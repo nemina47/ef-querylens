@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "QueryLens CLI (translate --help)",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/QueryLens.Cli", "--", "translate", "--help"],
+      "port": 0
+    },
+    {
+      "name": "QueryLens MCP Server",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/QueryLens.Mcp"],
+      "port": 0
+    }
+  ]
+}

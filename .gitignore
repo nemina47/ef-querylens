@@ -1,0 +1,55 @@
+# Build output
+bin/
+obj/
+out/
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.rsuser
+
+# VS Code
+.vscode/
+
+# Rider
+*.DotSettings.user
+
+# Test results
+TestResults/
+coverage/
+*.trx
+*.coveragexml
+
+# Publish profiles
+**/Properties/PublishProfiles/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets / local config
+appsettings.Development.json
+appsettings.Local.json
+*.pfx
+*.p12
+secrets.json
+local.settings.json
+
+# Tool output (querylens CLI artefacts)
+*.sql.snapshot
+
+# Claude Code local settings (keep .claude/launch.json but ignore personal overrides)
+.claude/settings.local.json

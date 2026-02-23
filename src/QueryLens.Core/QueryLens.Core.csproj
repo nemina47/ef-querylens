@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="5.0.0" />
+    <!-- Pinned to 9.x to match Pomelo.EntityFrameworkCore.MySql 9.0.0 upper bound -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.13" />
+  </ItemGroup>
+
+</Project>
