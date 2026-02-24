@@ -12,4 +12,12 @@ public sealed record TranslationMetadata
     /// Always flag this — it is a silent performance killer.
     /// </summary>
     public bool HasClientEvaluation { get; init; }
+
+    /// <summary>
+    /// How the offline DbContext instance was created.
+    /// <c>"design-time-factory"</c> when an <c>IDesignTimeDbContextFactory&lt;T&gt;</c>
+    /// was found in the user's assemblies; <c>"bootstrap"</c> when the provider
+    /// bootstrap fallback was used instead.
+    /// </summary>
+    public string CreationStrategy { get; init; } = "bootstrap";
 }

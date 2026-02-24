@@ -48,7 +48,8 @@ public sealed class QueryEvaluator
             var defaultAlcContextType = GetOrLoadTypeInDefaultAlc(dbContextType);
 
             // 3. Build an offline DbContext instance using the default-ALC type.
-            var dbInstance = CreateDbContextInstance(defaultAlcContextType, bootstrap, alcCtx.LoadedAssemblies);
+            //    Try IDesignTimeDbContextFactory<T> first (mirrors EF Core tooling priority).
+            var (dbInstance, creationStrategy) = CreateDbContextInstance(defaultAlcContextType, bootstrap, alcCtx.LoadedAssemblies);
 
             // 4. Get or build a warm ScriptState for this assembly + context type.
             var scriptState = await GetOrBuildScriptStateAsync(
@@ -80,7 +81,7 @@ public sealed class QueryEvaluator
                 Success = true,
                 Sql = sql,
                 Parameters = ParseParameters(sql),
-                Metadata = BuildMetadata(dbContextType, bootstrap, sw.Elapsed),
+                Metadata = BuildMetadata(dbContextType, bootstrap, sw.Elapsed, creationStrategy),
             };
         }
         catch (CompilationErrorException cex)
@@ -238,11 +239,21 @@ public sealed class QueryEvaluator
 
     // ─── DbContext instantiation ──────────────────────────────────────────────
 
-    private static object CreateDbContextInstance(
+    private static (object Instance, string Strategy) CreateDbContextInstance(
         Type dbContextType,
         IProviderBootstrap bootstrap,
         IEnumerable<Assembly> userAlcAssemblies)
     {
+        // Priority 1: IDesignTimeDbContextFactory<T> — mirrors EF Core tooling.
+        // Search default ALC (which already contains the user's assembly after
+        // GetOrLoadTypeInDefaultAlc), then user ALC assemblies as fallback.
+        var fromFactory = DesignTimeDbContextFactory.TryCreate(
+            dbContextType,
+            AssemblyLoadContext.Default.Assemblies.Concat(userAlcAssemblies));
+        if (fromFactory is not null)
+            return (fromFactory, "design-time-factory");
+
+        // Priority 2: Bootstrap approach (provider-supplied fake connection string).
         // We must build DbContextOptions<AppDbContext> using the EF Core types
         // that live in the *user's* ALC — not the tool's. Otherwise the ctor
         // rejects the options due to a cross-ALC type constraint violation.
@@ -314,7 +325,7 @@ public sealed class QueryEvaluator
                 $"'{dbContextType.FullName}' has no (DbContextOptions) constructor. " +
                 "QueryLens requires a DbContextOptions or DbContextOptions<T> ctor.");
 
-        return ctor.Invoke([options]);
+        return (ctor.Invoke([options]), "bootstrap");
     }
 
     // ─── IQueryable detection & ToQueryString via reflection ─────────────────
@@ -428,13 +439,15 @@ public sealed class QueryEvaluator
         };
 
     private static TranslationMetadata BuildMetadata(
-        Type? dbContextType, IProviderBootstrap? bootstrap, TimeSpan elapsed) =>
+        Type? dbContextType, IProviderBootstrap? bootstrap, TimeSpan elapsed,
+        string creationStrategy = "bootstrap") =>
         new()
         {
-            DbContextType = dbContextType?.FullName ?? "unknown",
-            ProviderName = bootstrap?.ProviderName ?? "unknown",
-            EfCoreVersion = GetEfCoreVersion(dbContextType),
-            TranslationTime = elapsed,
+            DbContextType    = dbContextType?.FullName ?? "unknown",
+            ProviderName     = bootstrap?.ProviderName ?? "unknown",
+            EfCoreVersion    = GetEfCoreVersion(dbContextType),
+            TranslationTime  = elapsed,
+            CreationStrategy = creationStrategy,
         };
 
     private static string GetEfCoreVersion(Type? dbContextType)

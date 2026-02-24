@@ -90,7 +90,16 @@ public sealed class QueryLensEngine : IQueryLensEngine
 
     private object CreateDbContextForInspection(Type dbContextType, ProjectAssemblyContext alcCtx)
     {
-        // Reuse the same reflection-based approach as QueryEvaluator:
+        // Priority 1: IDesignTimeDbContextFactory<T> — mirrors EF Core tooling.
+        // For model inspection the DbContext may come from any ALC (we don't need
+        // Roslyn compatibility here), so search both the user ALC and default ALC.
+        var fromFactory = DesignTimeDbContextFactory.TryCreate(
+            dbContextType,
+            alcCtx.LoadedAssemblies.Concat(AssemblyLoadContext.Default.Assemblies));
+        if (fromFactory is not null)
+            return fromFactory;
+
+        // Priority 2: Bootstrap approach.
         // build DbContextOptionsBuilder<TContext> from the shared EF Core assembly,
         // configure it via bootstrap, then call the DbContext ctor.
 

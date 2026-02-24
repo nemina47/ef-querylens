@@ -40,7 +40,16 @@
       <SampleAppOutputDir>..\..\samples\SampleApp\bin\$(Configuration)\$(TargetFramework)\</SampleAppOutputDir>
     </PropertyGroup>
     <ItemGroup>
-      <SampleAppFiles Include="$(SampleAppOutputDir)**\*.*" />
+      <!-- Exclude Microsoft.CodeAnalysis* DLLs: EF Core Design brings in an older
+           Roslyn version as a transitive dependency, which would overwrite the newer
+           Roslyn used by Microsoft.CodeAnalysis.CSharp.Scripting 5.x in QueryLens.Core.
+           The test process always loads Roslyn via its own deps.json; SampleApp's copy
+           must not shadow those with an older incompatible version. -->
+      <SampleAppFiles Include="$(SampleAppOutputDir)**\*.*"
+                      Exclude="$(SampleAppOutputDir)Microsoft.CodeAnalysis*.dll;
+                               $(SampleAppOutputDir)Microsoft.CodeAnalysis*.pdb;
+                               $(SampleAppOutputDir)System.Collections.Immutable.dll;
+                               $(SampleAppOutputDir)System.Reflection.Metadata.dll" />
     </ItemGroup>
     <Copy SourceFiles="@(SampleAppFiles)"
           DestinationFolder="$(OutputPath)%(RecursiveDir)"

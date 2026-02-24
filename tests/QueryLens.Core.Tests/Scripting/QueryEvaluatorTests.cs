@@ -218,4 +218,47 @@ public class QueryEvaluatorTests : IDisposable
         // and took less than 10s (the cold call could be 1-2s on first Roslyn compile).
         Assert.True(r2.Metadata.TranslationTime < TimeSpan.FromSeconds(10));
     }
+
+    // ─── IDesignTimeDbContextFactory discovery ────────────────────────────────
+
+    [Fact]
+    public async Task Evaluate_WhenDesignTimeFactoryExists_UsesFactoryOverBootstrap()
+    {
+        // SampleApp ships AppDbContextFactory : IDesignTimeDbContextFactory<AppDbContext>.
+        // QueryEvaluator must discover it and prefer it over the bootstrap approach.
+        var result = await TranslateAsync("db.Orders");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.Contains("Orders", result.Sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("design-time-factory", result.Metadata.CreationStrategy);
+    }
+
+    [Fact]
+    public async Task Evaluate_WhenDesignTimeFactoryExists_SqlIsStillGenerated()
+    {
+        // Verify that using the factory does not break SQL generation for
+        // WHERE clauses or any other operator.
+        var result = await TranslateAsync("db.Orders.Where(o => o.UserId == 5)");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.Contains("WHERE", result.Sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("design-time-factory", result.Metadata.CreationStrategy);
+    }
+
+    [Fact]
+    public async Task Evaluate_ExistingTests_StillPassWithFactoryPath()
+    {
+        // All four entity sets must translate correctly when the factory is active.
+        string[] expressions = ["db.Orders", "db.Users", "db.Products", "db.Categories"];
+
+        foreach (var expr in expressions)
+        {
+            var result = await TranslateAsync(expr);
+            Assert.True(result.Success, $"Failed for '{expr}': {result.ErrorMessage}");
+            Assert.NotNull(result.Sql);
+            Assert.Equal("design-time-factory", result.Metadata.CreationStrategy);
+        }
+    }
 }
