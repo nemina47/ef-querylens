@@ -45,20 +45,70 @@ public sealed class ProjectAssemblyContext : IDisposable
     // ─── Public API ──────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Returns all concrete (non-abstract) DbContext subclasses found in the
-    /// loaded assembly. Walks the full inheritance chain by type name, because
-    /// the DbContext type in the user's ALC is a different runtime instance
-    /// than the one in the tool's default load context.
+    /// Explicitly loads an additional assembly into the isolated ALC using the
+    /// same <see cref="AssemblyDependencyResolver"/> as the primary assembly.
+    /// Use this when the DbContext lives in a class library rather than the
+    /// primary executable assembly (e.g. load the API dll as primary for its
+    /// deps.json, then call this to pre-load the Core class library so that
+    /// <see cref="FindDbContextTypes"/> can discover the DbContext).
+    /// </summary>
+    public Assembly LoadAdditionalAssembly(string assemblyPath)
+    {
+        EnsureNotDisposed();
+
+        if (!_contextRef.TryGetTarget(out var ctx))
+            throw new ObjectDisposedException(nameof(ProjectAssemblyContext));
+
+        return ctx.LoadFromAssemblyPath(Path.GetFullPath(assemblyPath));
+    }
+
+    /// <summary>
+    /// Returns all concrete (non-abstract) DbContext subclasses found across
+    /// <b>all assemblies</b> currently loaded into this context (including any
+    /// additional assemblies pre-loaded via <see cref="LoadAdditionalAssembly"/>).
+    /// Walks the full inheritance chain by type name, because the DbContext type
+    /// in the user's ALC is a different runtime instance than the one in the
+    /// tool's default load context.
     /// </summary>
     public IReadOnlyList<Type> FindDbContextTypes()
     {
         EnsureNotDisposed();
 
         var results = new List<Type>();
-        foreach (var type in _targetAssembly!.GetExportedTypes())
+
+        // Scan ALL loaded assemblies — not just the primary target — so that
+        // projects which place DbContext in a class library dependency are
+        // discovered correctly after LoadAdditionalAssembly() is called.
+        foreach (var asm in LoadedAssemblies)
         {
-            if (!type.IsAbstract && IsDbContextSubclass(type))
-                results.Add(type);
+            IEnumerable<Type> candidates;
+            try
+            {
+                candidates = asm.GetExportedTypes();
+            }
+            catch (ReflectionTypeLoadException rtle)
+            {
+                // Some types in the assembly couldn't be loaded (e.g. a factory
+                // class that references a design-time interface whose assembly is
+                // not in the probe paths).  The successfully loaded types are still
+                // in rtle.Types — use them so that DbContext types aren't missed.
+                candidates = rtle.Types.Where(t => t is not null)!;
+            }
+            catch
+            {
+                // Truly broken assembly — skip entirely.
+                continue;
+            }
+
+            foreach (var type in candidates)
+            {
+                try
+                {
+                    if (!type.IsAbstract && IsDbContextSubclass(type))
+                        results.Add(type);
+                }
+                catch { /* IsDbContextSubclass may throw for partially-loaded types */ }
+            }
         }
 
         return results;

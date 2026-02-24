@@ -22,6 +22,47 @@ public sealed class QueryEvaluator
     // EF Core ToQueryString extension method — cached after first lookup.
     private MethodInfo? _toQueryStringMethod;
 
+    // ─── Static lazy-load resolver ────────────────────────────────────────────
+
+    // Directories registered by GetOrLoadTypeInDefaultAlc for each user project.
+    // When the default ALC can't resolve an assembly through its normal probe paths
+    // (e.g. a lazy transitive dep like Audit.NET that wasn't loaded at mirror-
+    // snapshot time), the Resolving handler below probes these directories.
+    private static readonly HashSet<string> s_probeDirs =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly object s_probeDirsLock = new();
+
+    /// <summary>
+    /// Registers a one-time <see cref="AssemblyLoadContext.Default"/> Resolving
+    /// handler that probes the registered user bin directories.  This handles
+    /// lazy transitive dependencies (e.g. Audit.NET loaded by AuditDbContext)
+    /// that are not yet in <c>userAlc.Assemblies</c> when the mirroring snapshot
+    /// runs in <see cref="GetOrLoadTypeInDefaultAlc"/>.
+    /// </summary>
+    static QueryEvaluator()
+    {
+        AssemblyLoadContext.Default.Resolving += (alc, name) =>
+        {
+            if (name.Name is null) return null;
+
+            string[] dirs;
+            lock (s_probeDirsLock)
+                dirs = [..s_probeDirs];
+
+            foreach (var dir in dirs)
+            {
+                var candidate = Path.Combine(dir, $"{name.Name}.dll");
+                if (File.Exists(candidate))
+                {
+                    try { return alc.LoadFromAssemblyPath(candidate); }
+                    catch { /* wrong version or platform — keep trying other dirs */ }
+                }
+            }
+
+            return null; // let the default ALC continue its normal fallback chain
+        };
+    }
+
     // ─── Public API ──────────────────────────────────────────────────────────
 
     /// <summary>
@@ -96,7 +137,13 @@ public sealed class QueryEvaluator
         }
         catch (Exception ex)
         {
-            return Failure(ex.Message, sw.Elapsed, null, bootstrap);
+            // Reflection-based invocations (ctor.Invoke, method.Invoke) wrap the
+            // real exception in TargetInvocationException. Unwrap one level so the
+            // error message returned to the caller describes the actual failure.
+            var msg = ex is System.Reflection.TargetInvocationException { InnerException: { } inner }
+                ? inner.ToString()
+                : ex.Message;
+            return Failure(msg, sw.Elapsed, null, bootstrap);
         }
     }
 
@@ -190,7 +237,53 @@ public sealed class QueryEvaluator
                 $"Assembly '{userAlcType.Assembly.GetName().Name}' has no physical file location " +
                 "and cannot be loaded into the default ALC.");
 
-        // Re-use an already-loaded copy to avoid duplicate loads.
+        // Mirror the user-ALC assemblies into the default ALC before calling GetType().
+        //
+        // Roslyn CSharpScript executes in the default ALC, so both the DbContext
+        // type and its dependency chain (base classes, interfaces, entity types) must
+        // be resolvable there.  For projects where the DbContext extends a third-party
+        // base class (e.g. AuditDbContext from Audit.EntityFramework), that base class
+        // assembly is loaded into the *user* ALC — not the default ALC.  Without this
+        // mirroring step, Assembly.GetType() returns null because it can't resolve the
+        // base-class assembly, even though the DbContext type itself is present.
+        //
+        // We build a snapshot of current default-ALC locations first (fast HashSet
+        // lookup), then add any user-ALC assemblies that aren't already there.
+        // EF Core / Pomelo are already shared with the default ALC by
+        // IsolatedLoadContext.Load — they'll be in the snapshot and skipped.
+        var userAlc = AssemblyLoadContext.GetLoadContext(userAlcType.Assembly);
+        if (userAlc is not null && userAlc != AssemblyLoadContext.Default)
+        {
+            // Register the user's bin dir so the static Resolving handler above can
+            // lazily load transitive deps (e.g. Audit.NET) that are not yet in the
+            // default ALC snapshot — they only get loaded when EF Core's type-walker
+            // encounters base classes like AuditDbContext during DbContext construction.
+            lock (s_probeDirsLock)
+            {
+                var binDir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(binDir))
+                    s_probeDirs.Add(binDir);
+            }
+
+            var defaultLocations = AssemblyLoadContext.Default.Assemblies
+                .Select(a => a.Location)
+                .Where(l => !string.IsNullOrEmpty(l))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var asm in userAlc.Assemblies)
+            {
+                var loc = asm.Location;
+                if (string.IsNullOrEmpty(loc) || defaultLocations.Contains(loc)) continue;
+                try
+                {
+                    AssemblyLoadContext.Default.LoadFromAssemblyPath(loc);
+                    defaultLocations.Add(loc);
+                }
+                catch { /* best-effort — some assemblies legitimately can't load in the default ALC */ }
+            }
+        }
+
+        // Now load (or find already-loaded) the primary assembly in the default ALC.
         var defaultAssembly =
             AssemblyLoadContext.Default.Assemblies
                 .FirstOrDefault(a => string.Equals(a.Location, path, StringComparison.OrdinalIgnoreCase))
