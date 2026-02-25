@@ -15,4 +15,18 @@
     </PackageReference>
   </ItemGroup>
 
+  <!-- QueryLens.Core reference — design-time only, not deployed to production.
+       Provides IQueryLensDbContextFactory<T> for AppQueryLensFactory.
+       NOTE: QueryLens.Core brings Microsoft.CodeAnalysis.CSharp.Scripting 5.x.
+       EF Core Design brings Microsoft.CodeAnalysis.CSharp.Workspaces 4.8 which
+       wants Common 4.8 — conflict. Pin Common to 5.0.0 to resolve. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\QueryLens.Core\QueryLens.Core.csproj">
+      <PrivateAssets>all</PrivateAssets>
+    </ProjectReference>
+    <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="5.0.0">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
 </Project>

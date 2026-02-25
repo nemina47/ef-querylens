@@ -337,12 +337,21 @@ public sealed class QueryEvaluator
         IProviderBootstrap bootstrap,
         IEnumerable<Assembly> userAlcAssemblies)
     {
+        var allAssemblies = AssemblyLoadContext.Default.Assemblies.Concat(userAlcAssemblies);
+
+        // Priority 0: IQueryLensDbContextFactory<T> — QueryLens-native, highest priority.
+        // Users implement this to supply provider-specific options (UseProjectables,
+        // MySqlSchemaBehavior, etc.) that the bootstrap path cannot infer.
+        var fromQueryLensFactory = DesignTimeDbContextFactory.TryCreateQueryLensFactory(
+            dbContextType, allAssemblies);
+        if (fromQueryLensFactory is not null)
+            return (fromQueryLensFactory, "querylens-factory");
+
         // Priority 1: IDesignTimeDbContextFactory<T> — mirrors EF Core tooling.
         // Search default ALC (which already contains the user's assembly after
         // GetOrLoadTypeInDefaultAlc), then user ALC assemblies as fallback.
         var fromFactory = DesignTimeDbContextFactory.TryCreate(
-            dbContextType,
-            AssemblyLoadContext.Default.Assemblies.Concat(userAlcAssemblies));
+            dbContextType, allAssemblies);
         if (fromFactory is not null)
             return (fromFactory, "design-time-factory");
 

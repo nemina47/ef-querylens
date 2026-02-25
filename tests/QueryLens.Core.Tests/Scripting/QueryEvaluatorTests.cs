@@ -219,19 +219,44 @@ public class QueryEvaluatorTests : IDisposable
         Assert.True(r2.Metadata.TranslationTime < TimeSpan.FromSeconds(10));
     }
 
-    // ─── IDesignTimeDbContextFactory discovery ────────────────────────────────
+    // ─── IQueryLensDbContextFactory + IDesignTimeDbContextFactory discovery ─────
+
+    [Fact]
+    public async Task Evaluate_WhenQueryLensFactoryExists_StrategyIsQueryLensFactory()
+    {
+        // SampleApp ships AppQueryLensFactory : IQueryLensDbContextFactory<AppDbContext>.
+        // QueryEvaluator must report "querylens-factory" as the creation strategy.
+        var result = await TranslateAsync("db.Orders");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal("querylens-factory", result.Metadata.CreationStrategy);
+    }
+
+    [Fact]
+    public async Task Evaluate_QueryLensFactory_TakesPriorityOverDesignTimeFactory()
+    {
+        // SampleApp has BOTH AppQueryLensFactory (IQueryLensDbContextFactory<T>) AND
+        // AppDbContextFactory (IDesignTimeDbContextFactory<T>).
+        // Priority 0 (QueryLens factory) must win over Priority 1 (design-time factory).
+        var result = await TranslateAsync("db.Users");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal("querylens-factory", result.Metadata.CreationStrategy);
+        Assert.NotEqual("design-time-factory", result.Metadata.CreationStrategy);
+        Assert.NotEqual("bootstrap", result.Metadata.CreationStrategy);
+    }
 
     [Fact]
     public async Task Evaluate_WhenDesignTimeFactoryExists_UsesFactoryOverBootstrap()
     {
-        // SampleApp ships AppDbContextFactory : IDesignTimeDbContextFactory<AppDbContext>.
-        // QueryEvaluator must discover it and prefer it over the bootstrap approach.
+        // SampleApp now has a QueryLens factory (Priority 0) that wins over the
+        // design-time factory (Priority 1). Strategy must NOT be "bootstrap".
         var result = await TranslateAsync("db.Orders");
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.NotNull(result.Sql);
         Assert.Contains("Orders", result.Sql, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("design-time-factory", result.Metadata.CreationStrategy);
+        Assert.Equal("querylens-factory", result.Metadata.CreationStrategy);
     }
 
     [Fact]
@@ -244,13 +269,13 @@ public class QueryEvaluatorTests : IDisposable
         Assert.True(result.Success, result.ErrorMessage);
         Assert.NotNull(result.Sql);
         Assert.Contains("WHERE", result.Sql, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("design-time-factory", result.Metadata.CreationStrategy);
+        Assert.Equal("querylens-factory", result.Metadata.CreationStrategy);
     }
 
     [Fact]
     public async Task Evaluate_ExistingTests_StillPassWithFactoryPath()
     {
-        // All four entity sets must translate correctly when the factory is active.
+        // All four entity sets must translate correctly when any factory is active.
         string[] expressions = ["db.Orders", "db.Users", "db.Products", "db.Categories"];
 
         foreach (var expr in expressions)
@@ -258,7 +283,7 @@ public class QueryEvaluatorTests : IDisposable
             var result = await TranslateAsync(expr);
             Assert.True(result.Success, $"Failed for '{expr}': {result.ErrorMessage}");
             Assert.NotNull(result.Sql);
-            Assert.Equal("design-time-factory", result.Metadata.CreationStrategy);
+            Assert.Equal("querylens-factory", result.Metadata.CreationStrategy);
         }
     }
 }
