@@ -42,14 +42,23 @@ public class QueryEvaluatorTests : IDisposable
         return dll;
     }
 
-    private Task<QueryTranslationResult> TranslateAsync(string expression,
-        string? dbContextTypeName = null, CancellationToken ct = default) =>
+    private Task<QueryTranslationResult> TranslateAsync(
+        string expression,
+        string? dbContextTypeName = null,
+        IReadOnlyList<string>? additionalImports = null,
+        IReadOnlyDictionary<string, string>? usingAliases = null,
+        IReadOnlyList<string>? usingStaticTypes = null,
+        CancellationToken ct = default) =>
         _evaluator.EvaluateAsync(_alcCtx, _bootstrap,
             new TranslationRequest
             {
                 AssemblyPath      = _alcCtx.AssemblyPath,
                 Expression        = expression,
                 DbContextTypeName = dbContextTypeName,
+                AdditionalImports = additionalImports ?? [],
+                UsingAliases = usingAliases
+                    ?? new Dictionary<string, string>(StringComparer.Ordinal),
+                UsingStaticTypes = usingStaticTypes ?? [],
             }, ct);
 
     // ─── Basic translation ────────────────────────────────────────────────────
@@ -219,6 +228,48 @@ public class QueryEvaluatorTests : IDisposable
         Assert.NotNull(result.ErrorMessage);
         Assert.Contains("IQueryable", result.ErrorMessage, StringComparison.Ordinal);
         Assert.DoesNotContain("Compilation error", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Evaluate_WithAliasUsingContext_CanResolveAliasedTypeMember()
+    {
+        var result = await TranslateAsync(
+            "db.Orders.Where(o => o.UserId < IntAlias.MaxValue)",
+            usingAliases: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["IntAlias"] = "System.Int32"
+            });
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.DoesNotContain("Compilation error", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Evaluate_WithStaticUsingContext_CanResolveStaticMethodCall()
+    {
+        var result = await TranslateAsync(
+            "db.Orders.Where(o => o.UserId < Abs(-5))",
+            usingStaticTypes: ["System.Math"]);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.DoesNotContain("Compilation error", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Evaluate_MissingAliasIdentifier_IsNotSynthesizedAsObjectVariable()
+    {
+        var result = await TranslateAsync(
+            "db.Orders.Where(o => o.UserId == Enums.Approved)",
+            usingAliases: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["Enums"] = "SampleApp.Does.Not.Exist"
+            });
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.ErrorMessage);
+        Assert.DoesNotContain("'object' does not contain a definition", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     // ─── Error handling ───────────────────────────────────────────────────────

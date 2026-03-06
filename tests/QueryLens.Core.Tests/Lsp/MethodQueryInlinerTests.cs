@@ -55,6 +55,7 @@ public class MethodQueryInlinerTests
                 substituteSelectorArguments: false,
                 out var inlined,
                 out var contextVariable,
+                out var selectedMethodSourcePath,
                 out var reason);
 
             Assert.True(success, reason);
@@ -63,6 +64,7 @@ public class MethodQueryInlinerTests
             Assert.Contains("w.WorkflowType == workflowType", inlined, StringComparison.Ordinal);
             Assert.Contains("Select(expression)", inlined, StringComparison.Ordinal);
             Assert.DoesNotContain("SingleOrDefaultAsync", inlined, StringComparison.Ordinal);
+            Assert.Equal(coreFile, selectedMethodSourcePath);
         }
         finally
         {

@@ -7,6 +7,11 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace QueryLens.Lsp.Parsing;
 
+public sealed record SourceUsingContext(
+    IReadOnlyList<string> Imports,
+    IReadOnlyDictionary<string, string> Aliases,
+    IReadOnlyList<string> StaticTypes);
+
 public static class LspSyntaxHelper
 {
     private static readonly HashSet<string> TerminalMethods = new(StringComparer.OrdinalIgnoreCase)
@@ -91,6 +96,50 @@ public static class LspSyntaxHelper
                 .FirstOrDefault();
 
         return targetExpression.ToString();
+    }
+
+    public static SourceUsingContext ExtractUsingContext(string sourceText)
+    {
+        var tree = CSharpSyntaxTree.ParseText(sourceText);
+        var root = tree.GetRoot();
+
+        var imports = new List<string>();
+        var importSet = new HashSet<string>(StringComparer.Ordinal);
+        var aliases = new Dictionary<string, string>(StringComparer.Ordinal);
+        var staticTypes = new List<string>();
+        var staticSet = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var usingDirective in root.DescendantNodes().OfType<UsingDirectiveSyntax>())
+        {
+            var name = usingDirective.Name?.ToString();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            if (usingDirective.Alias is { Name.Identifier.ValueText: { Length: > 0 } aliasName })
+            {
+                aliases[aliasName] = name;
+                continue;
+            }
+
+            if (!usingDirective.StaticKeyword.IsKind(SyntaxKind.None))
+            {
+                if (staticSet.Add(name))
+                {
+                    staticTypes.Add(name);
+                }
+
+                continue;
+            }
+
+            if (importSet.Add(name))
+            {
+                imports.Add(name);
+            }
+        }
+
+        return new SourceUsingContext(imports, aliases, staticTypes);
     }
 
     private static string? TryExtractRootContextVariable(ExpressionSyntax expression)

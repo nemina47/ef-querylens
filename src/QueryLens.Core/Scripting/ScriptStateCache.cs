@@ -27,12 +27,14 @@ internal sealed class ScriptStateCache
         string assemblyPath,
         string dbContextTypeName,
         DateTime assemblyTimestamp,
-        string assemblySetHash)
+        string assemblySetHash,
+        string scriptContextHash)
     {
         var key = MakeKey(assemblyPath, dbContextTypeName);
         if (_entries.TryGetValue(key, out var entry)
             && entry.AssemblyTimestamp == assemblyTimestamp
-            && entry.AssemblySetHash  == assemblySetHash)
+            && entry.AssemblySetHash  == assemblySetHash
+            && entry.ScriptContextHash == scriptContextHash)
             return entry.State;
 
         // Stale or compiled against a different assembly set — evict.
@@ -48,10 +50,11 @@ internal sealed class ScriptStateCache
         string dbContextTypeName,
         DateTime assemblyTimestamp,
         string assemblySetHash,
+        string scriptContextHash,
         ScriptState<object> state)
     {
         var key = MakeKey(assemblyPath, dbContextTypeName);
-        _entries[key] = new CacheEntry(state, assemblyTimestamp, assemblySetHash);
+        _entries[key] = new CacheEntry(state, assemblyTimestamp, assemblySetHash, scriptContextHash);
     }
 
     /// <summary>Removes all cached entries for the given assembly path.</summary>
@@ -93,5 +96,6 @@ internal sealed class ScriptStateCache
     private sealed record CacheEntry(
         ScriptState<object> State,
         DateTime AssemblyTimestamp,
-        string AssemblySetHash);
+        string AssemblySetHash,
+        string ScriptContextHash);
 }

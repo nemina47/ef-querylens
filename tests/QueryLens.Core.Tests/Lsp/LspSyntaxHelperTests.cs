@@ -50,6 +50,47 @@ public class LspSyntaxHelperTests
         Assert.StartsWith("context", expression, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ExtractUsingContext_CollectsImportsAliasesAndStaticUsings()
+    {
+        var source = """
+            using System.Linq;
+            using Enums = Share.Medics.Applications.Core.Entities.Enums;
+            using static System.Math;
+
+            namespace Demo;
+
+            internal sealed class C;
+            """;
+
+        var context = LspSyntaxHelper.ExtractUsingContext(source);
+
+        Assert.Contains("System.Linq", context.Imports);
+        Assert.Contains("System.Math", context.StaticTypes);
+        Assert.True(context.Aliases.TryGetValue("Enums", out var aliasTarget));
+        Assert.Equal("Share.Medics.Applications.Core.Entities.Enums", aliasTarget);
+    }
+
+    [Fact]
+    public void ExtractUsingContext_DeduplicatesRepeatedImports()
+    {
+        var source = """
+            using System.Linq;
+            using System.Linq;
+            using static System.Math;
+            using static System.Math;
+
+            namespace Demo;
+
+            internal sealed class C;
+            """;
+
+        var context = LspSyntaxHelper.ExtractUsingContext(source);
+
+        Assert.Single(context.Imports, i => i == "System.Linq");
+        Assert.Single(context.StaticTypes, s => s == "System.Math");
+    }
+
     private static (int line, int character) FindPosition(string source, string marker)
     {
         var index = source.IndexOf(marker, StringComparison.Ordinal);

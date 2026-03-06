@@ -2,8 +2,11 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.Scripting;
 using Microsoft.EntityFrameworkCore;
@@ -135,7 +138,7 @@ public sealed class QueryEvaluator
 
             // 4. Get or build a warm ScriptState for this assembly + context type.
             var scriptState = await GetOrBuildScriptStateAsync(
-                alcCtx, defaultAlcContextType, dbInstance, request.ContextVariableName, ct);
+                alcCtx, defaultAlcContextType, dbInstance, request, ct);
 
             // 5. Evaluate the user's LINQ expression.
             //    No EnterContextualReflection needed — both the DbContext instance
@@ -175,7 +178,13 @@ public sealed class QueryEvaluator
                         .Distinct()
                         .ToList();
 
-                    if (missingNames.Count == 0)
+                    var declarableNames = missingNames
+                        .Where(n =>
+                            !string.IsNullOrWhiteSpace(n)
+                            && !LooksLikeTypeOrNamespacePrefix(n!, request.Expression, request.UsingAliases))
+                        .ToList();
+
+                    if (declarableNames.Count == 0)
                     {
                         // Non-CS0103 compilation errors — fall through to the outer catch
                         return Failure(
@@ -189,7 +198,7 @@ public sealed class QueryEvaluator
                     // and look up PropertyName's CLR type from the DbContext's entity types.
                     var rootIdentifier = TryExtractRootIdentifier(request.Expression);
                     var declarations = string.Join("\n",
-                        missingNames.Select(n =>
+                        declarableNames.Select(n =>
                         {
                             if (!string.IsNullOrWhiteSpace(rootIdentifier) &&
                                 string.Equals(n, rootIdentifier, StringComparison.Ordinal) &&
@@ -335,7 +344,7 @@ public sealed class QueryEvaluator
         ProjectAssemblyContext alcCtx,
         Type dbContextType,
         object dbInstance,
-        string contextVariableName,
+        TranslationRequest request,
         CancellationToken ct)
     {
         // EagerLoadBinDirAssemblies has been moved to ProjectAssemblyContext constructor
@@ -343,24 +352,27 @@ public sealed class QueryEvaluator
 
         var assemblySetHash = ScriptStateCache.ComputeAssemblySetHash(
             alcCtx.LoadedAssemblies.ToArray());
+        var scriptContextHash = ComputeScriptContextHash(request);
 
         var cached = _cache.TryGet(
             alcCtx.AssemblyPath,
             dbContextType.FullName!,
             alcCtx.AssemblyTimestamp,
-            assemblySetHash);
+            assemblySetHash,
+            scriptContextHash);
 
         if (cached is not null)
             return cached;
 
         var freshState = await BuildInitialScriptStateAsync(
-            alcCtx, dbContextType, dbInstance, contextVariableName, ct);
+            alcCtx, dbContextType, dbInstance, request, ct);
 
         _cache.Store(
             alcCtx.AssemblyPath,
             dbContextType.FullName!,
             alcCtx.AssemblyTimestamp,
             assemblySetHash,
+            scriptContextHash,
             freshState);
 
         return freshState;
@@ -370,7 +382,7 @@ public sealed class QueryEvaluator
         ProjectAssemblyContext alcCtx,
         Type dbContextType,
         object dbInstance,
-        string contextVariableName,
+        TranslationRequest request,
         CancellationToken ct)
     {
         // EagerLoadBinDirAssemblies has already been called by GetOrBuildScriptStateAsync
@@ -385,13 +397,25 @@ public sealed class QueryEvaluator
         refs.Add(MetadataReference.CreateFromFile(
             typeof(Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions).Assembly.Location));
 
+        var imports = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "System",
+            "System.Linq",
+            "System.Collections.Generic",
+            "Microsoft.EntityFrameworkCore",
+        };
+
+        foreach (var import in request.AdditionalImports)
+        {
+            if (IsValidUsingName(import))
+            {
+                imports.Add(import);
+            }
+        }
+
         var scriptOptions = ScriptOptions.Default
             .AddReferences(refs)
-            .AddImports(
-                "System",
-                "System.Linq",
-                "System.Collections.Generic",
-                "Microsoft.EntityFrameworkCore");
+            .AddImports(imports.ToArray());
 
         // Create a strongly-typed local alias for the raw global so that user expressions
         // like "db.Orders.Where(o => o.UserId == 5)" compile cleanly against the concrete
@@ -407,14 +431,114 @@ public sealed class QueryEvaluator
         // from the default ALC (see GetOrLoadTypeInDefaultAlc), so the cast always succeeds.
         var globals = new QueryScriptGlobals { __ql_raw_ctx__ = dbInstance };
 
+        var preamble = BuildScriptPreamble(dbContextType, request.ContextVariableName, request);
+
         var script = CSharpScript.Create<object>(
-            $"var {contextVariableName} = ({dbContextType.FullName})(object)__ql_raw_ctx__;",
+            preamble,
             scriptOptions,
             globalsType: typeof(QueryScriptGlobals));
 
         var initial = await script.RunAsync(globals, cancellationToken: ct);
 
         return initial;
+    }
+
+    private static string ComputeScriptContextHash(TranslationRequest request)
+    {
+        var sb = new StringBuilder();
+        sb.Append("ctx:").Append(request.ContextVariableName).Append('|');
+
+        foreach (var import in request.AdditionalImports
+                     .Where(i => !string.IsNullOrWhiteSpace(i))
+                     .Order(StringComparer.Ordinal))
+        {
+            sb.Append("i:").Append(import).Append('|');
+        }
+
+        foreach (var alias in request.UsingAliases.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+        {
+            sb.Append("a:").Append(alias.Key).Append('=').Append(alias.Value).Append('|');
+        }
+
+        foreach (var staticType in request.UsingStaticTypes
+                     .Where(s => !string.IsNullOrWhiteSpace(s))
+                     .Order(StringComparer.Ordinal))
+        {
+            sb.Append("s:").Append(staticType).Append('|');
+        }
+
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString()));
+        return Convert.ToHexString(bytes)[..8];
+    }
+
+    private static string BuildScriptPreamble(
+        Type dbContextType,
+        string contextVariableName,
+        TranslationRequest request)
+    {
+        var sb = new StringBuilder();
+
+        foreach (var alias in request.UsingAliases
+                     .Where(kvp => IsValidAliasName(kvp.Key) && IsValidUsingName(kvp.Value))
+                     .OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+        {
+            sb.Append("using ")
+                .Append(alias.Key)
+                .Append(" = ")
+                .Append(alias.Value)
+                .AppendLine(";");
+        }
+
+        foreach (var staticType in request.UsingStaticTypes
+                     .Where(IsValidUsingName)
+                     .Distinct(StringComparer.Ordinal)
+                     .Order(StringComparer.Ordinal))
+        {
+            sb.Append("using static ")
+                .Append(staticType)
+                .AppendLine(";");
+        }
+
+        sb.Append("var ")
+            .Append(contextVariableName)
+            .Append(" = (")
+            .Append(dbContextType.FullName)
+            .AppendLine(")(object)__ql_raw_ctx__;");
+
+        return sb.ToString();
+    }
+
+    private static bool IsValidAliasName(string aliasName) =>
+        !string.IsNullOrWhiteSpace(aliasName) && SyntaxFacts.IsValidIdentifier(aliasName);
+
+    private static bool IsValidUsingName(string typeOrNamespaceName)
+    {
+        if (string.IsNullOrWhiteSpace(typeOrNamespaceName))
+        {
+            return false;
+        }
+
+        var parsed = SyntaxFactory.ParseName(typeOrNamespaceName);
+        return !parsed.ContainsDiagnostics;
+    }
+
+    private static bool LooksLikeTypeOrNamespacePrefix(
+        string identifier,
+        string expression,
+        IReadOnlyDictionary<string, string> usingAliases)
+    {
+        if (usingAliases.ContainsKey(identifier))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(identifier) || !char.IsUpper(identifier[0]))
+        {
+            return false;
+        }
+
+        var qualifiedAccessPattern = $@"(?<!\w){Regex.Escape(identifier)}\s*\.\s*[A-Z_]";
+        return Regex.IsMatch(expression, qualifiedAccessPattern);
     }
 
     /// <summary>

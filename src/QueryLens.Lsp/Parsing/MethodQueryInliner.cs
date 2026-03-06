@@ -33,8 +33,30 @@ public static class MethodQueryInliner
         out string? contextVariableName,
         out string? reason)
     {
+        return TryInlineTopLevelInvocation(
+            sourceText,
+            sourceFilePath,
+            expression,
+            substituteSelectorArguments,
+            out inlinedExpression,
+            out contextVariableName,
+            out _,
+            out reason);
+    }
+
+    public static bool TryInlineTopLevelInvocation(
+        string sourceText,
+        string sourceFilePath,
+        string expression,
+        bool substituteSelectorArguments,
+        out string inlinedExpression,
+        out string? contextVariableName,
+        out string? selectedMethodSourcePath,
+        out string? reason)
+    {
         inlinedExpression = expression;
         contextVariableName = null;
+        selectedMethodSourcePath = null;
         reason = null;
 
         if (string.IsNullOrWhiteSpace(expression))
@@ -110,6 +132,7 @@ public static class MethodQueryInliner
 
         inlinedExpression = stripped.NormalizeWhitespace().ToString();
         contextVariableName = extractedRoot;
+        selectedMethodSourcePath = best.Candidate.FilePath;
         return true;
     }
 

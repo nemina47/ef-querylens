@@ -47,6 +47,19 @@ internal sealed class HoverHandler : HoverHandlerBase
         string? conservativeContextVariableName = null;
         var inlineMode = InlineMode.Direct;
 
+        var usingImports = new HashSet<string>(StringComparer.Ordinal);
+        var usingAliases = new Dictionary<string, string>(StringComparer.Ordinal);
+        var usingStaticTypes = new HashSet<string>(StringComparer.Ordinal);
+
+        MergeUsingContext(
+            LspSyntaxHelper.ExtractUsingContext(sourceText),
+            usingImports,
+            usingAliases,
+            usingStaticTypes,
+            aliasPriority: AliasMergePriority.PreferExisting);
+
+        string? selectedInlinedSourcePath = null;
+
         if (MethodQueryInliner.TryInlineTopLevelInvocation(
                 sourceText,
                 filePath,
@@ -54,10 +67,12 @@ internal sealed class HoverHandler : HoverHandlerBase
                 substituteSelectorArguments: true,
                 out var inlinedExpression,
                 out var inlinedContextVariable,
+                out var optimisticSourcePath,
                 out _))
         {
             expression = inlinedExpression;
             inlineMode = InlineMode.Optimistic;
+            selectedInlinedSourcePath = optimisticSourcePath;
             if (!string.IsNullOrWhiteSpace(inlinedContextVariable))
             {
                 contextVariableName = inlinedContextVariable;
@@ -70,11 +85,16 @@ internal sealed class HoverHandler : HoverHandlerBase
                     substituteSelectorArguments: false,
                     out var conservativeInlinedExpression,
                     out var conservativeInlinedContextVariable,
+                    out var conservativeSourcePath,
                     out _)
                 && !string.Equals(conservativeInlinedExpression, expression, StringComparison.Ordinal))
             {
                 conservativeExpression = conservativeInlinedExpression;
                 conservativeContextVariableName = conservativeInlinedContextVariable;
+                if (string.IsNullOrWhiteSpace(selectedInlinedSourcePath))
+                {
+                    selectedInlinedSourcePath = conservativeSourcePath;
+                }
             }
         }
         else if (MethodQueryInliner.TryInlineTopLevelInvocation(
@@ -84,15 +104,24 @@ internal sealed class HoverHandler : HoverHandlerBase
                      substituteSelectorArguments: false,
                      out var conservativeOnlyInlinedExpression,
                      out var conservativeOnlyInlinedContextVariable,
+                     out var conservativeOnlySourcePath,
                      out _))
         {
             expression = conservativeOnlyInlinedExpression;
             inlineMode = InlineMode.Conservative;
+            selectedInlinedSourcePath = conservativeOnlySourcePath;
             if (!string.IsNullOrWhiteSpace(conservativeOnlyInlinedContextVariable))
             {
                 contextVariableName = conservativeOnlyInlinedContextVariable;
             }
         }
+
+        TryMergeUsingContextFromFile(
+            selectedInlinedSourcePath,
+            filePath,
+            usingImports,
+            usingAliases,
+            usingStaticTypes);
 
         var targetAssembly = AssemblyResolver.TryGetTargetAssembly(filePath);
 
@@ -133,7 +162,10 @@ internal sealed class HoverHandler : HoverHandlerBase
                 {
                     AssemblyPath = targetAssemblyPath,
                     Expression = expr,
-                    ContextVariableName = ctxVar ?? "db"
+                    ContextVariableName = ctxVar ?? "db",
+                    AdditionalImports = usingImports.ToArray(),
+                    UsingAliases = new Dictionary<string, string>(usingAliases, StringComparer.Ordinal),
+                    UsingStaticTypes = usingStaticTypes.ToArray()
                 }, cancellationToken);
             }
 
@@ -273,5 +305,67 @@ internal sealed class HoverHandler : HoverHandlerBase
             }
         }
         return ordered;
+    }
+
+    private static void TryMergeUsingContextFromFile(
+        string? sourceFilePath,
+        string currentFilePath,
+        ISet<string> imports,
+        IDictionary<string, string> aliases,
+        ISet<string> staticTypes)
+    {
+        if (string.IsNullOrWhiteSpace(sourceFilePath) ||
+            string.Equals(sourceFilePath, currentFilePath, StringComparison.OrdinalIgnoreCase) ||
+            !File.Exists(sourceFilePath))
+        {
+            return;
+        }
+
+        try
+        {
+            var source = File.ReadAllText(sourceFilePath);
+            var context = LspSyntaxHelper.ExtractUsingContext(source);
+            MergeUsingContext(context, imports, aliases, staticTypes, AliasMergePriority.PreferIncoming);
+        }
+        catch
+        {
+            // Best effort only; hover translation continues without extra using context.
+        }
+    }
+
+    private static void MergeUsingContext(
+        SourceUsingContext context,
+        ISet<string> imports,
+        IDictionary<string, string> aliases,
+        ISet<string> staticTypes,
+        AliasMergePriority aliasPriority)
+    {
+        foreach (var import in context.Imports)
+        {
+            imports.Add(import);
+        }
+
+        foreach (var staticType in context.StaticTypes)
+        {
+            staticTypes.Add(staticType);
+        }
+
+        foreach (var (alias, target) in context.Aliases)
+        {
+            if (aliasPriority == AliasMergePriority.PreferIncoming)
+            {
+                aliases[alias] = target;
+            }
+            else if (!aliases.ContainsKey(alias))
+            {
+                aliases[alias] = target;
+            }
+        }
+    }
+
+    private enum AliasMergePriority
+    {
+        PreferExisting,
+        PreferIncoming
     }
 }
