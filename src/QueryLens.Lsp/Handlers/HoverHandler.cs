@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using OmniSharp.Extensions.LanguageServer.Protocol.Client.Capabilities;
 using OmniSharp.Extensions.LanguageServer.Protocol.Document;
 using OmniSharp.Extensions.LanguageServer.Protocol.Models;
@@ -6,6 +7,8 @@ using QueryLens.Core;
 using QueryLens.Lsp.Parsing;
 
 namespace QueryLens.Lsp.Handlers;
+
+internal enum InlineMode { Direct, Optimistic, Conservative }
 
 internal sealed class HoverHandler : HoverHandlerBase
 {
@@ -39,18 +42,55 @@ internal sealed class HoverHandler : HoverHandlerBase
             return null;
         }
 
+        var originalExpression = expression;
+        string? conservativeExpression = null;
+        string? conservativeContextVariableName = null;
+        var inlineMode = InlineMode.Direct;
+
         if (MethodQueryInliner.TryInlineTopLevelInvocation(
                 sourceText,
                 filePath,
                 expression,
+                substituteSelectorArguments: true,
                 out var inlinedExpression,
                 out var inlinedContextVariable,
                 out _))
         {
             expression = inlinedExpression;
+            inlineMode = InlineMode.Optimistic;
             if (!string.IsNullOrWhiteSpace(inlinedContextVariable))
             {
                 contextVariableName = inlinedContextVariable;
+            }
+
+            if (MethodQueryInliner.TryInlineTopLevelInvocation(
+                    sourceText,
+                    filePath,
+                    originalExpression,
+                    substituteSelectorArguments: false,
+                    out var conservativeInlinedExpression,
+                    out var conservativeInlinedContextVariable,
+                    out _)
+                && !string.Equals(conservativeInlinedExpression, expression, StringComparison.Ordinal))
+            {
+                conservativeExpression = conservativeInlinedExpression;
+                conservativeContextVariableName = conservativeInlinedContextVariable;
+            }
+        }
+        else if (MethodQueryInliner.TryInlineTopLevelInvocation(
+                     sourceText,
+                     filePath,
+                     expression,
+                     substituteSelectorArguments: false,
+                     out var conservativeOnlyInlinedExpression,
+                     out var conservativeOnlyInlinedContextVariable,
+                     out _))
+        {
+            expression = conservativeOnlyInlinedExpression;
+            inlineMode = InlineMode.Conservative;
+            if (!string.IsNullOrWhiteSpace(conservativeOnlyInlinedContextVariable))
+            {
+                contextVariableName = conservativeOnlyInlinedContextVariable;
             }
         }
 
@@ -83,14 +123,40 @@ internal sealed class HoverHandler : HoverHandlerBase
             };
         }
 
+        var targetAssemblyPath = targetAssembly;
+
         try
         {
-            var translation = await _engine.TranslateAsync(new TranslationRequest
+            async Task<QueryTranslationResult> TranslateAsync(string expr, string? ctxVar)
             {
-                AssemblyPath = targetAssembly,
-                Expression = expression,
-                ContextVariableName = contextVariableName
-            }, cancellationToken);
+                return await _engine.TranslateAsync(new TranslationRequest
+                {
+                    AssemblyPath = targetAssemblyPath,
+                    Expression = expr,
+                    ContextVariableName = ctxVar ?? "db"
+                }, cancellationToken);
+            }
+
+            var translation = await TranslateAsync(expression, contextVariableName);
+
+            if (!translation.Success &&
+                !string.IsNullOrWhiteSpace(conservativeExpression) &&
+                !string.Equals(conservativeExpression, expression, StringComparison.Ordinal))
+            {
+                var fallbackTranslation = await TranslateAsync(
+                    conservativeExpression,
+                    string.IsNullOrWhiteSpace(conservativeContextVariableName)
+                        ? contextVariableName
+                        : conservativeContextVariableName);
+
+                if (fallbackTranslation.Success)
+                {
+                    translation = fallbackTranslation;
+                    expression = conservativeExpression;
+                    contextVariableName = conservativeContextVariableName ?? contextVariableName;
+                    inlineMode = InlineMode.Conservative;
+                }
+            }
 
             if (translation.Success)
             {
@@ -117,7 +183,7 @@ internal sealed class HoverHandler : HoverHandlerBase
                     Contents = new MarkedStringsOrMarkupContent(new MarkupContent
                     {
                         Kind = MarkupKind.Markdown,
-                        Value = BuildSqlPreview(commands)
+                        Value = BuildSqlPreview(commands, inlineMode)
                     })
                 };
             }
@@ -155,23 +221,57 @@ internal sealed class HoverHandler : HoverHandlerBase
         };
     }
 
-    private static string BuildSqlPreview(IReadOnlyList<QuerySqlCommand> commands)
+    private static string BuildSqlPreview(IReadOnlyList<QuerySqlCommand> commands, InlineMode mode)
     {
-        if (commands.Count == 1)
+        var tableNames = ExtractTableNames(commands);
+        var tablesSummary = tableNames.Count > 0 ? " · " + string.Join(", ", tableNames) : "";
+        var modeLabel = mode switch
         {
-            return $"**QueryLens SQL Preview**\n```sql\n{commands[0].Sql}\n```";
-        }
-
-        var blocks = new List<string>
-        {
-            $"**QueryLens SQL Preview ({commands.Count} statements)**"
+            InlineMode.Optimistic => "optimistic-inline",
+            InlineMode.Conservative => "conservative-inline",
+            _ => "direct"
         };
 
-        for (var i = 0; i < commands.Count; i++)
+        string sqlBlock;
+        if (commands.Count == 1)
         {
-            blocks.Add($"**Statement {i + 1}**\n```sql\n{commands[i].Sql}\n```");
+            sqlBlock = commands[0].Sql;
+        }
+        else
+        {
+            var parts = new string[commands.Count];
+            for (var i = 0; i < commands.Count; i++)
+            {
+                parts[i] = $"-- {CircledNumber(i + 1)}\n{commands[i].Sql}";
+            }
+            sqlBlock = string.Join("\n\n", parts);
         }
 
-        return string.Join("\n\n", blocks);
+        var statementWord = commands.Count == 1 ? "query" : "queries";
+        return $"**QueryLens · {commands.Count} {statementWord}**{tablesSummary}\n```sql\n{sqlBlock}\n```\n\n*mode: {modeLabel}*";
+    }
+
+    private static string CircledNumber(int n) => n switch
+    {
+        1 => "①", 2 => "②", 3 => "③", 4 => "④", 5 => "⑤",
+        6 => "⑥", 7 => "⑦", 8 => "⑧", 9 => "⑨", _ => $"({n})"
+    };
+
+    private static readonly Regex TableNameRegex =
+        new(@"(?:FROM|JOIN)\s+`([^`]+)`", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static IReadOnlyList<string> ExtractTableNames(IReadOnlyList<QuerySqlCommand> commands)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var ordered = new List<string>();
+        foreach (var cmd in commands)
+        {
+            foreach (Match m in TableNameRegex.Matches(cmd.Sql))
+            {
+                var name = m.Groups[1].Value;
+                if (seen.Add(name)) ordered.Add(name);
+            }
+        }
+        return ordered;
     }
 }

@@ -28,6 +28,7 @@ public static class MethodQueryInliner
         string sourceText,
         string sourceFilePath,
         string expression,
+        bool substituteSelectorArguments,
         out string inlinedExpression,
         out string? contextVariableName,
         out string? reason)
@@ -96,7 +97,7 @@ public static class MethodQueryInliner
             return false;
         }
 
-        var map = BuildParameterArgumentMap(method, argumentExpressions);
+        var map = BuildParameterArgumentMap(method, argumentExpressions, substituteSelectorArguments);
         var substituted = (ExpressionSyntax)new ParameterSubstitutionRewriter(map).Visit(calleeQuery)!;
         var stripped = StripTrailingTerminalMethods(substituted);
 
@@ -367,7 +368,8 @@ public static class MethodQueryInliner
 
     private static Dictionary<string, ExpressionSyntax> BuildParameterArgumentMap(
         MethodDeclarationSyntax method,
-        IReadOnlyList<ExpressionSyntax> arguments)
+        IReadOnlyList<ExpressionSyntax> arguments,
+        bool substituteSelectorArguments)
     {
         var map = new Dictionary<string, ExpressionSyntax>(StringComparer.Ordinal);
         var parameters = method.ParameterList.Parameters;
@@ -380,10 +382,64 @@ public static class MethodQueryInliner
                 continue;
             }
 
-            map[name] = arguments[i];
+            var argument = arguments[i];
+            var parameter = parameters[i];
+            if (ShouldSkipSubstitution(parameter, argument, substituteSelectorArguments))
+            {
+                continue;
+            }
+
+            if (substituteSelectorArguments)
+            {
+                argument = SanitizeSelectorArgument(parameter, argument);
+            }
+
+            map[name] = argument;
         }
 
         return map;
+    }
+
+    private static bool ShouldSkipSubstitution(
+        ParameterSyntax parameter,
+        ExpressionSyntax argument,
+        bool substituteSelectorArguments)
+    {
+        var parameterType = parameter.Type?.ToString() ?? string.Empty;
+
+        // In conservative mode keep selector parameters as identifiers so QueryEvaluator
+        // can synthesize a safe typed placeholder when endpoint DTO types are unavailable.
+        if (parameterType.Contains("Expression", StringComparison.Ordinal) &&
+            (argument is LambdaExpressionSyntax || argument is AnonymousMethodExpressionSyntax))
+        {
+            return !substituteSelectorArguments;
+        }
+
+        // Keep member-access arguments (for example req.WorkflowType) as method
+        // parameters to avoid introducing unresolved request DTO roots.
+        if (argument is MemberAccessExpressionSyntax)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static ExpressionSyntax SanitizeSelectorArgument(ParameterSyntax parameter, ExpressionSyntax argument)
+    {
+        var parameterType = parameter.Type?.ToString() ?? string.Empty;
+        if (!parameterType.Contains("Expression", StringComparison.Ordinal))
+        {
+            return argument;
+        }
+
+        if (argument is not LambdaExpressionSyntax && argument is not AnonymousMethodExpressionSyntax)
+        {
+            return argument;
+        }
+
+        var rewritten = new ProjectionTypeSanitizer().Visit(argument) as ExpressionSyntax;
+        return rewritten ?? argument;
     }
 
     private static ExpressionSyntax StripTrailingTerminalMethods(ExpressionSyntax expression)
@@ -507,6 +563,56 @@ public static class MethodQueryInliner
             }
 
             return false;
+        }
+    }
+
+    private sealed class ProjectionTypeSanitizer : CSharpSyntaxRewriter
+    {
+        public override SyntaxNode? VisitObjectCreationExpression(ObjectCreationExpressionSyntax node)
+        {
+            var visited = (ObjectCreationExpressionSyntax)base.VisitObjectCreationExpression(node)!;
+
+            // Only sanitize object-initializer-style DTO projections; keep constructor-based
+            // creations unchanged because they may rely on positional constructor semantics.
+            if (visited.Initializer is null)
+            {
+                return visited;
+            }
+
+            if (visited.ArgumentList is { Arguments.Count: > 0 })
+            {
+                return visited;
+            }
+
+            var members = new List<string>();
+            foreach (var initExpression in visited.Initializer.Expressions)
+            {
+                if (initExpression is AssignmentExpressionSyntax assignment)
+                {
+                    var memberName = assignment.Left switch
+                    {
+                        IdentifierNameSyntax id => id.Identifier.ValueText,
+                        SimpleNameSyntax simple => simple.Identifier.ValueText,
+                        MemberAccessExpressionSyntax ma => ma.Name.Identifier.ValueText,
+                        _ => null,
+                    };
+
+                    if (!string.IsNullOrWhiteSpace(memberName))
+                    {
+                        members.Add($"{memberName} = {assignment.Right}");
+                        continue;
+                    }
+                }
+
+                members.Add(initExpression.ToString());
+            }
+
+            var anonymousText = members.Count == 0
+                ? "new { __ql = 1 }"
+                : $"new {{ {string.Join(", ", members)} }}";
+
+            return SyntaxFactory.ParseExpression(anonymousText)
+                .WithTriviaFrom(node);
         }
     }
 }

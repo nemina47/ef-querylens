@@ -35,6 +35,7 @@ public sealed class ProjectAssemblyContext : IDisposable
             throw new FileNotFoundException($"Assembly not found: {assemblyPath}", assemblyPath);
 
         AssemblyPath = Path.GetFullPath(assemblyPath);
+        AssemblyTimestamp = File.GetLastWriteTimeUtc(AssemblyPath);
         EnsureRuntimeConfigDevExists(AssemblyPath);
 
         var ctx = new IsolatedLoadContext(AssemblyPath);

@@ -1,6 +1,7 @@
 using QueryLens.Core;
 using QueryLens.Core.AssemblyContext;
 using QueryLens.Core.Scripting;
+using QueryLens.Lsp.Parsing;
 using QueryLens.MySql;
 
 namespace QueryLens.Core.Tests.RealWorld;
@@ -15,6 +16,7 @@ namespace QueryLens.Core.Tests.RealWorld;
 ///   1. Build share-common-workflow in Debug mode (net8.0)
 ///   2. Run: dotnet test --filter "RealWorld"
 /// </summary>
+[Collection("AssemblyLoadContextIsolation")]
 public class WorkflowRealWorldTests
 {
     private const string BinDir =
@@ -22,6 +24,8 @@ public class WorkflowRealWorldTests
 
     private static readonly string ApiDll  = Path.Combine(BinDir, "Share.Common.Workflow.Api.dll");
     private static readonly string CoreDll = Path.Combine(BinDir, "Share.Common.Workflow.Core.dll");
+    private static readonly string EndpointFile =
+        @"C:\nemina\QueryLens\samples\share-common-workflow\src\Share.Common.Workflow.Api\Endpoints\Workflow\GetWorkflowByType.cs";
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -56,6 +60,79 @@ public class WorkflowRealWorldTests
         };
 
     // ─── Tests ───────────────────────────────────────────────────────────────
+
+    [SkippableFact]
+    public async Task Workflow_EngineTranslate_HostAssemblyAutoDiscoversCoreDbContext()
+    {
+        SkipIfNotPresent();
+
+        await using var engine = new QueryLensEngine(new MySqlProviderBootstrap());
+
+        var result = await engine.TranslateAsync(new TranslationRequest
+        {
+            AssemblyPath = ApiDll,
+            Expression = "dbContext.AppWorkflows.Where(w => w.IsNotDeleted)",
+        });
+
+        Assert.True(result.Success, $"Error: {result.ErrorMessage}");
+        Assert.NotNull(result.Sql);
+        Assert.Contains("AppWorkflows", result.Sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [SkippableFact]
+    public async Task Workflow_EngineTranslate_InlinedServiceExpression_DoesNotFailDbContextDiscovery()
+    {
+        SkipIfNotPresent();
+
+        await using var engine = new QueryLensEngine(new MySqlProviderBootstrap());
+
+        var result = await engine.TranslateAsync(new TranslationRequest
+        {
+            AssemblyPath = ApiDll,
+            ContextVariableName = "dbContext",
+            Expression = "dbContext.Workflows.Where(w => w.WorkflowType == workflowType && w.IsNotDeleted).Select(expression)",
+        });
+
+        Assert.True(result.Success, $"Error: {result.ErrorMessage}");
+        Assert.NotNull(result.Sql);
+        Assert.DoesNotContain("No DbContext subclass found", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [SkippableFact]
+    public async Task Workflow_EndpointCallsite_OptimisticInline_Translates()
+    {
+        SkipIfNotPresent();
+        Skip.IfNot(File.Exists(EndpointFile), "Workflow endpoint source file not present.");
+
+        var source = File.ReadAllText(EndpointFile);
+        var expression = "service.GetWorkflowByTypeAsync(req.WorkflowType, w => new WorkflowResponse { WorkflowType = w.WorkflowType, Levels = w.Levels.Where(l => l.IsNotDeleted).Select(l => new WorkflowLevelResponse { Level = l.Level, IsFinal = l.IsFinal, WorkflowRole = l.WorkflowRole, Stages = l.Stages.Where(s => s.IsNotDeleted).Select(s => new WorkflowLevelStageResponse { Stage = s.Stage, StageIdentifier = s.StageIdentifier, IsFinal = s.IsFinal, Privileges = s.Privileges.Where(sp => sp.IsNotDeleted).Select(sp => new WorkflowLevelStagePrivilegeResponse { PrivilegeType = sp.PrivilegeType, PrivilegeRequirementType = sp.PrivilegeRequirementType, }).ToList(), }).ToList() }).ToList(), }, ct)";
+
+        var inlined = MethodQueryInliner.TryInlineTopLevelInvocation(
+            source,
+            EndpointFile,
+            expression,
+            substituteSelectorArguments: true,
+            out var inlinedExpression,
+            out var contextVar,
+            out var reason);
+
+        Assert.True(inlined, reason);
+
+        await using var engine = new QueryLensEngine(new MySqlProviderBootstrap());
+
+        var result = await engine.TranslateAsync(new TranslationRequest
+        {
+            AssemblyPath = ApiDll,
+            Expression = inlinedExpression,
+            ContextVariableName = contextVar ?? "dbContext",
+        });
+
+        Assert.True(result.Success, $"Error: {result.ErrorMessage}");
+        Assert.NotNull(result.Sql);
+
+        Console.WriteLine($"[Inlined]\n{inlinedExpression}");
+        Console.WriteLine($"[SQL]\n{result.Sql}");
+    }
 
     [SkippableFact]
     public async Task Workflow_SimpleTableScan_GeneratesSql()

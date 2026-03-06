@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Text.RegularExpressions;
@@ -90,7 +91,20 @@ public sealed class QueryEvaluator
         try
         {
             // 1. Resolve the DbContext type from the user's ALC.
-            var dbContextType = alcCtx.FindDbContextType(request.DbContextTypeName, request.Expression);
+            Type dbContextType;
+            try
+            {
+                dbContextType = alcCtx.FindDbContextType(request.DbContextTypeName, request.Expression);
+            }
+            catch (InvalidOperationException ex) when (IsNoDbContextFoundError(ex))
+            {
+                // Some solutions place the DbContext in a sibling class library while the
+                // hovered file resolves to a host executable assembly. If that sibling wasn't
+                // loaded yet in a reused cached context, best-effort load local sibling DLLs
+                // and retry discovery once before returning the original error.
+                TryLoadSiblingAssembliesForDbContextDiscovery(alcCtx);
+                dbContextType = alcCtx.FindDbContextType(request.DbContextTypeName, request.Expression);
+            }
 
             // 2. Load the same type in the DEFAULT ALC — Roslyn CSharpScript generates
             //    assemblies that execute in the default ALC.  The DbContext instance must
@@ -767,6 +781,48 @@ public sealed class QueryEvaluator
     private static bool IsQueryable(object? value) =>
         value?.GetType().GetInterfaces()
             .Any(i => i.FullName == "System.Linq.IQueryable") == true;
+
+    private static bool IsNoDbContextFoundError(InvalidOperationException ex) =>
+        ex.Message.Contains("No DbContext subclass found", StringComparison.OrdinalIgnoreCase);
+
+    private static void TryLoadSiblingAssembliesForDbContextDiscovery(ProjectAssemblyContext alcCtx)
+    {
+        var binDir = Path.GetDirectoryName(alcCtx.AssemblyPath);
+        if (string.IsNullOrWhiteSpace(binDir) || !Directory.Exists(binDir))
+        {
+            return;
+        }
+
+        var alreadyLoaded = alcCtx.LoadedAssemblies
+            .Select(a => a.Location)
+            .Where(l => !string.IsNullOrWhiteSpace(l))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var dll in Directory.EnumerateFiles(binDir, "*.dll", SearchOption.TopDirectoryOnly))
+        {
+            if (string.Equals(dll, alcCtx.AssemblyPath, StringComparison.OrdinalIgnoreCase) ||
+                alreadyLoaded.Contains(dll))
+            {
+                continue;
+            }
+
+            var name = Path.GetFileNameWithoutExtension(dll);
+            if (name.StartsWith("Microsoft.EntityFrameworkCore", StringComparison.OrdinalIgnoreCase) ||
+                name.StartsWith("Pomelo.EntityFrameworkCore", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            try
+            {
+                alcCtx.LoadAdditionalAssembly(dll);
+            }
+            catch
+            {
+                // Best-effort recovery only.
+            }
+        }
+    }
 
     private static string? TryExtractRootIdentifier(string expression)
     {

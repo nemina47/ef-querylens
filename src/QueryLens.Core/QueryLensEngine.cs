@@ -34,8 +34,21 @@ public sealed class QueryLensEngine : IQueryLensEngine
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(request);
 
-        var alcCtx = GetOrRefreshContext(request.AssemblyPath);
-        return await _evaluator.EvaluateAsync(alcCtx, _bootstrap, request, ct);
+        var fullPath = Path.GetFullPath(request.AssemblyPath);
+        var alcCtx = GetOrRefreshContext(fullPath);
+        var result = await _evaluator.EvaluateAsync(alcCtx, _bootstrap, request, ct);
+
+        if (!NeedsDbContextDiscoveryRetry(result))
+            return result;
+
+        // Self-heal long-running hosts (LSP): evict the cached context and retry once.
+        // This recovers from contexts created before dependency outputs existed or from
+        // transient assembly-load failures during initial discovery.
+        if (_alcCache.TryRemove(fullPath, out var stale))
+            stale.Dispose();
+
+        var freshCtx = GetOrRefreshContext(fullPath);
+        return await _evaluator.EvaluateAsync(freshCtx, _bootstrap, request, ct);
     }
 
     public Task<ExplainResult> ExplainAsync(
@@ -371,4 +384,9 @@ public sealed class QueryLensEngine : IQueryLensEngine
         }
         catch { return false; }
     }
+
+    private static bool NeedsDbContextDiscoveryRetry(QueryTranslationResult result) =>
+        !result.Success &&
+        !string.IsNullOrWhiteSpace(result.ErrorMessage) &&
+        result.ErrorMessage.Contains("No DbContext subclass found", StringComparison.OrdinalIgnoreCase);
 }

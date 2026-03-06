@@ -52,6 +52,7 @@ public class MethodQueryInlinerTests
                 endpointSource,
                 apiFile,
                 expression,
+                substituteSelectorArguments: false,
                 out var inlined,
                 out var contextVariable,
                 out var reason);
@@ -59,8 +60,8 @@ public class MethodQueryInlinerTests
             Assert.True(success, reason);
             Assert.Equal("dbContext", contextVariable);
             Assert.Contains("dbContext.Workflows", inlined, StringComparison.Ordinal);
-            Assert.Contains("req.WorkflowType", inlined, StringComparison.Ordinal);
-            Assert.Contains("Select(w => new WorkflowResponse", inlined, StringComparison.Ordinal);
+            Assert.Contains("w.WorkflowType == workflowType", inlined, StringComparison.Ordinal);
+            Assert.Contains("Select(expression)", inlined, StringComparison.Ordinal);
             Assert.DoesNotContain("SingleOrDefaultAsync", inlined, StringComparison.Ordinal);
         }
         finally
@@ -115,6 +116,7 @@ public class MethodQueryInlinerTests
                 endpointSource,
                 apiFile,
                 expression,
+                substituteSelectorArguments: false,
                 out var inlined,
                 out var contextVariable,
                 out var reason);
@@ -122,8 +124,8 @@ public class MethodQueryInlinerTests
             Assert.True(success, reason);
             Assert.Equal("dbContext", contextVariable);
             Assert.Contains("dbContext.Workflows", inlined, StringComparison.Ordinal);
-            Assert.Contains("req.WorkflowId", inlined, StringComparison.Ordinal);
-            Assert.Contains("Select(w => w.WorkflowId)", inlined, StringComparison.Ordinal);
+            Assert.Contains("w.WorkflowId == workflowId", inlined, StringComparison.Ordinal);
+            Assert.Contains("Select(expression)", inlined, StringComparison.Ordinal);
             Assert.DoesNotContain("SingleOrDefaultAsync", inlined, StringComparison.Ordinal);
         }
         finally
@@ -154,6 +156,7 @@ public class MethodQueryInlinerTests
                 source,
                 apiFile,
                 expression,
+                substituteSelectorArguments: false,
                 out var inlined,
                 out var contextVariable,
                 out var reason);
@@ -167,6 +170,100 @@ public class MethodQueryInlinerTests
         {
             DeleteWorkspace(workspaceRoot);
         }
+    }
+
+    [Fact]
+    public void TryInlineTopLevelInvocation_SelectorSubstitutionEnabled_InlinesConcreteProjection()
+    {
+        var workspaceRoot = CreateWorkspace();
+
+        try
+        {
+            var apiFile = Path.Combine(workspaceRoot, "Api", "GetWorkflowByType.cs");
+            var coreFile = Path.Combine(workspaceRoot, "Core", "WorkflowService.cs");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(apiFile)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(coreFile)!);
+            File.WriteAllText(Path.Combine(workspaceRoot, "Sample.sln"), "");
+
+            File.WriteAllText(coreFile, """
+                using System.Linq.Expressions;
+                using System.Threading;
+                using System.Threading.Tasks;
+
+                public sealed class WorkflowService
+                {
+                    public async Task<TResult?> GetWorkflowByTypeAsync<TResult>(
+                        WorkflowType workflowType,
+                        Expression<Func<Workflow, TResult>> expression,
+                        CancellationToken ct)
+                    {
+                        return await dbContext
+                            .Workflows.Where(w => w.WorkflowType == workflowType && w.IsNotDeleted)
+                            .Select(expression)
+                            .SingleOrDefaultAsync(ct);
+                    }
+                }
+                """);
+
+            var endpointSource = """
+                var data = await service.GetWorkflowByTypeAsync(
+                    req.WorkflowType,
+                    w => new WorkflowResponse { WorkflowType = w.WorkflowType },
+                    ct);
+                """;
+            File.WriteAllText(apiFile, endpointSource);
+
+            var expression = "service.GetWorkflowByTypeAsync(req.WorkflowType, w => new WorkflowResponse { WorkflowType = w.WorkflowType }, ct)";
+
+            var success = MethodQueryInliner.TryInlineTopLevelInvocation(
+                endpointSource,
+                apiFile,
+                expression,
+                substituteSelectorArguments: true,
+                out var inlined,
+                out var contextVariable,
+                out var reason);
+
+            Assert.True(success, reason);
+            Assert.Equal("dbContext", contextVariable);
+            Assert.Contains("dbContext.Workflows", inlined, StringComparison.Ordinal);
+            Assert.Contains("w.WorkflowType == workflowType", inlined, StringComparison.Ordinal);
+            Assert.Contains("Select(w => new { WorkflowType = w.WorkflowType })", inlined, StringComparison.Ordinal);
+            Assert.DoesNotContain("SingleOrDefaultAsync", inlined, StringComparison.Ordinal);
+        }
+        finally
+        {
+            DeleteWorkspace(workspaceRoot);
+        }
+    }
+
+    [Fact]
+    public void TryInlineTopLevelInvocation_RealSampleEndpoint_SanitizesWorkflowProjection()
+    {
+        var apiFile = Path.GetFullPath(
+            Path.Combine(AppContext.BaseDirectory,
+                "..", "..", "..", "..", "..",
+                "samples", "share-common-workflow", "src", "Share.Common.Workflow.Api",
+                "Endpoints", "Workflow", "GetWorkflowByType.cs"));
+
+        var source = File.ReadAllText(apiFile);
+        var expression = "service.GetWorkflowByTypeAsync(req.WorkflowType, w => new WorkflowResponse { WorkflowType = w.WorkflowType, Levels = w.Levels.Where(l => l.IsNotDeleted).Select(l => new WorkflowLevelResponse { Level = l.Level, IsFinal = l.IsFinal, WorkflowRole = l.WorkflowRole, Stages = l.Stages.Where(s => s.IsNotDeleted).Select(s => new WorkflowLevelStageResponse { Stage = s.Stage, StageIdentifier = s.StageIdentifier, IsFinal = s.IsFinal, Privileges = s.Privileges.Where(sp => sp.IsNotDeleted).Select(sp => new WorkflowLevelStagePrivilegeResponse { PrivilegeType = sp.PrivilegeType, PrivilegeRequirementType = sp.PrivilegeRequirementType, }).ToList(), }).ToList() }).ToList(), }, ct)";
+
+        var success = MethodQueryInliner.TryInlineTopLevelInvocation(
+            source,
+            apiFile,
+            expression,
+            substituteSelectorArguments: true,
+            out var inlined,
+            out var contextVariable,
+            out var reason);
+
+        Assert.True(success, reason);
+        Assert.Equal("dbContext", contextVariable);
+        Assert.Contains("dbContext.Workflows", inlined, StringComparison.Ordinal);
+        Assert.Contains("Select(w => new { WorkflowType = w.WorkflowType", inlined, StringComparison.Ordinal);
+        Assert.DoesNotContain("Select(expression)", inlined, StringComparison.Ordinal);
     }
 
     private static string CreateWorkspace()

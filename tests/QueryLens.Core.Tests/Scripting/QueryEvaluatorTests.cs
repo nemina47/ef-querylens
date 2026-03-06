@@ -12,6 +12,7 @@ namespace QueryLens.Core.Tests.Scripting;
 /// SampleApp.dll is copied into the test output dir by the MSBuild target in
 /// the .csproj, so <see cref="GetSampleAppDll"/> finds it at runtime.
 /// </summary>
+[Collection("AssemblyLoadContextIsolation")]
 public class QueryEvaluatorTests : IDisposable
 {
     private readonly ProjectAssemblyContext _alcCtx;
