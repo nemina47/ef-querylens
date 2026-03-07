@@ -10,6 +10,21 @@ namespace QueryLens.Lsp.Parsing;
 
 public static class MethodQueryInliner
 {
+    public sealed record InlineSelectorDiagnostics
+    {
+        public bool SelectorParameterDetected { get; init; }
+        public bool SelectorArgumentSubstituted { get; init; }
+        public bool SelectorArgumentSanitized { get; init; }
+        public bool ContainsNestedSelectorMaterialization { get; init; }
+    }
+
+    private sealed record ParameterMapBuildResult(
+        Dictionary<string, ExpressionSyntax> Map,
+        bool SelectorParameterDetected,
+        bool SelectorArgumentSubstituted,
+        bool SelectorArgumentSanitized,
+        bool ContainsNestedSelectorMaterialization);
+
     private static readonly HashSet<string> TerminalMethods = new(StringComparer.OrdinalIgnoreCase)
     {
         "ToList", "ToListAsync", "ToArray", "ToArrayAsync", "ToDictionary", "ToDictionaryAsync",
@@ -22,6 +37,11 @@ public static class MethodQueryInliner
         "ElementAt", "ElementAtOrDefault", "ElementAtAsync", "ElementAtOrDefaultAsync",
         "AsEnumerable", "AsAsyncEnumerable", "ToLookup", "ToLookupAsync",
         "ExecuteUpdate", "ExecuteUpdateAsync", "ExecuteDelete", "ExecuteDeleteAsync"
+    };
+
+    private static readonly HashSet<string> NestedMaterializationMethods = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ToList", "ToListAsync", "ToArray", "ToArrayAsync", "ToDictionary", "ToDictionaryAsync", "ToLookup", "ToLookupAsync"
     };
 
     public static bool TryInlineTopLevelInvocation(
@@ -41,6 +61,7 @@ public static class MethodQueryInliner
             out inlinedExpression,
             out contextVariableName,
             out _,
+            out _,
             out reason);
     }
 
@@ -54,9 +75,33 @@ public static class MethodQueryInliner
         out string? selectedMethodSourcePath,
         out string? reason)
     {
+        return TryInlineTopLevelInvocation(
+            sourceText,
+            sourceFilePath,
+            expression,
+            substituteSelectorArguments,
+            out inlinedExpression,
+            out contextVariableName,
+            out selectedMethodSourcePath,
+            out _,
+            out reason);
+    }
+
+    public static bool TryInlineTopLevelInvocation(
+        string sourceText,
+        string sourceFilePath,
+        string expression,
+        bool substituteSelectorArguments,
+        out string inlinedExpression,
+        out string? contextVariableName,
+        out string? selectedMethodSourcePath,
+        out InlineSelectorDiagnostics diagnostics,
+        out string? reason)
+    {
         inlinedExpression = expression;
         contextVariableName = null;
         selectedMethodSourcePath = null;
+        diagnostics = new InlineSelectorDiagnostics();
         reason = null;
 
         if (string.IsNullOrWhiteSpace(expression))
@@ -119,9 +164,17 @@ public static class MethodQueryInliner
             return false;
         }
 
-        var map = BuildParameterArgumentMap(method, argumentExpressions, substituteSelectorArguments);
-        var substituted = (ExpressionSyntax)new ParameterSubstitutionRewriter(map).Visit(calleeQuery)!;
+        var mapResult = BuildParameterArgumentMap(method, argumentExpressions, substituteSelectorArguments);
+        var substituted = (ExpressionSyntax)new ParameterSubstitutionRewriter(mapResult.Map).Visit(calleeQuery)!;
         var stripped = StripTrailingTerminalMethods(substituted);
+
+        diagnostics = new InlineSelectorDiagnostics
+        {
+            SelectorParameterDetected = mapResult.SelectorParameterDetected,
+            SelectorArgumentSubstituted = mapResult.SelectorArgumentSubstituted,
+            SelectorArgumentSanitized = mapResult.SelectorArgumentSanitized,
+            ContainsNestedSelectorMaterialization = mapResult.ContainsNestedSelectorMaterialization,
+        };
 
         var extractedRoot = TryExtractRootContextVariable(stripped);
         if (string.IsNullOrWhiteSpace(extractedRoot))
@@ -389,13 +442,17 @@ public static class MethodQueryInliner
         return expression;
     }
 
-    private static Dictionary<string, ExpressionSyntax> BuildParameterArgumentMap(
+    private static ParameterMapBuildResult BuildParameterArgumentMap(
         MethodDeclarationSyntax method,
         IReadOnlyList<ExpressionSyntax> arguments,
         bool substituteSelectorArguments)
     {
         var map = new Dictionary<string, ExpressionSyntax>(StringComparer.Ordinal);
         var parameters = method.ParameterList.Parameters;
+        var selectorParameterDetected = false;
+        var selectorArgumentSubstituted = false;
+        var selectorArgumentSanitized = false;
+        var containsNestedSelectorMaterialization = false;
 
         for (var i = 0; i < arguments.Count && i < parameters.Count; i++)
         {
@@ -407,6 +464,17 @@ public static class MethodQueryInliner
 
             var argument = arguments[i];
             var parameter = parameters[i];
+            var isSelectorParameter = IsSelectorParameter(parameter, argument);
+
+            if (isSelectorParameter)
+            {
+                selectorParameterDetected = true;
+                if (ContainsNestedMaterialization(argument))
+                {
+                    containsNestedSelectorMaterialization = true;
+                }
+            }
+
             if (ShouldSkipSubstitution(parameter, argument, substituteSelectorArguments))
             {
                 continue;
@@ -414,13 +482,54 @@ public static class MethodQueryInliner
 
             if (substituteSelectorArguments)
             {
+                var originalArgument = argument;
                 argument = SanitizeSelectorArgument(parameter, argument);
+                if (!ReferenceEquals(originalArgument, argument))
+                {
+                    selectorArgumentSanitized = true;
+                }
+            }
+
+            if (isSelectorParameter)
+            {
+                selectorArgumentSubstituted = true;
             }
 
             map[name] = argument;
         }
 
-        return map;
+        return new ParameterMapBuildResult(
+            map,
+            selectorParameterDetected,
+            selectorArgumentSubstituted,
+            selectorArgumentSanitized,
+            containsNestedSelectorMaterialization);
+    }
+
+    private static bool IsSelectorParameter(ParameterSyntax parameter, ExpressionSyntax argument)
+    {
+        var parameterType = parameter.Type?.ToString() ?? string.Empty;
+        return parameterType.Contains("Expression", StringComparison.Ordinal)
+               && (argument is LambdaExpressionSyntax || argument is AnonymousMethodExpressionSyntax);
+    }
+
+    private static bool ContainsNestedMaterialization(ExpressionSyntax argument)
+    {
+        if (argument is not LambdaExpressionSyntax && argument is not AnonymousMethodExpressionSyntax)
+        {
+            return false;
+        }
+
+        foreach (var invocation in argument.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        {
+            if (invocation.Expression is MemberAccessExpressionSyntax memberAccess
+                && NestedMaterializationMethods.Contains(memberAccess.Name.Identifier.ValueText))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool ShouldSkipSubstitution(

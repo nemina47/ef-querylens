@@ -34,9 +34,9 @@ namespace QueryLens.Core;
 /// and the automatic bootstrap fallback.
 /// </para>
 /// </summary>
-/// <typeparam name="TContext">The <see cref="Microsoft.EntityFrameworkCore.DbContext"/> type this factory creates.</typeparam>
+/// <typeparam name="TContext">The DbContext type this factory creates.</typeparam>
 public interface IQueryLensDbContextFactory<out TContext>
-    where TContext : Microsoft.EntityFrameworkCore.DbContext
+    where TContext : class
 {
     /// <summary>
     /// Creates an offline instance of <typeparamref name="TContext"/> configured

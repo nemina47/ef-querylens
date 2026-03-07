@@ -14,17 +14,12 @@ namespace QueryLens.Core;
 /// </summary>
 public sealed class QueryLensEngine : IQueryLensEngine
 {
-    private readonly IProviderBootstrap _bootstrap;
     private readonly QueryEvaluator _evaluator = new();
     private readonly ConcurrentDictionary<string, ProjectAssemblyContext> _alcCache = new(
         StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
 
-    public QueryLensEngine(IProviderBootstrap bootstrap)
-    {
-        ArgumentNullException.ThrowIfNull(bootstrap);
-        _bootstrap = bootstrap;
-    }
+    public QueryLensEngine() { }
 
     // ── IQueryLensEngine ──────────────────────────────────────────────────────
 
@@ -36,7 +31,7 @@ public sealed class QueryLensEngine : IQueryLensEngine
 
         var fullPath = Path.GetFullPath(request.AssemblyPath);
         var alcCtx = GetOrRefreshContext(fullPath);
-        var result = await _evaluator.EvaluateAsync(alcCtx, _bootstrap, request, ct);
+        var result = await _evaluator.EvaluateAsync(alcCtx, request, ct);
 
         if (!NeedsDbContextDiscoveryRetry(result))
             return result;
@@ -48,7 +43,7 @@ public sealed class QueryLensEngine : IQueryLensEngine
             stale.Dispose();
 
         var freshCtx = GetOrRefreshContext(fullPath);
-        return await _evaluator.EvaluateAsync(freshCtx, _bootstrap, request, ct);
+        return await _evaluator.EvaluateAsync(freshCtx, request, ct);
     }
 
     public Task<ExplainResult> ExplainAsync(
@@ -113,52 +108,9 @@ public sealed class QueryLensEngine : IQueryLensEngine
         if (fromFactory is not null)
             return fromFactory;
 
-        // Priority 2: Bootstrap approach.
-        // build DbContextOptionsBuilder<TContext> from the shared EF Core assembly,
-        // configure it via bootstrap, then call the DbContext ctor.
-
-        var efAssembly = alcCtx.LoadedAssemblies
-            .Concat(AssemblyLoadContext.Default.Assemblies)
-            .FirstOrDefault(a => a.GetName().Name == "Microsoft.EntityFrameworkCore")
-            ?? throw new InvalidOperationException(
-                "Microsoft.EntityFrameworkCore not found. " +
-                "Ensure the project references EF Core and has been built.");
-
-        var builderOpenGeneric = efAssembly.GetType(
-            "Microsoft.EntityFrameworkCore.DbContextOptionsBuilder`1")
-            ?? throw new InvalidOperationException(
-                "Could not locate DbContextOptionsBuilder`1 in EF Core assembly.");
-
-        var builderType = builderOpenGeneric.MakeGenericType(dbContextType);
-        var builderInstance = (Microsoft.EntityFrameworkCore.DbContextOptionsBuilder)
-            Activator.CreateInstance(builderType)!;
-
-        _bootstrap.ConfigureOffline(builderInstance);
-
-        // DeclaredOnly avoids AmbiguousMatchException: DbContextOptionsBuilder<T>
-        // hides the base class Options property with a covariant return type.
-        var optionsProp = builderType.GetProperty("Options",
-            BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-            ?? throw new InvalidOperationException(
-                "Could not find Options property on DbContextOptionsBuilder<T>.");
-
-        var options = optionsProp.GetValue(builderInstance)!;
-
-        // Find the (DbContextOptions) or (DbContextOptions<T>) constructor.
-        const string genericOptionsName = "Microsoft.EntityFrameworkCore.DbContextOptions`1";
-        const string baseOptionsName = "Microsoft.EntityFrameworkCore.DbContextOptions";
-
-        var ctor = dbContextType.GetConstructors().FirstOrDefault(c =>
-        {
-            var parms = c.GetParameters();
-            if (parms.Length != 1) return false;
-            var name = parms[0].ParameterType.FullName ?? string.Empty;
-            return name.StartsWith(genericOptionsName, StringComparison.Ordinal) ||
-                   name.StartsWith(baseOptionsName, StringComparison.Ordinal);
-        }) ?? throw new InvalidOperationException(
-            $"'{dbContextType.FullName}' has no (DbContextOptions) constructor.");
-
-        return ctor.Invoke([options]);
+        throw new InvalidOperationException(
+            $"Could not create an instance of '{dbContextType.FullName}' for model inspection. " +
+            "Implement IDesignTimeDbContextFactory<T> or IQueryLensDbContextFactory<T> in the project.");
     }
 
     // ── Model snapshot building ───────────────────────────────────────────────

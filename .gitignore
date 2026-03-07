@@ -57,7 +57,6 @@ local.settings.json
 # Real-world sample projects — local only, not part of the QueryLens repo.
 # Real-world tests (WorkflowRealWorldTests) discover these via SkipIfNotPresent()
 # and simply skip when the project hasn't been built locally.
-samples/share-common-workflow/
 
 # Node/TypeScript dependencies
 **/node_modules/

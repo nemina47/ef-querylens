@@ -46,6 +46,9 @@ internal sealed class HoverHandler : HoverHandlerBase
         string? conservativeExpression = null;
         string? conservativeContextVariableName = null;
         var inlineMode = InlineMode.Direct;
+        var optimisticInlineDiagnostics = new MethodQueryInliner.InlineSelectorDiagnostics();
+        var conservativeInlineDiagnostics = new MethodQueryInliner.InlineSelectorDiagnostics();
+        var inlineContainsNestedSelectorMaterialization = false;
 
         var usingImports = new HashSet<string>(StringComparer.Ordinal);
         var usingAliases = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -68,10 +71,13 @@ internal sealed class HoverHandler : HoverHandlerBase
                 out var inlinedExpression,
                 out var inlinedContextVariable,
                 out var optimisticSourcePath,
+                out optimisticInlineDiagnostics,
                 out _))
         {
             expression = inlinedExpression;
             inlineMode = InlineMode.Optimistic;
+            inlineContainsNestedSelectorMaterialization =
+                optimisticInlineDiagnostics.ContainsNestedSelectorMaterialization;
             selectedInlinedSourcePath = optimisticSourcePath;
             if (!string.IsNullOrWhiteSpace(inlinedContextVariable))
             {
@@ -86,6 +92,7 @@ internal sealed class HoverHandler : HoverHandlerBase
                     out var conservativeInlinedExpression,
                     out var conservativeInlinedContextVariable,
                     out var conservativeSourcePath,
+                    out conservativeInlineDiagnostics,
                     out _)
                 && !string.Equals(conservativeInlinedExpression, expression, StringComparison.Ordinal))
             {
@@ -105,10 +112,13 @@ internal sealed class HoverHandler : HoverHandlerBase
                      out var conservativeOnlyInlinedExpression,
                      out var conservativeOnlyInlinedContextVariable,
                      out var conservativeOnlySourcePath,
+                     out conservativeInlineDiagnostics,
                      out _))
         {
             expression = conservativeOnlyInlinedExpression;
             inlineMode = InlineMode.Conservative;
+            inlineContainsNestedSelectorMaterialization =
+                conservativeInlineDiagnostics.ContainsNestedSelectorMaterialization;
             selectedInlinedSourcePath = conservativeOnlySourcePath;
             if (!string.IsNullOrWhiteSpace(conservativeOnlyInlinedContextVariable))
             {
@@ -171,27 +181,75 @@ internal sealed class HoverHandler : HoverHandlerBase
 
             var translation = await TranslateAsync(expression, contextVariableName);
 
+            if (translation.Success &&
+                inlineMode == InlineMode.Optimistic &&
+                inlineContainsNestedSelectorMaterialization &&
+                !string.IsNullOrWhiteSpace(conservativeExpression) &&
+                !string.Equals(conservativeExpression, expression, StringComparison.Ordinal))
+            {
+                var conservativeHasSelectorPlaceholder =
+                    LooksLikeSelectorPlaceholderQuery(conservativeExpression);
+
+                if (!conservativeHasSelectorPlaceholder)
+                {
+                    var conservativeTranslation = await TranslateAsync(
+                        conservativeExpression,
+                        string.IsNullOrWhiteSpace(conservativeContextVariableName)
+                            ? contextVariableName
+                            : conservativeContextVariableName);
+
+                    if (conservativeTranslation.Success &&
+                        conservativeTranslation.Commands.Count > translation.Commands.Count)
+                    {
+                        translation = conservativeTranslation;
+                        expression = conservativeExpression;
+                        contextVariableName = conservativeContextVariableName ?? contextVariableName;
+                        inlineMode = InlineMode.Conservative;
+                        inlineContainsNestedSelectorMaterialization =
+                            conservativeInlineDiagnostics.ContainsNestedSelectorMaterialization;
+                    }
+                }
+            }
+
             if (!translation.Success &&
                 !string.IsNullOrWhiteSpace(conservativeExpression) &&
                 !string.Equals(conservativeExpression, expression, StringComparison.Ordinal))
             {
+                var conservativeHasSelectorPlaceholder =
+                    LooksLikeSelectorPlaceholderQuery(conservativeExpression);
+
                 var fallbackTranslation = await TranslateAsync(
                     conservativeExpression,
                     string.IsNullOrWhiteSpace(conservativeContextVariableName)
                         ? contextVariableName
                         : conservativeContextVariableName);
 
-                if (fallbackTranslation.Success)
+                if (fallbackTranslation.Success && !conservativeHasSelectorPlaceholder)
                 {
                     translation = fallbackTranslation;
                     expression = conservativeExpression;
                     contextVariableName = conservativeContextVariableName ?? contextVariableName;
                     inlineMode = InlineMode.Conservative;
+                    inlineContainsNestedSelectorMaterialization =
+                        conservativeInlineDiagnostics.ContainsNestedSelectorMaterialization;
                 }
             }
 
             if (translation.Success)
             {
+                if (inlineContainsNestedSelectorMaterialization)
+                {
+                    translation = AppendWarningIfMissing(
+                        translation,
+                        new QueryWarning
+                        {
+                            Severity = WarningSeverity.Warning,
+                            Code = "QL_EXPRESSION_PARTIAL_RISK",
+                            Message = "Expression selector contains nested materialization that may require additional SQL commands.",
+                            Suggestion = "SQL preview is best-effort for this projection shape; child collection commands may be omitted offline.",
+                        });
+                }
+
                 var commands = translation.Commands.Count > 0
                     ? translation.Commands
                     : translation.Sql is null
@@ -215,7 +273,7 @@ internal sealed class HoverHandler : HoverHandlerBase
                     Contents = new MarkedStringsOrMarkupContent(new MarkupContent
                     {
                         Kind = MarkupKind.Markdown,
-                        Value = BuildSqlPreview(commands, inlineMode)
+                        Value = BuildSqlPreview(commands, inlineMode, translation.Warnings)
                     })
                 };
             }
@@ -253,7 +311,10 @@ internal sealed class HoverHandler : HoverHandlerBase
         };
     }
 
-    private static string BuildSqlPreview(IReadOnlyList<QuerySqlCommand> commands, InlineMode mode)
+    private static string BuildSqlPreview(
+        IReadOnlyList<QuerySqlCommand> commands,
+        InlineMode mode,
+        IReadOnlyList<QueryWarning> warnings)
     {
         var tableNames = ExtractTableNames(commands);
         var tablesSummary = tableNames.Count > 0 ? " · " + string.Join(", ", tableNames) : "";
@@ -280,7 +341,31 @@ internal sealed class HoverHandler : HoverHandlerBase
         }
 
         var statementWord = commands.Count == 1 ? "query" : "queries";
-        return $"**QueryLens · {commands.Count} {statementWord}**{tablesSummary}\n```sql\n{sqlBlock}\n```\n\n*mode: {modeLabel}*";
+
+        var warningLines = warnings
+            .Select(w => string.IsNullOrWhiteSpace(w.Suggestion)
+                ? $"- `{w.Code}`: {w.Message}"
+                : $"- `{w.Code}`: {w.Message} ({w.Suggestion})")
+            .ToList();
+
+        var usedToQueryStringFallback = warnings.Any(w =>
+            string.Equals(w.Code, "QL_CAPTURE_FALLBACK", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(w.Code, "QL_CAPTURE_SKIPPED", StringComparison.OrdinalIgnoreCase));
+
+        var containsSplitQueryNotice = commands.Count == 1 &&
+                                       commands[0].Sql.Contains("split-query mode", StringComparison.OrdinalIgnoreCase);
+
+        if (usedToQueryStringFallback && containsSplitQueryNotice)
+        {
+            warningLines.Add("- `QL_SPLIT_QUERY_PARTIAL`: Only the first split-query SQL statement is shown because execution capture was unavailable.");
+        }
+
+        if (warningLines.Count == 0)
+        {
+            return $"**QueryLens · {commands.Count} {statementWord}**{tablesSummary}\n```sql\n{sqlBlock}\n```\n\n*mode: {modeLabel}*";
+        }
+
+        return $"**QueryLens · {commands.Count} {statementWord}**{tablesSummary}\n```sql\n{sqlBlock}\n```\n\n*mode: {modeLabel}*\n\n**Notes**\n{string.Join("\n", warningLines)}";
     }
 
     private static string CircledNumber(int n) => n switch
@@ -291,6 +376,10 @@ internal sealed class HoverHandler : HoverHandlerBase
 
     private static readonly Regex TableNameRegex =
         new(@"(?:FROM|JOIN)\s+`([^`]+)`", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex SelectorPlaceholderRegex =
+        new(@"\.Select\s*\(\s*(expression|selector|projection)\s*\)",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static IReadOnlyList<string> ExtractTableNames(IReadOnlyList<QuerySqlCommand> commands)
     {
@@ -305,6 +394,14 @@ internal sealed class HoverHandler : HoverHandlerBase
             }
         }
         return ordered;
+    }
+
+    private static bool LooksLikeSelectorPlaceholderQuery(string? expression)
+    {
+        if (string.IsNullOrWhiteSpace(expression))
+            return false;
+
+        return SelectorPlaceholderRegex.IsMatch(expression);
     }
 
     private static void TryMergeUsingContextFromFile(
@@ -367,5 +464,18 @@ internal sealed class HoverHandler : HoverHandlerBase
     {
         PreferExisting,
         PreferIncoming
+    }
+
+    private static QueryTranslationResult AppendWarningIfMissing(
+        QueryTranslationResult translation,
+        QueryWarning warning)
+    {
+        if (translation.Warnings.Any(w => string.Equals(w.Code, warning.Code, StringComparison.OrdinalIgnoreCase)))
+        {
+            return translation;
+        }
+
+        var warnings = translation.Warnings.Concat([warning]).ToArray();
+        return translation with { Warnings = warnings };
     }
 }

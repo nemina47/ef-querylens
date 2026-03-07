@@ -24,8 +24,19 @@ internal static class DesignTimeDbContextFactory
     /// or <c>null</c> if no factory was found or construction failed.
     /// </returns>
     internal static object? TryCreateQueryLensFactory(
-        Type dbContextType, IEnumerable<Assembly> assemblies)
+        Type dbContextType, IEnumerable<Assembly> assemblies) =>
+        TryCreateQueryLensFactory(dbContextType, assemblies, out _);
+
+    /// <summary>
+    /// Same as <see cref="TryCreateQueryLensFactory(Type, IEnumerable{Assembly})"/>,
+    /// but returns a diagnostic message when a matching factory type is found and
+    /// invocation fails.
+    /// </summary>
+    internal static object? TryCreateQueryLensFactory(
+        Type dbContextType, IEnumerable<Assembly> assemblies, out string? failureReason)
     {
+        failureReason = null;
+
         foreach (var asm in assemblies)
         {
             Type? factoryType;
@@ -54,7 +65,12 @@ internal static class DesignTimeDbContextFactory
 
                 return method.Invoke(factory, null); // CreateOfflineContext takes no args
             }
-            catch { return null; }
+            catch (Exception ex)
+            {
+                failureReason =
+                    $"Found QueryLens factory '{factoryType.FullName}' but CreateOfflineContext() failed: {Unwrap(ex)}";
+                return null;
+            }
         }
 
         return null;
@@ -72,8 +88,19 @@ internal static class DesignTimeDbContextFactory
     /// if no factory was found or if the factory threw during construction
     /// (callers should fall back to the bootstrap approach).
     /// </returns>
-    internal static object? TryCreate(Type dbContextType, IEnumerable<Assembly> assemblies)
+    internal static object? TryCreate(Type dbContextType, IEnumerable<Assembly> assemblies) =>
+        TryCreate(dbContextType, assemblies, out _);
+
+    /// <summary>
+    /// Same as <see cref="TryCreate(Type, IEnumerable{Assembly})"/>, but returns
+    /// a diagnostic message when a matching design-time factory is found and
+    /// invocation fails.
+    /// </summary>
+    internal static object? TryCreate(
+        Type dbContextType, IEnumerable<Assembly> assemblies, out string? failureReason)
     {
+        failureReason = null;
+
         foreach (var asm in assemblies)
         {
             Type? factoryType;
@@ -102,9 +129,25 @@ internal static class DesignTimeDbContextFactory
 
                 return method.Invoke(factory, [Array.Empty<string>()]);
             }
-            catch { return null; } // factory needs DI/env — skip, fall through to bootstrap
+            catch (Exception ex)
+            {
+                failureReason =
+                    $"Found design-time factory '{factoryType.FullName}' but CreateDbContext(string[]) failed: {Unwrap(ex)}";
+                return null;
+            }
         }
 
         return null;
+    }
+
+    private static string Unwrap(Exception ex)
+    {
+        var current = ex;
+        while (current is TargetInvocationException tie && tie.InnerException is not null)
+        {
+            current = tie.InnerException;
+        }
+
+        return current.Message;
     }
 }

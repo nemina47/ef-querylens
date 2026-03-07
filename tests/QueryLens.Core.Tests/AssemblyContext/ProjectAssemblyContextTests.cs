@@ -10,6 +10,7 @@ namespace QueryLens.Core.Tests.AssemblyContext;
 /// ReferenceOutputAssembly="false". We locate it relative to this assembly's
 /// location at runtime.
 /// </summary>
+[Collection("AssemblyLoadContextIsolation")]
 public class ProjectAssemblyContextTests
 {
     // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -152,35 +153,33 @@ public class ProjectAssemblyContextTests
     [Fact]
     public void IsolationTest_TypeFromALC_IsNotSameRuntimeTypeAsToolDbContext()
     {
-        // Phase 1: EF Core is shared between the user's ALC and the host's default
-        // ALC so that DbContextOptionsBuilder<T> casts succeed at the bootstrap
-        // boundary. As a consequence, AppDbContext IS assignable to the tool's
-        // DbContext (both inherit from the same shared runtime type).
+        // Phase 2: EF Core is fully isolated — it is loaded from the user's bin dir
+        // into the user's ALC. The tool itself has no compile-time EF Core dependency.
         //
-        // What remains isolated is the user's own assembly (SampleApp.dll):
-        //   - AppDbContext.Assembly lives in the user's ALC, not the default ALC.
-        //   - AppDbContext ≠ DbContext (it's a subclass, not the same type).
-        //
-        // Phase 2 will restore full EF Core isolation once the bootstrap protocol
-        // switches to a reflection-only interface.
+        // Verify that:
+        //   - AppDbContext lives in the user's ALC (not the default ALC).
+        //   - The DbContext base class also lives in the user's ALC — confirming
+        //     that EF Core loaded from the user's bin, not the tool's runtime.
         var dll = GetSampleAppDll();
         using var ctx = new ProjectAssemblyContext(dll);
 
-        var alcType  = ctx.FindDbContextType("AppDbContext");
-        var toolType = typeof(Microsoft.EntityFrameworkCore.DbContext);
+        var alcType = ctx.FindDbContextType("AppDbContext");
 
-        // AppDbContext is a subclass of DbContext — they are NOT the same type.
-        Assert.NotEqual(toolType, alcType);
-
-        // Phase 1: EF Core is shared, so AppDbContext IS assignable to the tool's
-        // DbContext base class. This is expected and required for bootstrap to work.
-        Assert.True(toolType.IsAssignableFrom(alcType),
-            "Phase 1: EF Core is shared with the host ALC. " +
-            "AppDbContext must be assignable to Microsoft.EntityFrameworkCore.DbContext.");
-
-        // The user's SampleApp assembly itself is still in the user's ALC.
-        var userAlc = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(alcType.Assembly);
+        // AppDbContext must be in the user's ALC, not the default ALC.
+        var userAlc  = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(alcType.Assembly);
         Assert.NotSame(System.Runtime.Loader.AssemblyLoadContext.Default, userAlc);
+
+        // DbContext base class must also be in the user's ALC — not the tool's ALC.
+        var dbContextBase = alcType.BaseType;
+        while (dbContextBase != null && dbContextBase != typeof(object)
+               && dbContextBase.FullName != "Microsoft.EntityFrameworkCore.DbContext")
+            dbContextBase = dbContextBase.BaseType;
+
+        Assert.NotNull(dbContextBase);
+        Assert.Equal("Microsoft.EntityFrameworkCore.DbContext", dbContextBase.FullName);
+
+        var efAlc = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(dbContextBase.Assembly);
+        Assert.NotSame(System.Runtime.Loader.AssemblyLoadContext.Default, efAlc);
     }
 
     [Fact]
@@ -241,11 +240,18 @@ public class ProjectAssemblyContextTests
         // JIT-held stack roots keeping the ALC alive after Dispose().
         WeakReference alcRef = CreateAndDisposeContext();
 
-        // Force multiple GC cycles — collectible ALCs can take >1 pass.
-        for (int i = 0; i < 10; i++)
+        // Collectible ALC unload is eventually consistent with GC roots and JIT timing.
+        // Assert eventual unload within a bounded window rather than a fixed iteration count.
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (alcRef.IsAlive && sw.Elapsed < TimeSpan.FromSeconds(5))
         {
-            GC.Collect();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
             GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            if (alcRef.IsAlive)
+            {
+                System.Threading.Thread.Sleep(25);
+            }
         }
 
         Assert.False(alcRef.IsAlive,

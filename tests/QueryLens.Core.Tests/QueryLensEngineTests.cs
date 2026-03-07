@@ -1,5 +1,3 @@
-using QueryLens.MySql;
-
 namespace QueryLens.Core.Tests;
 
 /// <summary>
@@ -9,6 +7,7 @@ namespace QueryLens.Core.Tests;
 /// in QueryLens.Core.Tests.csproj, so the assembly is available at runtime
 /// via <see cref="GetSampleAppDll"/>.
 /// </summary>
+[Collection("AssemblyLoadContextIsolation")]
 public class QueryLensEngineTests
 {
     private static string GetSampleAppDll()
@@ -21,7 +20,7 @@ public class QueryLensEngineTests
         return dll;
     }
 
-    private static QueryLensEngine CreateEngine() => new(new MySqlProviderBootstrap());
+    private static QueryLensEngine CreateEngine() => new();
 
     // ── TranslateAsync ────────────────────────────────────────────────────────
 

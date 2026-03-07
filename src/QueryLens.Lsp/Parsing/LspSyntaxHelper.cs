@@ -139,6 +139,24 @@ public static class LspSyntaxHelper
             }
         }
 
+        // Add namespaces declared in the file itself. Code inside a namespace can
+        // use extension methods from that same namespace without an explicit using,
+        // but QueryLens compiles generated snippets in the global namespace, so we
+        // need to import these explicitly to preserve behavior.
+        foreach (var namespaceDecl in root.DescendantNodes().OfType<BaseNamespaceDeclarationSyntax>())
+        {
+            var ns = namespaceDecl.Name.ToString();
+            if (string.IsNullOrWhiteSpace(ns))
+            {
+                continue;
+            }
+
+            if (importSet.Add(ns))
+            {
+                imports.Add(ns);
+            }
+        }
+
         return new SourceUsingContext(imports, aliases, staticTypes);
     }
 

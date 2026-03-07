@@ -10,6 +10,8 @@ public class AppDbContext : DbContext
     public DbSet<OrderItem> OrderItems => Set<OrderItem>();
     public DbSet<Product>   Products   => Set<Product>();
     public DbSet<Category>  Categories => Set<Category>();
+    public DbSet<ApplicationChecklist> ApplicationChecklists => Set<ApplicationChecklist>();
+    public DbSet<ApplicationChecklistChangeType> ApplicationChecklistChangeTypes => Set<ApplicationChecklistChangeType>();
 
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
@@ -45,6 +47,19 @@ public class AppDbContext : DbContext
             b.HasOne(c => c.Parent)
              .WithMany(c => c.Children)
              .HasForeignKey(c => c.ParentCategoryId);
+        });
+
+        modelBuilder.Entity<ApplicationChecklist>(b =>
+        {
+            b.HasMany(c => c.ChecklistChangeTypes)
+             .WithOne(t => t.ApplicationChecklist)
+             .HasForeignKey(t => t.ApplicationChecklistId);
+        });
+
+        modelBuilder.Entity<ApplicationChecklistChangeType>(b =>
+        {
+            b.Property(t => t.ChangeType)
+             .HasMaxLength(128);
         });
     }
 }

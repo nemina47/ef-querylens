@@ -1,14 +1,11 @@
 using QueryLens.Core.AssemblyContext;
 using QueryLens.Core.Scripting;
-using QueryLens.MySql;
 
 namespace QueryLens.Core.Tests.Scripting;
 
 /// <summary>
 /// Integration-style unit tests for <see cref="QueryEvaluator"/>.
 ///
-/// Uses <see cref="MySqlProviderBootstrap"/> which configures EF Core with a
-/// fake connection string — no real database is ever contacted.
 /// SampleApp.dll is copied into the test output dir by the MSBuild target in
 /// the .csproj, so <see cref="GetSampleAppDll"/> finds it at runtime.
 /// </summary>
@@ -16,13 +13,11 @@ namespace QueryLens.Core.Tests.Scripting;
 public class QueryEvaluatorTests : IDisposable
 {
     private readonly ProjectAssemblyContext _alcCtx;
-    private readonly MySqlProviderBootstrap _bootstrap;
     private readonly QueryEvaluator _evaluator;
 
     public QueryEvaluatorTests()
     {
         _alcCtx    = new ProjectAssemblyContext(GetSampleAppDll());
-        _bootstrap = new MySqlProviderBootstrap();
         _evaluator = new QueryEvaluator();
     }
 
@@ -49,7 +44,7 @@ public class QueryEvaluatorTests : IDisposable
         IReadOnlyDictionary<string, string>? usingAliases = null,
         IReadOnlyList<string>? usingStaticTypes = null,
         CancellationToken ct = default) =>
-        _evaluator.EvaluateAsync(_alcCtx, _bootstrap,
+        _evaluator.EvaluateAsync(_alcCtx,
             new TranslationRequest
             {
                 AssemblyPath      = _alcCtx.AssemblyPath,
@@ -211,12 +206,88 @@ public class QueryEvaluatorTests : IDisposable
     }
 
     [Fact]
+    public async Task Evaluate_MissingGuidCollectionVariable_InContains_UsesAtLeastTwoPlaceholderValues()
+    {
+        var result = await TranslateAsync(
+            "db.ApplicationChecklists.Where(c => listingIds.Contains(c.ApplicationId))");
+
+        Assert.True(result.Success, result.ErrorMessage);
+
+        var secondGuid = "00000000-0000-0000-0000-000000000001";
+        var hasSecondGuidInSql = (result.Sql ?? string.Empty)
+            .Contains(secondGuid, StringComparison.OrdinalIgnoreCase);
+        var hasSecondGuidInParameters = result.Parameters.Any(p =>
+            (p.InferredValue ?? string.Empty)
+                .Contains(secondGuid, StringComparison.OrdinalIgnoreCase));
+
+        Assert.True(
+            hasSecondGuidInSql || hasSecondGuidInParameters,
+            "Expected synthesized Contains placeholders to include at least two GUID values.");
+    }
+
+    [Fact]
     public async Task Evaluate_MissingSelectorVariable_InSelect_IsSynthesized()
     {
         var result = await TranslateAsync("db.Orders.Select(selector)");
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.NotNull(result.Sql);
+    }
+
+    [Fact]
+    public async Task Evaluate_ChecklistSelectManyVariant_ReturnsSql()
+    {
+        var result = await TranslateAsync(
+            "db.ApplicationChecklists.AsNoTracking()" +
+            ".Where(w => !w.IsDeleted && w.IsLatest)" +
+            ".Where(w => w.ApplicationId == applicationId)" +
+            ".SelectMany(x => x.ChecklistChangeTypes)" +
+            ".Where(w => !w.IsDeleted)" +
+            ".Select(s => s.ChangeType)");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.Contains("ApplicationChecklists", result.Sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ApplicationChecklistChangeTypes", result.Sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Evaluate_ChecklistSelectManyVariant_DoesNotSurfaceBufferedReaderFieldCountFailure()
+    {
+        var result = await TranslateAsync(
+            "db.ApplicationChecklists.AsNoTracking()" +
+            ".Where(w => !w.IsDeleted && w.IsLatest)" +
+            ".Where(w => w.ApplicationId == applicationId)" +
+            ".SelectMany(x => x.ChecklistChangeTypes)" +
+            ".Where(w => !w.IsDeleted)" +
+            ".Select(s => s.ChangeType)");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.DoesNotContain(
+            "underlying reader doesn't have as many fields",
+            result.ErrorMessage ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Evaluate_ExpressionSelectorNestedToList_EmitsPartialRiskWarning()
+    {
+        var result = await TranslateAsync(
+            "db.ApplicationChecklists.AsNoTracking()" +
+            ".Where(w => !w.IsDeleted && w.IsLatest)" +
+            ".Where(w => w.ApplicationId == applicationId)" +
+            ".Select(app => new {" +
+            "    ChangeTypes = app.ChecklistChangeTypes" +
+            "        .Where(t => !t.IsDeleted)" +
+            "        .Select(t => t.ChangeType)" +
+            "        .ToList()" +
+            "})");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.Contains(
+            result.Warnings,
+            w => string.Equals(w.Code, "QL_EXPRESSION_PARTIAL_RISK", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -251,6 +322,18 @@ public class QueryEvaluatorTests : IDisposable
         var result = await TranslateAsync(
             "db.Orders.Where(o => o.UserId < Abs(-5))",
             usingStaticTypes: ["System.Math"]);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.DoesNotContain("Compilation error", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Evaluate_WithUnresolvableAdditionalImport_DoesNotFailCompilation()
+    {
+        var result = await TranslateAsync(
+            "db.Orders.Where(o => o.UserId > 0)",
+            additionalImports: ["Microsoft.AspNetCore.Http"]);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.NotNull(result.Sql);
