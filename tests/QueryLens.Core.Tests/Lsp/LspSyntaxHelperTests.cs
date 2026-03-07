@@ -51,6 +51,49 @@ public class LspSyntaxHelperTests
     }
 
     [Fact]
+    public void TryExtractLinqExpression_CountAsyncInlinePredicate_PreservesPredicateAsWhere()
+    {
+        var source = """
+            var count = await dbContext.Applications
+                .CountAsync(w => w.ApplicationId != applicationId, ct);
+            """;
+
+        var (line, character) = FindPosition(source, "CountAsync");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName);
+
+        Assert.NotNull(expression);
+        Assert.Equal("dbContext", contextVariableName);
+        Assert.Contains(".Where(", expression, StringComparison.Ordinal);
+        Assert.Contains("ApplicationId != applicationId", expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryExtractLinqExpression_CountAsyncPredicateVariable_PreservesPredicateAsWhere()
+    {
+        var source = """
+            var count = await dbContext.Applications
+                .CountAsync(countPredicate, ct);
+            """;
+
+        var (line, character) = FindPosition(source, "CountAsync");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName);
+
+        Assert.NotNull(expression);
+        Assert.Equal("dbContext", contextVariableName);
+        Assert.Contains(".Where(countPredicate)", expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ExtractUsingContext_CollectsImportsAliasesAndStaticUsings()
     {
         var source = """

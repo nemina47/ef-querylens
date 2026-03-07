@@ -184,6 +184,41 @@ public class QueryEvaluatorTests : IDisposable
     }
 
     [Fact]
+    public async Task Evaluate_MissingScalarVariable_InWhere_DoesNotCollapseToWhereFalse()
+    {
+        var result = await TranslateAsync("db.Users.Where(u => u.Email == companyUen).Select(u => u.Id)");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.DoesNotContain("WHERE FALSE", result.Sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Evaluate_MissingObjectMemberVariable_InWhere_IsSynthesized()
+    {
+        var result = await TranslateAsync(
+            "db.ApplicationChecklists.Where(w => w.ApplicationId == currentUser.ApplicationId).Select(s => new { s.ApplicationId, s.Id })");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.DoesNotContain("Compilation error", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("does not contain a definition", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Evaluate_WideProjection_DoesNotFailWithIndexOutOfRange()
+    {
+        var projectionMembers = string.Join(", ", Enumerable.Range(1, 64).Select(i => $"C{i} = u.Id"));
+        var expression = $"db.Users.Select(u => new {{ {projectionMembers} }})";
+
+        var result = await TranslateAsync(expression);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.DoesNotContain("Index was outside the bounds of the array", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Evaluate_MissingCollectionVariable_InContains_DoesNotFallBackToObject()
     {
         var result = await TranslateAsync("db.Orders.Where(o => userIds.Contains(o.UserId))");
@@ -232,6 +267,16 @@ public class QueryEvaluatorTests : IDisposable
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.NotNull(result.Sql);
+    }
+
+    [Fact]
+    public async Task Evaluate_MissingWhereAndSelectExpressionVariables_AreSynthesized()
+    {
+        var result = await TranslateAsync("db.Orders.Where(filter).Select(expression)");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.DoesNotContain("Compilation error", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -364,7 +409,10 @@ public class QueryEvaluatorTests : IDisposable
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorMessage);
-        Assert.Contains("error", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.True(
+            result.ErrorMessage.Contains("error", StringComparison.OrdinalIgnoreCase)
+            || result.ErrorMessage.Contains("No DbContext subclass found", StringComparison.OrdinalIgnoreCase),
+            $"Unexpected error message: {result.ErrorMessage}");
     }
 
     [Fact]

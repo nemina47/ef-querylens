@@ -28,6 +28,15 @@ public static class LspSyntaxHelper
         "ExecuteUpdate", "ExecuteUpdateAsync", "ExecuteDelete", "ExecuteDeleteAsync"
     };
 
+    private static readonly HashSet<string> PredicateTerminalMethods = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Count", "CountAsync", "LongCount", "LongCountAsync",
+        "Any", "AnyAsync",
+        "First", "FirstOrDefault", "FirstAsync", "FirstOrDefaultAsync",
+        "Single", "SingleOrDefault", "SingleAsync", "SingleOrDefaultAsync",
+        "Last", "LastOrDefault", "LastAsync", "LastOrDefaultAsync"
+    };
+
     public static string? TryExtractLinqExpression(string sourceText, int line, int character,
         out string? contextVariableName)
     {
@@ -83,6 +92,15 @@ public static class LspSyntaxHelper
                terminalInvocation.Expression is MemberAccessExpressionSyntax terminalAccess &&
                TerminalMethods.Contains(terminalAccess.Name.Identifier.Text))
         {
+            if (TryExtractPredicateArgument(
+                    terminalAccess.Name.Identifier.Text,
+                    terminalInvocation.ArgumentList.Arguments,
+                    out var predicateArgument))
+            {
+                targetExpression = CreateWhereCall(terminalAccess.Expression, predicateArgument);
+                continue;
+            }
+
             targetExpression = terminalAccess.Expression;
         }
 
@@ -192,5 +210,64 @@ public static class LspSyntaxHelper
                     return lastMemberName;
             }
         }
+    }
+
+    private static bool TryExtractPredicateArgument(
+        string terminalMethodName,
+        SeparatedSyntaxList<ArgumentSyntax> arguments,
+        out ExpressionSyntax predicateArgument)
+    {
+        predicateArgument = null!;
+
+        if (!PredicateTerminalMethods.Contains(terminalMethodName) || arguments.Count == 0)
+            return false;
+
+        foreach (var argument in arguments)
+        {
+            if (IsCancellationTokenArgument(argument))
+                continue;
+
+            // Accept lambdas and common variable/member forms that point to a pre-built predicate.
+            if (argument.Expression is LambdaExpressionSyntax
+                || argument.Expression is AnonymousMethodExpressionSyntax
+                || argument.Expression is IdentifierNameSyntax
+                || argument.Expression is MemberAccessExpressionSyntax)
+            {
+                predicateArgument = argument.Expression;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsCancellationTokenArgument(ArgumentSyntax argument)
+    {
+        if (argument.NameColon?.Name.Identifier.ValueText is { } named
+            && string.Equals(named, "cancellationToken", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (argument.Expression is IdentifierNameSyntax id)
+        {
+            var n = id.Identifier.ValueText;
+            return string.Equals(n, "ct", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(n, "cancellationToken", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private static InvocationExpressionSyntax CreateWhereCall(
+        ExpressionSyntax source,
+        ExpressionSyntax predicate)
+    {
+        return SyntaxFactory.InvocationExpression(
+            SyntaxFactory.MemberAccessExpression(
+                SyntaxKind.SimpleMemberAccessExpression,
+                source,
+                SyntaxFactory.IdentifierName("Where")),
+            SyntaxFactory.ArgumentList(
+                SyntaxFactory.SingletonSeparatedList(
+                    SyntaxFactory.Argument(predicate))));
     }
 }

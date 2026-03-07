@@ -3,7 +3,7 @@ using System.Data.Common;
 
 namespace QueryLens.Core.Scripting;
 
-internal sealed class FakeDbDataReader(int rowCount = 1, int fieldCount = 32) : DbDataReader
+internal sealed class FakeDbDataReader(int rowCount = 1, int fieldCount = 1024) : DbDataReader
 {
     private readonly int _rowCount = Math.Max(0, rowCount);
     private readonly int _fieldCount = Math.Max(1, fieldCount);
