@@ -15,10 +15,71 @@
   "contributes": {
     "commands": [
       {
+        "command": "querylens.showSql",
+        "title": "QueryLens: Show SQL Preview"
+      },
+      {
+        "command": "querylens.copySql",
+        "title": "QueryLens: Copy SQL"
+      },
+      {
+        "command": "querylens.showSqlFromCursor",
+        "title": "QueryLens: Show SQL From Cursor"
+      },
+      {
+        "command": "querylens.copySqlFromCursor",
+        "title": "QueryLens: Copy SQL From Cursor"
+      },
+      {
         "command": "querylens.restart",
         "title": "QueryLens: Restart Language Server"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "QueryLens",
+      "properties": {
+        "querylens.codeLens.maxPerDocument": {
+          "type": "number",
+          "default": 50,
+          "minimum": 1,
+          "maximum": 500,
+          "description": "Maximum number of query CodeLens entries to show per document."
+        },
+        "querylens.codeLens.debounceMs": {
+          "type": "number",
+          "default": 250,
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "Milliseconds to reuse cached CodeLens results for unchanged document text."
+        },
+        "querylens.codeLens.useModelFilter": {
+          "type": "boolean",
+          "default": false,
+          "description": "When enabled, CodeLens validates query roots against DbSet names from model inspection. Disable for maximum stability while debugging LSP crashes."
+        },
+        "querylens.sql.formatOnShow": {
+          "type": "boolean",
+          "default": true,
+          "description": "Format SQL before showing or copying from QueryLens commands."
+        },
+        "querylens.sql.dialect": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "sql",
+            "mysql",
+            "transactsql"
+          ],
+          "description": "Dialect used by SQL formatter. Auto infers from SQL text."
+        },
+        "querylens.debug.enableVerboseLogs": {
+          "type": "boolean",
+          "default": false,
+          "description": "Emit verbose QueryLens client/server diagnostic logs to help isolate LSP or CodeLens issues."
+        }
+      }
+    }
   },
   "activationEvents": [
     "onLanguage:csharp"
@@ -29,6 +90,7 @@
     "watch": "tsc -watch -p ./"
   },
   "dependencies": {
+    "sql-formatter": "^15.7.2",
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {

@@ -17,9 +17,13 @@ public sealed class QueryLensEngine : IQueryLensEngine
     private readonly QueryEvaluator _evaluator = new();
     private readonly ConcurrentDictionary<string, ProjectAssemblyContext> _alcCache = new(
         StringComparer.OrdinalIgnoreCase);
+    private readonly bool _debugEnabled;
     private bool _disposed;
 
-    public QueryLensEngine() { }
+    public QueryLensEngine()
+    {
+        _debugEnabled = ReadBoolEnvironmentVariable("QUERYLENS_DEBUG", fallback: false);
+    }
 
     // ── IQueryLensEngine ──────────────────────────────────────────────────────
 
@@ -57,11 +61,23 @@ public sealed class QueryLensEngine : IQueryLensEngine
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(request);
 
-        var alcCtx = GetOrRefreshContext(request.AssemblyPath);
-        var dbContextType = alcCtx.FindDbContextType(request.DbContextTypeName);
-        var dbInstance = CreateDbContextForInspection(dbContextType, alcCtx);
+        LogDebug($"inspect-model-start assembly={request.AssemblyPath}");
 
-        return BuildModelSnapshot(dbInstance, dbContextType);
+        try
+        {
+            var alcCtx = GetOrRefreshContext(request.AssemblyPath);
+            var dbContextType = alcCtx.FindDbContextType(request.DbContextTypeName);
+            var dbInstance = CreateDbContextForInspection(dbContextType, alcCtx);
+
+            var snapshot = BuildModelSnapshot(dbInstance, dbContextType);
+            LogDebug($"inspect-model-success context={snapshot.DbContextType} dbSets={snapshot.DbSetProperties.Count} entities={snapshot.Entities.Count}");
+            return snapshot;
+        }
+        catch (Exception ex)
+        {
+            LogDebug($"inspect-model-failure type={ex.GetType().Name} message={ex.Message}");
+            throw;
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -99,14 +115,22 @@ public sealed class QueryLensEngine : IQueryLensEngine
 
     private object CreateDbContextForInspection(Type dbContextType, ProjectAssemblyContext alcCtx)
     {
-        // Priority 1: IDesignTimeDbContextFactory<T> — mirrors EF Core tooling.
-        // For model inspection the DbContext may come from any ALC (we don't need
-        // Roslyn compatibility here), so search both the user ALC and default ALC.
-        var fromFactory = DesignTimeDbContextFactory.TryCreate(
+        // For model inspection we keep EF design-time factory as the primary path
+        // (stable parity with EF tooling) and support QueryLens factory as fallback.
+        // Search across both user ALC and default ALC.
+        var allAssemblies = alcCtx.LoadedAssemblies.Concat(AssemblyLoadContext.Default.Assemblies);
+
+        var fromDesignTimeFactory = DesignTimeDbContextFactory.TryCreate(
             dbContextType,
-            alcCtx.LoadedAssemblies.Concat(AssemblyLoadContext.Default.Assemblies));
-        if (fromFactory is not null)
-            return fromFactory;
+            allAssemblies);
+        if (fromDesignTimeFactory is not null)
+            return fromDesignTimeFactory;
+
+        var fromQueryLensFactory = DesignTimeDbContextFactory.TryCreateQueryLensFactory(
+            dbContextType,
+            allAssemblies);
+        if (fromQueryLensFactory is not null)
+            return fromQueryLensFactory;
 
         throw new InvalidOperationException(
             $"Could not create an instance of '{dbContextType.FullName}' for model inspection. " +
@@ -117,6 +141,13 @@ public sealed class QueryLensEngine : IQueryLensEngine
 
     private static ModelSnapshot BuildModelSnapshot(object dbInstance, Type dbContextType)
     {
+        var dbSetProperties = dbContextType
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(IsDbSetProperty)
+            .Select(p => p.Name)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
         var modelProp = dbContextType.GetProperty("Model",
             BindingFlags.Public | BindingFlags.Instance)
             ?? throw new InvalidOperationException(
@@ -132,7 +163,11 @@ public sealed class QueryLensEngine : IQueryLensEngine
                 .FirstOrDefault(m => m.Name == "GetEntityTypes");
 
         if (getEntityTypes is null)
-            return new ModelSnapshot { DbContextType = dbContextType.FullName! };
+            return new ModelSnapshot
+            {
+                DbContextType = dbContextType.FullName!,
+                DbSetProperties = dbSetProperties,
+            };
 
         var entityTypes = (System.Collections.IEnumerable)getEntityTypes.Invoke(model, null)!;
 
@@ -143,8 +178,51 @@ public sealed class QueryLensEngine : IQueryLensEngine
         return new ModelSnapshot
         {
             DbContextType = dbContextType.FullName!,
+            DbSetProperties = dbSetProperties,
             Entities = entities,
         };
+    }
+
+    private static bool IsDbSetProperty(PropertyInfo property)
+    {
+        var propertyType = property.PropertyType;
+        if (!propertyType.IsGenericType)
+        {
+            return false;
+        }
+
+        var genericTypeDefinition = propertyType.GetGenericTypeDefinition();
+        return string.Equals(genericTypeDefinition.FullName,
+            "Microsoft.EntityFrameworkCore.DbSet`1",
+            StringComparison.Ordinal);
+    }
+
+    private static bool ReadBoolEnvironmentVariable(string variableName, bool fallback)
+    {
+        var raw = Environment.GetEnvironmentVariable(variableName);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return fallback;
+        }
+
+        if (bool.TryParse(raw, out var parsed))
+        {
+            return parsed;
+        }
+
+        return raw.Equals("1", StringComparison.OrdinalIgnoreCase)
+               || raw.Equals("yes", StringComparison.OrdinalIgnoreCase)
+               || raw.Equals("on", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void LogDebug(string message)
+    {
+        if (!_debugEnabled)
+        {
+            return;
+        }
+
+        Console.Error.WriteLine($"[QL-Engine] {message}");
     }
 
     private static EntitySnapshot MapEntity(object entityType)

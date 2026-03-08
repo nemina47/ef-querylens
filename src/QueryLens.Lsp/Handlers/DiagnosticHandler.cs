@@ -34,6 +34,7 @@ internal sealed class DiagnosticHandler : TextDocumentSyncHandlerBase
         var text = request.ContentChanges.FirstOrDefault()?.Text;
         if (text != null)
         {
+            _documentManager.UpdateDocument(request.TextDocument.Uri, text);
             _ = ProcessDocumentAsync(request.TextDocument.Uri, text, cancellationToken);
         }
 
@@ -44,6 +45,7 @@ internal sealed class DiagnosticHandler : TextDocumentSyncHandlerBase
     {
         if (request.Text != null)
         {
+            _documentManager.UpdateDocument(request.TextDocument.Uri, request.Text);
             _ = ProcessDocumentAsync(request.TextDocument.Uri, request.Text, cancellationToken);
         }
 
@@ -52,6 +54,8 @@ internal sealed class DiagnosticHandler : TextDocumentSyncHandlerBase
 
     public override Task<Unit> Handle(DidCloseTextDocumentParams request, CancellationToken cancellationToken)
     {
+        _documentManager.RemoveDocument(request.TextDocument.Uri);
+
         // Clear diagnostics when a file closes
         _server.TextDocument.PublishDiagnostics(new PublishDiagnosticsParams
         {

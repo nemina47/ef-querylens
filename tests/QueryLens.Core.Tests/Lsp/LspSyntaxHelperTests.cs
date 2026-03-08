@@ -5,6 +5,65 @@ namespace QueryLens.Core.Tests.Lsp;
 public class LspSyntaxHelperTests
 {
     [Fact]
+    public void FindAllLinqChains_FindsTopLevelTerminalQueries()
+    {
+        var source = """
+            var first = await dbContext.Applications
+                .Where(a => a.ApplicationId == appId)
+                .ToListAsync(ct);
+
+            var second = await dbContext.AuditTrails
+                .OrderByDescending(x => x.CreatedAt)
+                .FirstOrDefaultAsync(ct);
+            """;
+
+        var chains = LspSyntaxHelper.FindAllLinqChains(source);
+
+        Assert.Equal(2, chains.Count);
+        var dbSets = chains.Select(c => c.DbSetMemberName).ToHashSet(StringComparer.Ordinal);
+        Assert.Contains("Applications", dbSets);
+        Assert.Contains("AuditTrails", dbSets);
+        Assert.All(chains, c => Assert.Equal("dbContext", c.ContextVariableName));
+    }
+
+    [Fact]
+    public void FindAllLinqChains_SkipsNestedQueriesInsideLambda()
+    {
+        var source = """
+            var query = await dbContext.Parents
+                .Select(p => new
+                {
+                    p.Id,
+                    Child = dbContext.Children.Where(c => c.ParentId == p.Id).FirstOrDefault()
+                })
+                .ToListAsync(ct);
+            """;
+
+        var chains = LspSyntaxHelper.FindAllLinqChains(source);
+
+        Assert.Single(chains);
+        Assert.Equal("Parents", chains[0].DbSetMemberName);
+        Assert.DoesNotContain(chains, c => c.DbSetMemberName == "Children");
+    }
+
+    [Fact]
+    public void FindAllLinqChains_FindsTopLevelNonTerminalQueryChains()
+    {
+        var source = """
+            var query = dbContext.CaseCloseHistory
+                .Where(c => c.PlusCaseId == caseId)
+                .Select(c => new { c.OfficerId, c.CreatedAt });
+            """;
+
+        var chains = LspSyntaxHelper.FindAllLinqChains(source);
+
+        Assert.Single(chains);
+        Assert.Equal("CaseCloseHistory", chains[0].DbSetMemberName);
+        Assert.Equal("dbContext", chains[0].ContextVariableName);
+        Assert.Contains("Select", chains[0].Expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TryExtractLinqExpression_UsesRootContextVariable_ForComplexChain()
     {
         var source = """

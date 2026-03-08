@@ -179,7 +179,7 @@ public class QueryLensEngineTests
     // ── InspectModelAsync ─────────────────────────────────────────────────────
 
     [Fact]
-    public async Task InspectModelAsync_ReturnsAllFiveEntities()
+    public async Task InspectModelAsync_ReturnsExpectedEntities()
     {
         await using var engine = CreateEngine();
         var snapshot = await engine.InspectModelAsync(new ModelInspectionRequest
@@ -188,7 +188,14 @@ public class QueryLensEngineTests
         });
 
         Assert.Equal("SampleApp.AppDbContext", snapshot.DbContextType);
-        Assert.Equal(5, snapshot.Entities.Count);
+        Assert.True(snapshot.Entities.Count >= 5);
+
+        var tableNames = snapshot.Entities.Select(e => e.TableName).ToHashSet(StringComparer.Ordinal);
+        Assert.Contains("Orders", tableNames);
+        Assert.Contains("Users", tableNames);
+        Assert.Contains("Products", tableNames);
+        Assert.Contains("Categories", tableNames);
+        Assert.Contains("OrderItems", tableNames);
     }
 
     [Fact]
@@ -250,6 +257,20 @@ public class QueryLensEngineTests
 
         var order = snapshot.Entities.First(e => e.TableName == "Orders");
         Assert.NotEmpty(order.Navigations);
+    }
+
+    [Fact]
+    public async Task InspectModelAsync_IncludesDbSetPropertyNames()
+    {
+        await using var engine = CreateEngine();
+        var snapshot = await engine.InspectModelAsync(new ModelInspectionRequest
+        {
+            AssemblyPath = GetSampleAppDll(),
+        });
+
+        Assert.Contains("Orders", snapshot.DbSetProperties);
+        Assert.Contains("Users", snapshot.DbSetProperties);
+        Assert.Contains("Categories", snapshot.DbSetProperties);
     }
 
     // ── ExplainAsync ──────────────────────────────────────────────────────────

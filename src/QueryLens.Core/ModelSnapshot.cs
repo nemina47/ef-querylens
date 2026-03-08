@@ -3,6 +3,7 @@ namespace QueryLens.Core;
 public sealed record ModelSnapshot
 {
     public required string DbContextType { get; init; }
+    public IReadOnlyList<string> DbSetProperties { get; init; } = [];
     public IReadOnlyList<EntitySnapshot> Entities { get; init; } = [];
 }
 

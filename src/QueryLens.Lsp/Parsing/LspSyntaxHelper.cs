@@ -12,6 +12,13 @@ public sealed record SourceUsingContext(
     IReadOnlyDictionary<string, string> Aliases,
     IReadOnlyList<string> StaticTypes);
 
+public sealed record LinqChainInfo(
+    string Expression,
+    string ContextVariableName,
+    string DbSetMemberName,
+    int Line,
+    int Character);
+
 public static class LspSyntaxHelper
 {
     private static readonly HashSet<string> TerminalMethods = new(StringComparer.OrdinalIgnoreCase)
@@ -51,6 +58,13 @@ public static class LspSyntaxHelper
     private static readonly HashSet<string> CountTerminalMethods = new(StringComparer.OrdinalIgnoreCase)
     {
         "Count", "CountAsync", "LongCount", "LongCountAsync"
+    };
+
+    private static readonly HashSet<string> QueryChainMethods = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Where", "Select", "SelectMany", "Join", "GroupBy", "OrderBy", "OrderByDescending",
+        "ThenBy", "ThenByDescending", "Skip", "Take", "Distinct", "Include", "ThenInclude",
+        "AsNoTracking", "AsTracking", "AsSplitQuery", "AsSingleQuery", "Expressionify"
     };
 
     public static string? TryExtractLinqExpression(string sourceText, int line, int character,
@@ -206,6 +220,77 @@ public static class LspSyntaxHelper
         return new SourceUsingContext(imports, aliases, staticTypes);
     }
 
+    public static IReadOnlyList<LinqChainInfo> FindAllLinqChains(string sourceText)
+    {
+        var tree = CSharpSyntaxTree.ParseText(sourceText);
+        var root = tree.GetRoot();
+
+        var results = new List<LinqChainInfo>();
+        var seenSpans = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        {
+            // Ignore nested queries inside lambda selectors/predicates. The outer query
+            // already captures the SQL that EF Core will generate.
+            if (IsInsideLambda(invocation))
+            {
+                continue;
+            }
+
+            var outermostInvocation = GetOutermostInvocationChain(invocation);
+            if (!IsLikelyQueryChain(outermostInvocation))
+            {
+                continue;
+            }
+
+            var outermostSpan = outermostInvocation.Span;
+            var outermostSpanKey = $"{outermostSpan.Start}:{outermostSpan.Length}";
+            if (!seenSpans.Add(outermostSpanKey))
+            {
+                continue;
+            }
+
+            var targetExpression = StripTerminalInvocation(outermostInvocation) ?? outermostInvocation;
+            if (targetExpression is null)
+            {
+                continue;
+            }
+
+            targetExpression = TryInlineLocalQueryRoot(targetExpression, outermostInvocation);
+            targetExpression = StripTransparentQueryableCasts(targetExpression);
+
+            var contextVariableName = TryExtractRootContextVariable(targetExpression)
+                ?? targetExpression.DescendantNodes()
+                    .OfType<IdentifierNameSyntax>()
+                    .Select(i => i.Identifier.Text)
+                    .FirstOrDefault();
+
+            if (string.IsNullOrWhiteSpace(contextVariableName))
+            {
+                continue;
+            }
+
+            if (!TryExtractFirstMemberAfterRoot(targetExpression, out var dbSetMemberName)
+                || string.IsNullOrWhiteSpace(dbSetMemberName))
+            {
+                continue;
+            }
+
+            var start = tree.GetLineSpan(targetExpression.Span).StartLinePosition;
+            results.Add(new LinqChainInfo(
+                targetExpression.ToString(),
+                contextVariableName,
+                dbSetMemberName,
+                start.Line,
+                start.Character));
+        }
+
+        return results
+            .OrderBy(r => r.Line)
+            .ThenBy(r => r.Character)
+            .ToArray();
+    }
+
     private static string? TryExtractRootContextVariable(ExpressionSyntax expression)
     {
         var current = expression;
@@ -236,6 +321,137 @@ public static class LspSyntaxHelper
 
                 default:
                     return lastMemberName;
+            }
+        }
+    }
+
+    private static bool TryGetTerminalMethodName(InvocationExpressionSyntax invocation, out string methodName)
+    {
+        methodName = string.Empty;
+
+        if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
+        {
+            return false;
+        }
+
+        methodName = memberAccess.Name.Identifier.Text;
+        return TerminalMethods.Contains(methodName);
+    }
+
+    private static bool IsInsideLambda(SyntaxNode node)
+    {
+        return node.Ancestors().Any(a =>
+            a is SimpleLambdaExpressionSyntax
+                or ParenthesizedLambdaExpressionSyntax
+                or AnonymousMethodExpressionSyntax);
+    }
+
+    private static InvocationExpressionSyntax GetOutermostInvocationChain(InvocationExpressionSyntax invocation)
+    {
+        var current = invocation;
+        while (current.Parent is MemberAccessExpressionSyntax or InvocationExpressionSyntax)
+        {
+            if (current.Parent is InvocationExpressionSyntax parentInvocation)
+            {
+                current = parentInvocation;
+                continue;
+            }
+
+            if (current.Parent is MemberAccessExpressionSyntax memberAccess
+                && memberAccess.Parent is InvocationExpressionSyntax parentCall)
+            {
+                current = parentCall;
+                continue;
+            }
+
+            break;
+        }
+
+        return current;
+    }
+
+    private static bool IsLikelyQueryChain(InvocationExpressionSyntax invocation)
+    {
+        var methodNames = invocation.DescendantNodesAndSelf()
+            .OfType<MemberAccessExpressionSyntax>()
+            .Select(ma => ma.Name.Identifier.Text)
+            .ToArray();
+
+        if (methodNames.Length == 0)
+        {
+            return false;
+        }
+
+        return methodNames.Any(name => TerminalMethods.Contains(name) || QueryChainMethods.Contains(name));
+    }
+
+    private static ExpressionSyntax? StripTerminalInvocation(InvocationExpressionSyntax invocation)
+    {
+        ExpressionSyntax targetExpression = invocation;
+
+        while (targetExpression is InvocationExpressionSyntax terminalInvocation
+               && terminalInvocation.Expression is MemberAccessExpressionSyntax terminalAccess
+               && TerminalMethods.Contains(terminalAccess.Name.Identifier.Text))
+        {
+            if (TryRewriteTerminalInvocation(
+                    terminalAccess.Expression,
+                    terminalAccess.Name.Identifier.Text,
+                    terminalInvocation.ArgumentList.Arguments,
+                    terminalInvocation,
+                    out var rewritten))
+            {
+                targetExpression = rewritten;
+                continue;
+            }
+
+            targetExpression = terminalAccess.Expression;
+        }
+
+        return targetExpression;
+    }
+
+    private static bool TryExtractFirstMemberAfterRoot(
+        ExpressionSyntax expression,
+        out string memberName)
+    {
+        memberName = string.Empty;
+        var current = expression;
+
+        while (true)
+        {
+            switch (current)
+            {
+                case InvocationExpressionSyntax invocation
+                    when invocation.Expression is MemberAccessExpressionSyntax memberAccess:
+                    if (memberAccess.Expression is IdentifierNameSyntax or ThisExpressionSyntax)
+                    {
+                        memberName = memberAccess.Name.Identifier.Text;
+                        return true;
+                    }
+
+                    current = memberAccess.Expression;
+                    continue;
+
+                case MemberAccessExpressionSyntax memberAccess:
+                    if (memberAccess.Expression is IdentifierNameSyntax or ThisExpressionSyntax)
+                    {
+                        memberName = memberAccess.Name.Identifier.Text;
+                        return true;
+                    }
+
+                    current = memberAccess.Expression;
+                    continue;
+
+                case ParenthesizedExpressionSyntax parenthesized:
+                    current = parenthesized.Expression;
+                    continue;
+
+                case CastExpressionSyntax cast:
+                    current = cast.Expression;
+                    continue;
+
+                default:
+                    return false;
             }
         }
     }
