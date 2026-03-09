@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Vsix Version="1.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+  <Identifier Id="EFQueryLens.VisualStudio">
+    <Name>EF QueryLens</Name>
+    <Author>EF QueryLens Contributors</Author>
+    <Version>0.1.0</Version>
+    <Description xml:space="preserve">EF QueryLens language integration for Visual Studio.</Description>
+  </Identifier>
+</Vsix>

@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Restore
+        run: dotnet restore EFQueryLens.slnx
+      - name: Build
+        run: dotnet build EFQueryLens.slnx --no-restore
+      - name: Test
+        run: dotnet test EFQueryLens.slnx --no-build
+      - name: Build VS Code client
+        working-directory: src/Plugins/ef-querylens-vscode
+        run: |
+          npm ci
+          npm run compile

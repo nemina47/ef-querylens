@@ -1,0 +1,8 @@
+<idea-plugin>
+    <id>dev.efquerylens.rider</id>
+    <name>EF QueryLens</name>
+    <vendor email="opensource@efquerylens.dev">EF QueryLens Contributors</vendor>
+    <description>EF QueryLens integration for Rider.</description>
+
+    <depends>com.intellij.modules.rider</depends>
+</idea-plugin>

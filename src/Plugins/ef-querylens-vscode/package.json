@@ -1,9 +1,9 @@
 {
-  "name": "querylens-vscode",
-  "displayName": "QueryLens",
+  "name": "ef-querylens-vscode",
+  "displayName": "EF QueryLens",
   "description": "SQL Analyzer and Preview for EF Core",
   "version": "1.0.0",
-  "publisher": "QueryLens",
+  "publisher": "efquerylens",
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -15,54 +15,54 @@
   "contributes": {
     "commands": [
       {
-        "command": "querylens.showSql",
-        "title": "QueryLens: Show SQL Preview"
+        "command": "efquerylens.showSql",
+        "title": "EF QueryLens: Show SQL Preview"
       },
       {
-        "command": "querylens.copySql",
-        "title": "QueryLens: Copy SQL"
+        "command": "efquerylens.copySql",
+        "title": "EF QueryLens: Copy SQL"
       },
       {
-        "command": "querylens.showSqlFromCursor",
-        "title": "QueryLens: Show SQL From Cursor"
+        "command": "efquerylens.showSqlFromCursor",
+        "title": "EF QueryLens: Show SQL From Cursor"
       },
       {
-        "command": "querylens.copySqlFromCursor",
-        "title": "QueryLens: Copy SQL From Cursor"
+        "command": "efquerylens.copySqlFromCursor",
+        "title": "EF QueryLens: Copy SQL From Cursor"
       },
       {
-        "command": "querylens.restart",
-        "title": "QueryLens: Restart Language Server"
+        "command": "efquerylens.restart",
+        "title": "EF QueryLens: Restart Language Server"
       }
     ],
     "configuration": {
-      "title": "QueryLens",
+      "title": "EF QueryLens",
       "properties": {
-        "querylens.codeLens.maxPerDocument": {
+        "efquerylens.codeLens.maxPerDocument": {
           "type": "number",
           "default": 50,
           "minimum": 1,
           "maximum": 500,
           "description": "Maximum number of query CodeLens entries to show per document."
         },
-        "querylens.codeLens.debounceMs": {
+        "efquerylens.codeLens.debounceMs": {
           "type": "number",
           "default": 250,
           "minimum": 0,
           "maximum": 5000,
           "description": "Milliseconds to reuse cached CodeLens results for unchanged document text."
         },
-        "querylens.codeLens.useModelFilter": {
+        "efquerylens.codeLens.useModelFilter": {
           "type": "boolean",
           "default": false,
           "description": "When enabled, CodeLens validates query roots against DbSet names from model inspection. Disable for maximum stability while debugging LSP crashes."
         },
-        "querylens.sql.formatOnShow": {
+        "efquerylens.sql.formatOnShow": {
           "type": "boolean",
           "default": true,
           "description": "Format SQL before showing or copying from QueryLens commands."
         },
-        "querylens.sql.dialect": {
+        "efquerylens.sql.dialect": {
           "type": "string",
           "default": "auto",
           "enum": [
@@ -73,7 +73,7 @@
           ],
           "description": "Dialect used by SQL formatter. Auto infers from SQL text."
         },
-        "querylens.debug.enableVerboseLogs": {
+        "efquerylens.debug.enableVerboseLogs": {
           "type": "boolean",
           "default": false,
           "description": "Emit verbose QueryLens client/server diagnostic logs to help isolate LSP or CodeLens issues."
