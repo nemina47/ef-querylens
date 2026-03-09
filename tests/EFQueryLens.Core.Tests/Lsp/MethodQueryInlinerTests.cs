@@ -317,17 +317,96 @@ public class MethodQueryInlinerTests
     }
 
     [Fact]
-    public void TryInlineTopLevelInvocation_SampleAppScenario_ReportsMaterializationRisk()
+    public void TryInlineTopLevelInvocation_AsyncPagedWrapperMethod_InlinesItemsQuery()
+    {
+        var workspaceRoot = CreateWorkspace();
+
+        try
+        {
+            var apiFile = Path.Combine(workspaceRoot, "Api", "OrdersEndpoint.cs");
+            var serviceFile = Path.Combine(workspaceRoot, "Core", "OrderService.cs");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(apiFile)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(serviceFile)!);
+            File.WriteAllText(Path.Combine(workspaceRoot, "Sample.sln"), "");
+
+            File.WriteAllText(serviceFile, """
+                using System;
+                using System.Linq.Expressions;
+                using System.Threading;
+                using System.Threading.Tasks;
+
+                public sealed class OrderService
+                {
+                    public async Task<PagedResult<TResult>> GetPagedOrdersAsync<TResult>(
+                        OrderQueryRequest request,
+                        Expression<Func<Order, TResult>> expression,
+                        CancellationToken ct)
+                    {
+                        var baseQuery = dbContext.Orders.Where(o => o.IsNotDeleted);
+
+                        var totalCount = await baseQuery.CountAsync(ct);
+
+                        var items = await baseQuery
+                            .OrderByDescending(o => o.CreatedUtc)
+                            .ThenByDescending(o => o.Id)
+                            .Skip((request.Page - 1) * request.PageSize)
+                            .Take(request.PageSize)
+                            .Select(expression)
+                            .ToListAsync(ct);
+
+                        return new PagedResult<TResult>(items, totalCount, request.Page, request.PageSize);
+                    }
+                }
+                """);
+
+            var endpointSource = """
+                var result = await service.GetPagedOrdersAsync(
+                    request,
+                    o => new OrderListItemResponse { OrderId = o.Id, Total = o.Total },
+                    ct);
+                """;
+            File.WriteAllText(apiFile, endpointSource);
+
+            var expression = "service.GetPagedOrdersAsync(request, o => new OrderListItemResponse { OrderId = o.Id, Total = o.Total }, ct)";
+
+            var success = MethodQueryInliner.TryInlineTopLevelInvocation(
+                endpointSource,
+                apiFile,
+                expression,
+                substituteSelectorArguments: false,
+                out var inlined,
+                out var contextVariable,
+                out var selectedMethodSourcePath,
+                out var reason);
+
+            Assert.True(success, reason);
+            Assert.Equal("dbContext", contextVariable);
+            Assert.Equal(serviceFile, selectedMethodSourcePath);
+            Assert.Contains("dbContext.Orders", inlined, StringComparison.Ordinal);
+            Assert.Contains("Skip((request.Page - 1) * request.PageSize)", inlined, StringComparison.Ordinal);
+            Assert.Contains("Select(expression)", inlined, StringComparison.Ordinal);
+            Assert.DoesNotContain("CountAsync", inlined, StringComparison.Ordinal);
+            Assert.DoesNotContain("ToListAsync", inlined, StringComparison.Ordinal);
+        }
+        finally
+        {
+            DeleteWorkspace(workspaceRoot);
+        }
+    }
+
+    [Fact]
+    public void TryInlineTopLevelInvocation_SampleMySqlAppScenario_ReportsMaterializationRisk()
     {
         var endpointFile = Path.GetFullPath(
             Path.Combine(AppContext.BaseDirectory,
                 "..", "..", "..", "..", "..",
-                "samples", "SampleApp", "QueryScenarios", "ApplicationChecklistEndpointSamples.cs"));
+                "samples", "SampleMySqlApp", "QueryScenarios", "ApplicationChecklistEndpointSamples.cs"));
 
         var serviceFile = Path.GetFullPath(
             Path.Combine(AppContext.BaseDirectory,
                 "..", "..", "..", "..", "..",
-                "samples", "SampleApp", "QueryScenarios", "ApplicationChecklistScenarioService.cs"));
+                "samples", "SampleMySqlApp", "QueryScenarios", "ApplicationChecklistScenarioService.cs"));
 
         Assert.True(File.Exists(endpointFile), $"Sample endpoint file not found: {endpointFile}");
         Assert.True(File.Exists(serviceFile), $"Sample service file not found: {serviceFile}");
@@ -354,6 +433,80 @@ public class MethodQueryInlinerTests
         Assert.True(diagnostics.SelectorArgumentSubstituted);
         Assert.True(diagnostics.SelectorArgumentSanitized);
         Assert.True(diagnostics.ContainsNestedSelectorMaterialization);
+    }
+
+    [Fact]
+    public void TryInlineTopLevelInvocation_SampleMySqlAppPagedOrdersEndpoint_InlinesInternalQuery()
+    {
+        var endpointFile = Path.GetFullPath(
+            Path.Combine(AppContext.BaseDirectory,
+                "..", "..", "..", "..", "..",
+                "samples", "SampleMySqlApp", "Program.cs"));
+
+        var serviceFile = Path.GetFullPath(
+            Path.Combine(AppContext.BaseDirectory,
+                "..", "..", "..", "..", "..",
+                "samples", "SampleMySqlApp", "Application", "Customers", "CustomerReadService.cs"));
+
+        Assert.True(File.Exists(endpointFile), $"Sample endpoint file not found: {endpointFile}");
+        Assert.True(File.Exists(serviceFile), $"Sample service file not found: {serviceFile}");
+
+        var source = File.ReadAllText(endpointFile);
+        var expression = "service.GetPagedOrdersAsync(request, o => new OrderListItemResponse { OrderId = o.Id, CustomerId = o.Customer.CustomerId, Total = o.Total, Status = o.Status, CreatedUtc = o.CreatedUtc }, ct)";
+
+        var success = MethodQueryInliner.TryInlineTopLevelInvocation(
+            source,
+            endpointFile,
+            expression,
+            substituteSelectorArguments: false,
+            out var inlined,
+            out var contextVariable,
+            out var selectedMethodSourcePath,
+            out var reason);
+
+        Assert.True(success, reason);
+        Assert.Equal("_dbContext", contextVariable);
+        Assert.Equal(serviceFile, selectedMethodSourcePath);
+        Assert.Contains("_dbContext.Orders", inlined, StringComparison.Ordinal);
+        Assert.Contains("Select(expression)", inlined, StringComparison.Ordinal);
+        Assert.DoesNotContain("service.GetPagedOrdersAsync", inlined, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryInlineTopLevelInvocation_SampleMySqlAppRecentOrdersBuilderCall_InlinesAndPreservesSelect()
+    {
+        var endpointFile = Path.GetFullPath(
+            Path.Combine(AppContext.BaseDirectory,
+                "..", "..", "..", "..", "..",
+                "samples", "SampleMySqlApp", "Program.cs"));
+
+        var queryFile = Path.GetFullPath(
+            Path.Combine(AppContext.BaseDirectory,
+                "..", "..", "..", "..", "..",
+                "samples", "SampleMySqlApp", "Application", "Orders", "OrderQueries.cs"));
+
+        Assert.True(File.Exists(endpointFile), $"Sample endpoint file not found: {endpointFile}");
+        Assert.True(File.Exists(queryFile), $"Sample query file not found: {queryFile}");
+
+        var source = File.ReadAllText(endpointFile);
+        var expression = "orderQueries.BuildRecentOrdersQuery(DateTime.UtcNow, lookbackDays).Select(o => new RecentOrderResponse { OrderId = o.OrderId, CustomerName = o.CustomerName, Total = o.Total, CreatedUtc = o.CreatedUtc })";
+
+        var success = MethodQueryInliner.TryInlineTopLevelInvocation(
+            source,
+            endpointFile,
+            expression,
+            substituteSelectorArguments: false,
+            out var inlined,
+            out var contextVariable,
+            out var selectedMethodSourcePath,
+            out var reason);
+
+        Assert.True(success, reason);
+        Assert.Equal("_db", contextVariable);
+        Assert.Equal(queryFile, selectedMethodSourcePath);
+        Assert.Contains("_db.Orders", inlined, StringComparison.Ordinal);
+        Assert.Contains("Select(o => new RecentOrderResponse", inlined, StringComparison.Ordinal);
+        Assert.DoesNotContain("BuildRecentOrdersQuery", inlined, StringComparison.Ordinal);
     }
 
     private static string CreateWorkspace()

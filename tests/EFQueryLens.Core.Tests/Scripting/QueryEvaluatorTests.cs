@@ -18,7 +18,7 @@ public class QueryEvaluatorTests : IDisposable
 
     public QueryEvaluatorTests()
     {
-        _alcCtx    = new ProjectAssemblyContext(GetSampleAppDll());
+        _alcCtx    = new ProjectAssemblyContext(GetSampleMySqlAppDll());
         _evaluator = new QueryEvaluator();
     }
 
@@ -26,14 +26,14 @@ public class QueryEvaluatorTests : IDisposable
 
     // ─── Helper ───────────────────────────────────────────────────────────────
 
-    private static string GetSampleAppDll()
+    private static string GetSampleMySqlAppDll()
     {
         var dir = Path.GetDirectoryName(typeof(QueryEvaluatorTests).Assembly.Location)!;
-        var dll = ResolveSampleDll(dir, "SampleApp", "SampleApp.dll");
+        var dll = ResolveSampleDll(dir, "SampleMySqlApp", "SampleMySqlApp.dll");
 
         if (!File.Exists(dll))
             throw new FileNotFoundException(
-                $"SampleApp.dll not found in test output dir. Expected: {dll}");
+                $"SampleMySqlApp.dll not found in test output dir. Expected: {dll}");
 
         return dll;
     }
@@ -103,7 +103,7 @@ public class QueryEvaluatorTests : IDisposable
             {
                 AssemblyPath = sqlAlcCtx.AssemblyPath,
                 Expression = "db.Customers",
-                DbContextTypeName = "SampleSqlServerApp.SqlServerAppDbContext",
+                DbContextTypeName = "SampleSqlServerApp.Infrastructure.Persistence.SqlServerAppDbContext",
             });
 
         Assert.True(result.Success, result.ErrorMessage);
@@ -135,7 +135,7 @@ public class QueryEvaluatorTests : IDisposable
     [Fact]
     public async Task Evaluate_ExplicitDbContextName_Resolves()
     {
-        var result = await TranslateAsync("db.Users", dbContextTypeName: "AppDbContext");
+        var result = await TranslateAsync("db.Users", dbContextTypeName: "MySqlAppDbContext");
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.NotNull(result.Sql);
@@ -145,7 +145,7 @@ public class QueryEvaluatorTests : IDisposable
     [Fact]
     public async Task Evaluate_FullyQualifiedDbContextName_Resolves()
     {
-        var result = await TranslateAsync("db.Users", dbContextTypeName: "SampleApp.AppDbContext");
+        var result = await TranslateAsync("db.Users", dbContextTypeName: "SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext");
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.NotNull(result.Sql);
@@ -190,7 +190,7 @@ public class QueryEvaluatorTests : IDisposable
         var result = await TranslateAsync("db.Orders");
 
         Assert.True(result.Success, result.ErrorMessage);
-        Assert.Equal("SampleApp.AppDbContext", result.Metadata.DbContextType);
+        Assert.Equal("SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext", result.Metadata.DbContextType);
     }
 
     [Fact]
@@ -283,6 +283,34 @@ public class QueryEvaluatorTests : IDisposable
     }
 
     [Fact]
+    public async Task Evaluate_MissingStringTerm_InContainsStartsWith_IsSynthesizedAsString()
+    {
+        var result = await TranslateAsync(
+            "db.Customers.Where(c => c.Name.ToLower().Contains(term) || c.Email.ToLower().StartsWith(term))");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.DoesNotContain(
+            "cannot convert from 'object' to 'string'",
+            result.ErrorMessage ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Evaluate_MissingMinOrders_InCountComparison_IsSynthesizedAsNumeric()
+    {
+        var result = await TranslateAsync(
+            "db.Customers.Where(c => c.Orders.Count(o => o.IsNotDeleted) >= minOrders)");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.DoesNotContain(
+            "Operator '>=' cannot be applied to operands of type 'int' and 'object'",
+            result.ErrorMessage ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Evaluate_RootWrapperContextHop_IsNormalizedFromCompilerDiagnostics()
     {
         var result = await TranslateAsync("services.Context.Orders.Select(o => o.Id)");
@@ -315,7 +343,7 @@ public class QueryEvaluatorTests : IDisposable
             expression: "db.Orders.ApplyFilteringAndOrdering(query, gm)");
 
         Assert.Equal(
-            "global::Gridify.IGridifyMapper<SampleApp.Entities.Order>? gm = null;",
+            "global::Gridify.IGridifyMapper<SampleMySqlApp.Domain.Entities.Order>? gm = null;",
             stub);
     }
 
@@ -341,6 +369,26 @@ public class QueryEvaluatorTests : IDisposable
         Assert.Equal(
             "var pastPlanningPlusCase = new { CaseType = (System.DayOfWeek)1 };",
             stub);
+    }
+
+    [Fact]
+    public void BuildStubDeclaration_StringMethodArgument_UsesStringStub()
+    {
+        var stub = BuildStubDeclarationForTest(
+            missingName: "term",
+            expression: "db.Customers.Where(c => c.Name.ToLower().Contains(term) || c.Email.ToLower().StartsWith(term))");
+
+        Assert.Equal("string term = \"__ql_stub_0\";", stub);
+    }
+
+    [Fact]
+    public void BuildStubDeclaration_CountComparisonVariable_UsesNumericStub()
+    {
+        var stub = BuildStubDeclarationForTest(
+            missingName: "minOrders",
+            expression: "db.Customers.Where(c => c.Orders.Count(o => o.IsNotDeleted) >= minOrders)");
+
+        Assert.Equal("int minOrders = 1;", stub);
     }
 
     [Fact]

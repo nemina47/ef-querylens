@@ -11,11 +11,13 @@ public sealed class OrderQueries
         _db = db;
     }
 
-    public IQueryable<OrderSummaryDto> BuildRecentOrdersQuery(DateTime utcNow)
+    public IQueryable<OrderSummaryDto> BuildRecentOrdersQuery(DateTime utcNow, int lookbackDays = 30)
     {
-        var fromUtc = utcNow.Date.AddDays(-30);
+        var safeLookbackDays = Math.Clamp(lookbackDays, 1, 365);
+        var fromUtc = utcNow.Date.AddDays(-safeLookbackDays);
 
         return _db.Orders
+            .Where(o => o.IsNotDeleted)
             .Where(o => o.CreatedUtc >= fromUtc)
             .OrderByDescending(o => o.CreatedUtc)
             .Select(o => new OrderSummaryDto(

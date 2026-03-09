@@ -22,6 +22,7 @@ public sealed class CustomerReadService
     {
         return await _dbContext
             .Customers
+            .Where(c => c.IsNotDeleted)
             .Where(c => c.CustomerId == customerId)
             .Select(expression)
             .SingleOrDefaultAsync(ct);
@@ -33,6 +34,7 @@ public sealed class CustomerReadService
     {
         return _dbContext
             .Customers
+            .Where(c => c.IsNotDeleted)
             .Where(c => c.CustomerId == customerId)
             .Select(expression);
     }
@@ -42,7 +44,12 @@ public sealed class CustomerReadService
         Expression<Func<Customer, TResult>> expression,
         CancellationToken ct)
     {
-        var query = _dbContext.Customers.AsQueryable();
+        var page = Math.Max(request.Page, 1);
+        var pageSize = Math.Clamp(request.PageSize, 1, 200);
+
+        var query = _dbContext.Customers
+            .Where(c => c.IsNotDeleted)
+            .AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(request.SearchTerm))
         {
@@ -68,17 +75,28 @@ public sealed class CustomerReadService
         if (request.MinOrders is not null)
         {
             var minOrders = request.MinOrders.Value;
-            query = query.Where(c => c.Orders.Count(o => !o.IsDeleted) >= minOrders);
+            query = query.Where(c => c.Orders.Count(o => o.IsNotDeleted) >= minOrders);
         }
 
-        return await query.Select(expression).ToListAsync(ct);
+        return await query
+            .OrderByDescending(c => c.CreatedUtc)
+            .ThenBy(c => c.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(expression)
+            .ToListAsync(ct);
     }
 
     public IQueryable<TResult> GetCustomersQuery<TResult>(
         CustomerQueryRequest request,
         Expression<Func<Customer, TResult>> expression)
     {
-        var query = _dbContext.Customers.AsQueryable();
+        var page = Math.Max(request.Page, 1);
+        var pageSize = Math.Clamp(request.PageSize, 1, 200);
+
+        var query = _dbContext.Customers
+            .Where(c => c.IsNotDeleted)
+            .AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(request.SearchTerm))
         {
@@ -104,10 +122,15 @@ public sealed class CustomerReadService
         if (request.MinOrders is not null)
         {
             var minOrders = request.MinOrders.Value;
-            query = query.Where(c => c.Orders.Count(o => !o.IsDeleted) >= minOrders);
+            query = query.Where(c => c.Orders.Count(o => o.IsNotDeleted) >= minOrders);
         }
 
-        return query.Select(expression);
+        return query
+            .OrderByDescending(c => c.CreatedUtc)
+            .ThenBy(c => c.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(expression);
     }
 
     public async Task<IReadOnlyList<TResult>> GetCustomerOrdersAsync<TResult>(
@@ -119,6 +142,7 @@ public sealed class CustomerReadService
         return await _dbContext
             .Orders
             .Where(o => o.Customer.CustomerId == customerId)
+            .Where(o => o.IsNotDeleted)
             .Where(whereExpression)
             .Select(selectExpression)
             .ToListAsync(ct);
@@ -132,6 +156,7 @@ public sealed class CustomerReadService
         return _dbContext
             .Orders
             .Where(o => o.Customer.CustomerId == customerId)
+            .Where(o => o.IsNotDeleted)
             .Where(whereExpression)
             .Select(selectExpression);
     }
@@ -144,7 +169,7 @@ public sealed class CustomerReadService
         var page = Math.Max(request.Page, 1);
         var pageSize = Math.Clamp(request.PageSize, 1, 200);
 
-        var baseQuery = _dbContext.Orders.Where(o => !o.IsDeleted);
+        var baseQuery = _dbContext.Orders.Where(o => o.IsNotDeleted);
 
         if (request.CustomerId is not null)
         {
@@ -196,7 +221,7 @@ public sealed class CustomerReadService
         var page = Math.Max(request.Page, 1);
         var pageSize = Math.Clamp(request.PageSize, 1, 200);
 
-        var query = _dbContext.Orders.Where(o => !o.IsDeleted);
+        var query = _dbContext.Orders.Where(o => o.IsNotDeleted);
 
         if (request.CustomerId is not null)
         {
@@ -245,7 +270,7 @@ public sealed class CustomerReadService
                 c.Name,
                 c.Email,
                 c.IsActive,
-                c.Orders.Count(o => !o.IsDeleted)));
+                c.Orders.Count(o => o.IsNotDeleted)));
 
         var customersSearch = GetCustomersQuery(
             new CustomerQueryRequest
@@ -258,7 +283,7 @@ public sealed class CustomerReadService
 
         var customerOrders = GetCustomerOrdersQuery(
             customerId,
-            o => !o.IsDeleted && o.Total >= 100 && o.Status != OrderStatus.Cancelled,
+            o => o.Total >= 100 && o.Status != OrderStatus.Cancelled,
             o => new OrderListItemDto(o.Id, o.Customer.CustomerId, o.Total, o.Status, o.CreatedUtc));
 
         var pagedOrders = GetPagedOrdersQuery(
@@ -276,6 +301,17 @@ public sealed class CustomerReadService
 
         var revenue = GetRevenueByCustomerQuery(utcNow.Date.AddDays(-30));
         var activeHighValueCustomers = GetCustomersWithRecentOrderQuery(utcNow.Date.AddDays(-14), 200);
+        var customersWithRecentOrdersSplit = _dbContext.Customers
+            .Where(c => c.IsNotDeleted)
+            .Include(c => c.Orders.Where(o => o.IsNotDeleted && o.CreatedUtc >= utcNow.Date.AddDays(-30)))
+            .OrderByDescending(c => c.CreatedUtc)
+            .Take(10);
+
+        var customersWithHighValueOrdersSplit = _dbContext.Customers
+            .Where(c => c.IsNotDeleted)
+            .Include(c => c.Orders.Where(o => o.IsNotDeleted && o.Total >= 150))
+            .OrderBy(c => c.Id)
+            .Take(10);
 
         return
         [
@@ -284,14 +320,16 @@ public sealed class CustomerReadService
             ("GetCustomerOrdersAsync<TResult> (expression where/select)", customerOrders),
             ("GetPagedOrdersAsync<TResult>", pagedOrders),
             ("Revenue aggregation", revenue),
-            ("Correlated subquery (Any + Average)", activeHighValueCustomers)
+            ("Correlated subquery (Any + Average)", activeHighValueCustomers),
+            ("Split query trigger (Customers + recent Orders include)", customersWithRecentOrdersSplit),
+            ("Split query trigger (Customers + high-value Orders include)", customersWithHighValueOrdersSplit)
         ];
     }
 
     public IQueryable<CustomerRevenueDto> GetRevenueByCustomerQuery(DateTime fromUtc)
     {
         return _dbContext.Orders
-            .Where(o => !o.IsDeleted && o.CreatedUtc >= fromUtc)
+            .Where(o => o.IsNotDeleted && o.CreatedUtc >= fromUtc)
             .GroupBy(o => new { o.Customer.CustomerId, o.Customer.Name })
             .Select(g => new CustomerRevenueDto(
                 g.Key.CustomerId,
@@ -304,11 +342,12 @@ public sealed class CustomerReadService
     public IQueryable<CustomerHealthDto> GetCustomersWithRecentOrderQuery(DateTime fromUtc, decimal minTotal)
     {
         return _dbContext.Customers
-            .Where(c => c.Orders.Any(o => !o.IsDeleted && o.CreatedUtc >= fromUtc && o.Total >= minTotal))
+            .Where(c => c.IsNotDeleted)
+            .Where(c => c.Orders.Any(o => o.IsNotDeleted && o.CreatedUtc >= fromUtc && o.Total >= minTotal))
             .Select(c => new CustomerHealthDto(
                 c.CustomerId,
                 c.Name,
-                c.Orders.Count(o => !o.IsDeleted),
+                c.Orders.Count(o => o.IsNotDeleted),
                 c.Orders.Average(o => (decimal?)o.Total) ?? 0));
     }
 
@@ -318,6 +357,8 @@ public sealed class CustomerReadService
         public bool? IsActive { get; init; }
         public DateTime? CreatedAfterUtc { get; init; }
         public int? MinOrders { get; init; }
+        public int Page { get; init; } = 1;
+        public int PageSize { get; init; } = 25;
     }
 
     public sealed class OrderQueryRequest

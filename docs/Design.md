@@ -890,7 +890,7 @@ Communicates with the engine over a local named pipe / Unix socket. The analyzer
 
 
 
-`/samples/SampleApp` is the dogfood project used for integration tests throughout development. It should have realistic entities:
+`/samples/SampleMySqlApp` is the dogfood project used for integration tests throughout development. It should have realistic entities:
 
 
 

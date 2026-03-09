@@ -1,4 +1,4 @@
-namespace SampleApp.QueryScenarios;
+namespace SampleMySqlApp.QueryScenarios;
 
 public static class ApplicationChecklistEndpointSamples
 {

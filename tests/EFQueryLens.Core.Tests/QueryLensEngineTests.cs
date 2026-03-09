@@ -3,26 +3,26 @@ namespace EFQueryLens.Core.Tests;
 /// <summary>
 /// Tests for <see cref="QueryLensEngine"/> — the top-level orchestrator.
 ///
-/// SampleApp.dll is copied into an isolated SampleApp subfolder in the test
+/// SampleMySqlApp.dll is copied into an isolated SampleMySqlApp subfolder in the test
 /// output directory by EFQueryLens.Core.Tests.csproj, so the assembly is available at runtime
-/// via <see cref="GetSampleAppDll"/>.
+/// via <see cref="GetSampleMySqlAppDll"/>.
 /// </summary>
 [Collection("AssemblyLoadContextIsolation")]
 public class QueryLensEngineTests
 {
-    private static string GetSampleAppDll()
+    private static string GetSampleMySqlAppDll()
     {
         var dir = Path.GetDirectoryName(typeof(QueryLensEngineTests).Assembly.Location)!;
-        var dll = ResolveSampleDll(dir, "SampleApp.dll");
+        var dll = ResolveSampleDll(dir, "SampleMySqlApp.dll");
         if (!File.Exists(dll))
             throw new FileNotFoundException(
-                $"SampleApp.dll not found in test output dir. Expected: {dll}");
+                $"SampleMySqlApp.dll not found in test output dir. Expected: {dll}");
         return dll;
     }
 
     private static string ResolveSampleDll(string testOutputDir, string dllName)
     {
-        var isolated = Path.Combine(testOutputDir, "SampleApp", dllName);
+        var isolated = Path.Combine(testOutputDir, "SampleMySqlApp", dllName);
         if (File.Exists(isolated))
             return isolated;
 
@@ -76,7 +76,7 @@ public class QueryLensEngineTests
         await using var engine = CreateEngine();
         var result = await engine.TranslateAsync(new TranslationRequest
         {
-            AssemblyPath = GetSampleAppDll(),
+            AssemblyPath = GetSampleMySqlAppDll(),
             Expression   = "db.Orders",
         });
 
@@ -91,7 +91,7 @@ public class QueryLensEngineTests
         await using var engine = CreateEngine();
         var result = await engine.TranslateAsync(new TranslationRequest
         {
-            AssemblyPath = GetSampleAppDll(),
+            AssemblyPath = GetSampleMySqlAppDll(),
             Expression   = "db.Orders.Where(o => o.UserId == 5)",
         });
 
@@ -105,7 +105,7 @@ public class QueryLensEngineTests
         await using var engine = CreateEngine();
         var result = await engine.TranslateAsync(new TranslationRequest
         {
-            AssemblyPath = GetSampleAppDll(),
+            AssemblyPath = GetSampleMySqlAppDll(),
             Expression   = "db.Orders.Where(o => o.UserId == 5).Include(o => o.Items)",
         });
 
@@ -120,7 +120,7 @@ public class QueryLensEngineTests
         await using var engine = CreateEngine();
         var result = await engine.TranslateAsync(new TranslationRequest
         {
-            AssemblyPath = GetSampleAppDll(),
+            AssemblyPath = GetSampleMySqlAppDll(),
             Expression   = "db.Orders.Include(o => o.Items).ThenInclude(i => i.Product)",
         });
 
@@ -134,7 +134,7 @@ public class QueryLensEngineTests
         await using var engine = CreateEngine();
         var result = await engine.TranslateAsync(new TranslationRequest
         {
-            AssemblyPath = GetSampleAppDll(),
+            AssemblyPath = GetSampleMySqlAppDll(),
             Expression   = "db.Users.Select(u => new { u.Id, u.Email })",
         });
 
@@ -148,7 +148,7 @@ public class QueryLensEngineTests
         await using var engine = CreateEngine();
         var result = await engine.TranslateAsync(new TranslationRequest
         {
-            AssemblyPath = GetSampleAppDll(),
+            AssemblyPath = GetSampleMySqlAppDll(),
             Expression   = "db.NonExistentTable.Where(x => x.Foo == 1)",
         });
 
@@ -162,7 +162,7 @@ public class QueryLensEngineTests
         await using var engine = CreateEngine();
         var result = await engine.TranslateAsync(new TranslationRequest
         {
-            AssemblyPath = GetSampleAppDll(),
+            AssemblyPath = GetSampleMySqlAppDll(),
             Expression   = "42",
         });
 
@@ -173,7 +173,7 @@ public class QueryLensEngineTests
     public async Task TranslateAsync_SecondCall_UsesWarmCache_IsFaster()
     {
         await using var engine = CreateEngine();
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
 
         var r1 = await engine.TranslateAsync(new TranslationRequest
         {
@@ -201,12 +201,12 @@ public class QueryLensEngineTests
         await using var engine = CreateEngine();
         var result = await engine.TranslateAsync(new TranslationRequest
         {
-            AssemblyPath = GetSampleAppDll(),
+            AssemblyPath = GetSampleMySqlAppDll(),
             Expression   = "db.Categories",
         });
 
         Assert.True(result.Success, result.ErrorMessage);
-        Assert.Equal("SampleApp.AppDbContext", result.Metadata.DbContextType);
+        Assert.Equal("SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext", result.Metadata.DbContextType);
         Assert.Equal("Pomelo.EntityFrameworkCore.MySql", result.Metadata.ProviderName);
         Assert.NotEmpty(result.Metadata.EfCoreVersion);
         Assert.NotEqual("unknown", result.Metadata.EfCoreVersion);
@@ -218,9 +218,9 @@ public class QueryLensEngineTests
     public async Task InspectModelAsync_ReturnsExpectedEntities()
     {
         await using var engine = CreateEngine();
-        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleAppDll());
+        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleMySqlAppDll());
 
-        Assert.Equal("SampleApp.AppDbContext", snapshot.DbContextType);
+        Assert.Equal("SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext", snapshot.DbContextType);
         Assert.True(snapshot.Entities.Count >= 5);
 
         var tableNames = snapshot.Entities.Select(e => e.TableName).ToHashSet(StringComparer.Ordinal);
@@ -235,7 +235,7 @@ public class QueryLensEngineTests
     public async Task InspectModelAsync_ContainsExpectedTableNames()
     {
         await using var engine = CreateEngine();
-        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleAppDll());
+        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleMySqlAppDll());
 
         var names = snapshot.Entities.Select(e => e.TableName).ToList();
         Assert.Contains("Orders", names);
@@ -247,7 +247,7 @@ public class QueryLensEngineTests
     public async Task InspectModelAsync_OrderEntity_HasExpectedProperties()
     {
         await using var engine = CreateEngine();
-        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleAppDll());
+        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleMySqlAppDll());
 
         var order = snapshot.Entities.FirstOrDefault(e => e.TableName == "Orders");
         Assert.NotNull(order);
@@ -262,7 +262,7 @@ public class QueryLensEngineTests
     public async Task InspectModelAsync_OrderEntity_IdIsKey()
     {
         await using var engine = CreateEngine();
-        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleAppDll());
+        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleMySqlAppDll());
 
         var order = snapshot.Entities.First(e => e.TableName == "Orders");
         var id    = order.Properties.FirstOrDefault(p => p.Name == "Id");
@@ -274,7 +274,7 @@ public class QueryLensEngineTests
     public async Task InspectModelAsync_OrderEntity_HasNavigations()
     {
         await using var engine = CreateEngine();
-        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleAppDll());
+        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleMySqlAppDll());
 
         var order = snapshot.Entities.First(e => e.TableName == "Orders");
         Assert.NotEmpty(order.Navigations);
@@ -284,7 +284,7 @@ public class QueryLensEngineTests
     public async Task InspectModelAsync_IncludesDbSetPropertyNames()
     {
         await using var engine = CreateEngine();
-        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleAppDll());
+        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleMySqlAppDll());
 
         Assert.Contains("Orders", snapshot.DbSetProperties);
         Assert.Contains("Users", snapshot.DbSetProperties);
@@ -300,7 +300,7 @@ public class QueryLensEngineTests
         await Assert.ThrowsAsync<NotImplementedException>(() =>
             engine.ExplainAsync(new ExplainRequest
             {
-                AssemblyPath     = GetSampleAppDll(),
+                AssemblyPath     = GetSampleMySqlAppDll(),
                 Expression       = "db.Orders",
                 ConnectionString = "Server=localhost",
             }));

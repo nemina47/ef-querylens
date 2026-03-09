@@ -142,19 +142,8 @@ internal sealed class CodeLensHandler : CodeLensHandlerBase
                     Command = new Command
                     {
                         Name = "efquerylens.showSql",
-                        Title = $"QueryLens · {chain.DbSetMemberName}",
+                        Title = "SQL Preview",
                         Arguments = arguments,
-                    }
-                });
-
-                lenses.Add(new CodeLens
-                {
-                    Range = range,
-                    Command = new Command
-                    {
-                        Name = "efquerylens.copySql",
-                        Title = "Copy SQL",
-                        Arguments = arguments.DeepClone() as JArray ?? arguments,
                     }
                 });
             }

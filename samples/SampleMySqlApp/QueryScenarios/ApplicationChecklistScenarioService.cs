@@ -1,10 +1,11 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
-using SampleApp.Entities;
+using SampleMySqlApp.Domain.Entities;
+using SampleMySqlApp.Infrastructure.Persistence;
 
-namespace SampleApp.QueryScenarios;
+namespace SampleMySqlApp.QueryScenarios;
 
-public sealed class ApplicationChecklistScenarioService(AppDbContext dbContext)
+public sealed class ApplicationChecklistScenarioService(MySqlAppDbContext dbContext)
 {
     public Task<TResult?> GetChecklistByApplicationIdAsync<TResult>(
         Guid applicationId,

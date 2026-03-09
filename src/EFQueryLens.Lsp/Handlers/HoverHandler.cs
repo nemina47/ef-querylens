@@ -1,6 +1,8 @@
 using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Text;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using OmniSharp.Extensions.LanguageServer.Protocol.Client.Capabilities;
 using OmniSharp.Extensions.LanguageServer.Protocol.Document;
 using OmniSharp.Extensions.LanguageServer.Protocol.Models;
@@ -48,6 +50,7 @@ internal sealed class HoverHandler : HoverHandlerBase
         string? conservativeExpression = null;
         string? conservativeContextVariableName = null;
         var inlineMode = InlineMode.Direct;
+        var topLevelInliningSucceeded = false;
         var optimisticInlineDiagnostics = new MethodQueryInliner.InlineSelectorDiagnostics();
         var conservativeInlineDiagnostics = new MethodQueryInliner.InlineSelectorDiagnostics();
         var inlineContainsNestedSelectorMaterialization = false;
@@ -76,6 +79,7 @@ internal sealed class HoverHandler : HoverHandlerBase
                 out optimisticInlineDiagnostics,
                 out _))
         {
+            topLevelInliningSucceeded = true;
             expression = inlinedExpression;
             inlineMode = InlineMode.Optimistic;
             inlineContainsNestedSelectorMaterialization =
@@ -126,6 +130,20 @@ internal sealed class HoverHandler : HoverHandlerBase
             {
                 contextVariableName = conservativeOnlyInlinedContextVariable;
             }
+        }
+
+        // Suppress QueryLens hover output for non-query expressions.
+        // Top-level service calls that can be inlined are still supported because
+        // the inlined expression is checked here.
+        if (!topLevelInliningSucceeded
+            && !LspSyntaxHelper.IsLikelyDbContextRootIdentifier(contextVariableName))
+        {
+            return null;
+        }
+
+        if (!LspSyntaxHelper.IsLikelyQueryPreviewCandidate(expression))
+        {
+            return null;
         }
 
         TryMergeUsingContextFromFile(
@@ -341,9 +359,9 @@ internal sealed class HoverHandler : HoverHandlerBase
         };
         var modeDescription = mode switch
         {
-            InlineMode.Optimistic => "Inlines top-level helper methods and substitutes selector arguments for a best-effort full query shape.",
-            InlineMode.Conservative => "Inlines helper methods conservatively without selector argument substitution to reduce rewrite risk.",
-            _ => "Translates the query exactly from the hovered chain without method inlining."
+            InlineMode.Optimistic => "Best-effort inline translation with selector substitution.",
+            InlineMode.Conservative => "Safer inline translation without selector substitution.",
+            _ => "Direct translation of the hovered query chain."
         };
 
         string sqlBlock;
@@ -364,10 +382,14 @@ internal sealed class HoverHandler : HoverHandlerBase
 
         var statementWord = commands.Count == 1 ? "query" : "queries";
 
-        var warningLines = warnings
+        var warningNotes = warnings
             .Select(w => string.IsNullOrWhiteSpace(w.Suggestion)
-                ? $"- `{w.Code}`: {w.Message}"
-                : $"- `{w.Code}`: {w.Message} ({w.Suggestion})")
+                ? $"{w.Code}: {w.Message}"
+                : $"{w.Code}: {w.Message} ({w.Suggestion})")
+            .ToList();
+
+        var warningLines = warningNotes
+            .Select(note => $"- {note}")
             .ToList();
 
         var usedToQueryStringFallback = warnings.Any(w =>
@@ -379,15 +401,17 @@ internal sealed class HoverHandler : HoverHandlerBase
 
         if (usedToQueryStringFallback && containsSplitQueryNotice)
         {
-            warningLines.Add("- `QL_SPLIT_QUERY_PARTIAL`: Only the first split-query SQL statement is shown because execution capture was unavailable.");
+            var splitQueryPartialNote = "QL_SPLIT_QUERY_PARTIAL: Only the first split-query SQL statement is shown because execution capture was unavailable.";
+            warningNotes.Add(splitQueryPartialNote);
+            warningLines.Add($"- {splitQueryPartialNote}");
         }
 
         if (warningLines.Count == 0)
         {
-            return $"**QueryLens · {commands.Count} {statementWord}**{tablesSummary}\n*mode: {modeLabel}* - {modeDescription}\n{BuildHoverActions(documentUri, line, character, sourceExpression, executedExpression, modeLabel, modeDescription)}\n\n```sql\n{sqlBlock}\n```";
+            return $"**QueryLens · {commands.Count} {statementWord}**{tablesSummary}\n*LINQ-to-SQL strategy: {modeLabel}* - {modeDescription}\n{BuildHoverActions(documentUri, line, character, sourceExpression, executedExpression, modeLabel, modeDescription, warningNotes)}\n\n```sql\n{sqlBlock}\n```";
         }
 
-        return $"**QueryLens · {commands.Count} {statementWord}**{tablesSummary}\n*mode: {modeLabel}* - {modeDescription}\n{BuildHoverActions(documentUri, line, character, sourceExpression, executedExpression, modeLabel, modeDescription)}\n\n```sql\n{sqlBlock}\n```\n\n**Notes**\n{string.Join("\n", warningLines)}";
+        return $"**QueryLens · {commands.Count} {statementWord}**{tablesSummary}\n*LINQ-to-SQL strategy: {modeLabel}* - {modeDescription}\n{BuildHoverActions(documentUri, line, character, sourceExpression, executedExpression, modeLabel, modeDescription, warningNotes)}\n\n```sql\n{sqlBlock}\n```\n\n**Notes**\n{string.Join("\n", warningLines)}";
     }
 
     private static string BuildHoverActions(
@@ -397,27 +421,49 @@ internal sealed class HoverHandler : HoverHandlerBase
         string sourceExpression,
         string executedExpression,
         string modeLabel,
-        string modeDescription)
+        string modeDescription,
+        IReadOnlyList<string>? warningNotes = null)
     {
         var encodedArgs = Uri.EscapeDataString(JsonSerializer.Serialize(new object[] { uri, line, character }));
         var copyCommandUri = $"command:efquerylens.copySql?{encodedArgs}";
-        var showCommandUri = $"command:efquerylens.showSql?{encodedArgs}";
-        var metadataPayload = BuildHoverMetadataPayload(sourceExpression, executedExpression, modeLabel, modeDescription);
-        return $"[Copy SQL]({copyCommandUri}) | [Open SQL Editor]({showCommandUri})\n<!--QUERYLENS_META:{metadataPayload}-->";
+        var openEditorCommandUri = $"command:efquerylens.openSqlEditor?{encodedArgs}";
+        var metadataPayload = BuildHoverMetadataPayload(sourceExpression, executedExpression, modeLabel, modeDescription, warningNotes);
+        return $"[Copy SQL]({copyCommandUri}) | [Open SQL Editor]({openEditorCommandUri})\n<!--QUERYLENS_META:{metadataPayload}-->";
     }
 
     private static string BuildHoverMetadataPayload(
         string sourceExpression,
         string executedExpression,
         string modeLabel,
-        string modeDescription)
+        string modeDescription,
+        IReadOnlyList<string>? warningNotes = null)
     {
+        var formattedExecutedExpression = FormatLinqExpression(executedExpression);
         var json = JsonSerializer.Serialize(new HoverActionMetadata(
             sourceExpression,
-            executedExpression,
+            formattedExecutedExpression,
             modeLabel,
-            modeDescription));
+            modeDescription,
+            (warningNotes ?? []).ToArray()));
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+    }
+
+    private static string FormatLinqExpression(string expression)
+    {
+        if (string.IsNullOrWhiteSpace(expression))
+        {
+            return expression;
+        }
+
+        try
+        {
+            var root = CSharpSyntaxTree.ParseText(expression).GetRoot();
+            return root.NormalizeWhitespace("    ", "\n", false).ToFullString();
+        }
+        catch
+        {
+            return expression.Trim();
+        }
     }
 
     private static string InferSplitQueryRole(string sql, int index, int total)
@@ -445,7 +491,8 @@ internal sealed class HoverHandler : HoverHandlerBase
         string SourceExpression,
         string ExecutedExpression,
         string Mode,
-        string ModeDescription);
+        string ModeDescription,
+        string[] Warnings);
 
     private static readonly Regex TableNameRegex =
         new(@"(?:FROM|JOIN)\s+`([^`]+)`", RegexOptions.IgnoreCase | RegexOptions.Compiled);

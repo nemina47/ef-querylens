@@ -220,6 +220,56 @@ public static class LspSyntaxHelper
         return new SourceUsingContext(imports, aliases, staticTypes);
     }
 
+    public static bool IsLikelyQueryPreviewCandidate(string expression)
+    {
+        if (string.IsNullOrWhiteSpace(expression))
+        {
+            return false;
+        }
+
+        ExpressionSyntax parsed;
+        try
+        {
+            parsed = SyntaxFactory.ParseExpression(expression);
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (parsed is InvocationExpressionSyntax invocation)
+        {
+            var hasKnownQueryMethods = GetInvocationChainMethodNames(invocation)
+                .Any(name => TerminalMethods.Contains(name) || QueryChainMethods.Contains(name));
+            if (hasKnownQueryMethods)
+            {
+                var rootName = TryExtractRootContextVariable(invocation);
+                if (!LooksLikeDbContextRoot(rootName) && LooksLikeStaticTypeRoot(rootName))
+                {
+                    return false;
+                }
+
+                return true;
+            }
+
+            var invocationRootName = TryExtractRootContextVariable(invocation);
+            return LooksLikeDbContextRoot(invocationRootName);
+        }
+
+        if (parsed is MemberAccessExpressionSyntax memberAccess)
+        {
+            var rootName = TryExtractRootContextVariable(memberAccess);
+            return LooksLikeDbContextRoot(rootName);
+        }
+
+        return false;
+    }
+
+    public static bool IsLikelyDbContextRootIdentifier(string? rootName)
+    {
+        return LooksLikeDbContextRoot(rootName);
+    }
+
     public static IReadOnlyList<LinqChainInfo> FindAllLinqChains(string sourceText)
     {
         var tree = CSharpSyntaxTree.ParseText(sourceText);
@@ -256,6 +306,11 @@ public static class LspSyntaxHelper
                 continue;
             }
 
+            // Preserve the display anchor from source text before inlining local
+            // query variables. Inlining rewrites spans to declaration expressions,
+            // which can collapse multiple lenses onto the same line.
+            var displaySpan = targetExpression.Span;
+
             targetExpression = TryInlineLocalQueryRoot(targetExpression, outermostInvocation);
             targetExpression = StripTransparentQueryableCasts(targetExpression);
 
@@ -276,7 +331,7 @@ public static class LspSyntaxHelper
                 continue;
             }
 
-            var start = tree.GetLineSpan(targetExpression.Span).StartLinePosition;
+            var start = tree.GetLineSpan(displaySpan).StartLinePosition;
             results.Add(new LinqChainInfo(
                 targetExpression.ToString(),
                 contextVariableName,
@@ -372,10 +427,7 @@ public static class LspSyntaxHelper
 
     private static bool IsLikelyQueryChain(InvocationExpressionSyntax invocation)
     {
-        var methodNames = invocation.DescendantNodesAndSelf()
-            .OfType<MemberAccessExpressionSyntax>()
-            .Select(ma => ma.Name.Identifier.Text)
-            .ToArray();
+        var methodNames = GetInvocationChainMethodNames(invocation).ToArray();
 
         if (methodNames.Length == 0)
         {
@@ -383,6 +435,52 @@ public static class LspSyntaxHelper
         }
 
         return methodNames.Any(name => TerminalMethods.Contains(name) || QueryChainMethods.Contains(name));
+    }
+
+    private static IEnumerable<string> GetInvocationChainMethodNames(InvocationExpressionSyntax invocation)
+    {
+        SyntaxNode? current = invocation;
+
+        while (current is InvocationExpressionSyntax currentInvocation)
+        {
+            if (currentInvocation.Expression is not MemberAccessExpressionSyntax memberAccess)
+            {
+                yield break;
+            }
+
+            yield return memberAccess.Name.Identifier.Text;
+
+            current = memberAccess.Expression;
+        }
+    }
+
+    private static bool LooksLikeDbContextRoot(string? rootName)
+    {
+        if (string.IsNullOrWhiteSpace(rootName))
+        {
+            return false;
+        }
+
+        if (string.Equals(rootName, "db", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(rootName, "_db", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(rootName, "context", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(rootName, "dbContext", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(rootName, "_dbContext", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return rootName.Contains("context", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeStaticTypeRoot(string? rootName)
+    {
+        if (string.IsNullOrWhiteSpace(rootName))
+        {
+            return false;
+        }
+
+        return char.IsUpper(rootName[0]);
     }
 
     private static ExpressionSyntax? StripTerminalInvocation(InvocationExpressionSyntax invocation)
@@ -581,28 +679,75 @@ public static class LspSyntaxHelper
     {
         expression = null!;
 
+        if (!TryResolveLocalExpression(identifier, invocationContext, out expression, out var resolvedAtStatement)
+            || resolvedAtStatement is null)
+        {
+            return false;
+        }
+
+        expression = InlineLeftMostIdentifierChain(expression, resolvedAtStatement);
+        return true;
+    }
+
+    private static bool TryResolveLocalExpression(
+        string identifier,
+        InvocationExpressionSyntax invocationContext,
+        out ExpressionSyntax expression,
+        out StatementSyntax? resolvedAtStatement)
+    {
+        expression = null!;
+        resolvedAtStatement = null;
+
         var anchorStatement = invocationContext.FirstAncestorOrSelf<StatementSyntax>();
         if (anchorStatement is null)
             return false;
 
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-        return TryResolveLocalExpressionCore(identifier, anchorStatement, visited, out expression);
+        return TryResolveLocalExpressionCore(identifier, anchorStatement, out expression, out resolvedAtStatement);
     }
 
     private static ExpressionSyntax TryInlineLocalQueryRoot(
         ExpressionSyntax expression,
         InvocationExpressionSyntax invocationContext)
     {
-        if (!TryGetLeftMostExpression(expression, out var leftMostExpression))
+        var anchorStatement = invocationContext.FirstAncestorOrSelf<StatementSyntax>();
+        if (anchorStatement is null)
+        {
             return expression;
+        }
 
-        if (leftMostExpression is not IdentifierNameSyntax identifier)
-            return expression;
+        return InlineLeftMostIdentifierChain(expression, anchorStatement);
+    }
 
-        if (!TryResolveLocalExpression(identifier.Identifier.ValueText, invocationContext, out var resolvedExpression))
-            return expression;
+    private static ExpressionSyntax InlineLeftMostIdentifierChain(
+        ExpressionSyntax expression,
+        StatementSyntax anchorStatement)
+    {
+        var currentExpression = expression;
+        var currentAnchorStatement = anchorStatement;
 
-        return expression.ReplaceNode(leftMostExpression, resolvedExpression.WithoutTrivia());
+        for (var depth = 0; depth < 32; depth++)
+        {
+            if (!TryGetLeftMostExpression(currentExpression, out var leftMostExpression)
+                || leftMostExpression is not IdentifierNameSyntax identifier)
+            {
+                break;
+            }
+
+            if (!TryResolveLocalExpressionCore(
+                    identifier.Identifier.ValueText,
+                    currentAnchorStatement,
+                    out var resolvedExpression,
+                    out var resolvedAtStatement)
+                || resolvedAtStatement is null)
+            {
+                break;
+            }
+
+            currentExpression = currentExpression.ReplaceNode(leftMostExpression, resolvedExpression.WithoutTrivia());
+            currentAnchorStatement = resolvedAtStatement;
+        }
+
+        return currentExpression;
     }
 
     private static bool TryGetLeftMostExpression(ExpressionSyntax expression, out ExpressionSyntax leftMost)
@@ -641,13 +786,11 @@ public static class LspSyntaxHelper
     private static bool TryResolveLocalExpressionCore(
         string identifier,
         StatementSyntax anchorStatement,
-        ISet<string> visited,
-        out ExpressionSyntax expression)
+        out ExpressionSyntax expression,
+        out StatementSyntax? resolvedAtStatement)
     {
         expression = null!;
-
-        if (!visited.Add(identifier))
-            return false;
+        resolvedAtStatement = null;
 
         for (SyntaxNode? scope = anchorStatement.Parent; scope is not null; scope = scope.Parent)
         {
@@ -665,16 +808,21 @@ public static class LspSyntaxHelper
                 {
                     if (declaredExpression is IdentifierNameSyntax nestedIdentifier)
                     {
-                        if (TryResolveLocalExpressionCore(nestedIdentifier.Identifier.ValueText, statement, visited, out expression))
+                        if (TryResolveLocalExpressionCore(
+                                nestedIdentifier.Identifier.ValueText,
+                                statement,
+                                out expression,
+                                out resolvedAtStatement))
                         {
                             return true;
                         }
+
+                        continue;
                     }
-                    else
-                    {
-                        expression = declaredExpression;
-                        return true;
-                    }
+
+                    expression = declaredExpression;
+                    resolvedAtStatement = statement;
+                    return true;
                 }
             }
 

@@ -64,6 +64,83 @@ public class LspSyntaxHelperTests
     }
 
     [Fact]
+    public void FindAllLinqChains_DoesNotTreatMapGetRegistrationAsQueryChain()
+    {
+        var source = """
+            app.MapGet("/api/customers/{customerId:guid}/orders",
+                async (
+                    Guid customerId,
+                    decimal? minTotal,
+                    OrderStatus? status,
+                    CustomerReadService service,
+                    CancellationToken ct) =>
+                {
+                    Expression<Func<Order, bool>> whereExpression = o =>
+                        (!minTotal.HasValue || o.Total >= minTotal.Value)
+                        && (!status.HasValue || o.Status == status.Value);
+
+                    var orders = await service.GetCustomerOrdersAsync(
+                        customerId,
+                        whereExpression,
+                        o => new OrderListItemResponse
+                        {
+                            OrderId = o.Id,
+                            CustomerId = o.Customer.CustomerId,
+                            Total = o.Total,
+                            Status = o.Status,
+                            CreatedUtc = o.CreatedUtc
+                        },
+                        ct);
+
+                    return Results.Ok(orders);
+                });
+            """;
+
+        var chains = LspSyntaxHelper.FindAllLinqChains(source);
+
+        Assert.Empty(chains);
+    }
+
+    [Fact]
+    public void FindAllLinqChains_ReassignedLocalQuery_ResolvesDbSetMember()
+    {
+        var source = """
+            var query = dbContext.Customers
+                .Where(c => c.IsNotDeleted)
+                .AsQueryable();
+
+            if (isActive is not null)
+            {
+                query = query.Where(c => c.IsActive == isActive);
+            }
+
+            if (createdAfterUtc is not null)
+            {
+                var createdAfter = createdAfterUtc.Value;
+                query = query.Where(c => c.CreatedUtc >= createdAfter);
+            }
+
+            var items = query
+                .OrderByDescending(c => c.CreatedUtc)
+                .Select(c => new { c.CustomerId, c.Name });
+            """;
+
+        var chains = LspSyntaxHelper.FindAllLinqChains(source);
+
+        Assert.NotEmpty(chains);
+        Assert.All(chains, c => Assert.Equal("Customers", c.DbSetMemberName));
+        Assert.Contains(chains, c => c.Expression.Contains("CreatedUtc >= createdAfter", StringComparison.Ordinal));
+
+        var (isActiveLine, _) = FindPosition(source, "query = query.Where(c => c.IsActive == isActive);");
+        var (createdAfterLine, _) = FindPosition(source, "query = query.Where(c => c.CreatedUtc >= createdAfter);");
+        var (returnQueryLine, _) = FindPosition(source, "var items = query");
+
+        Assert.Contains(chains, c => c.Line == isActiveLine);
+        Assert.Contains(chains, c => c.Line == createdAfterLine);
+        Assert.Contains(chains, c => c.Line == returnQueryLine);
+    }
+
+    [Fact]
     public void TryExtractLinqExpression_UsesRootContextVariable_ForComplexChain()
     {
         var source = """
@@ -107,6 +184,40 @@ public class LspSyntaxHelperTests
         Assert.NotNull(expression);
         Assert.Equal("context", contextVariableName);
         Assert.StartsWith("context", expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryExtractLinqExpression_ReassignedWhere_ResolvesToDbContextRoot()
+    {
+        var source = """
+            var query = dbContext.Customers
+                .Where(c => c.IsNotDeleted)
+                .AsQueryable();
+
+            if (isActive is not null)
+            {
+                query = query.Where(c => c.IsActive == isActive);
+            }
+
+            if (createdAfterUtc is not null)
+            {
+                var createdAfter = createdAfterUtc.Value;
+                query = query.Where(c => c.CreatedUtc >= createdAfter);
+            }
+            """;
+
+        var (line, character) = FindPosition(source, "CreatedUtc >= createdAfter");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName);
+
+        Assert.NotNull(expression);
+        Assert.Equal("dbContext", contextVariableName);
+        Assert.Contains("dbContext.Customers", expression, StringComparison.Ordinal);
+        Assert.Contains("CreatedUtc >= createdAfter", expression, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -359,6 +470,40 @@ public class LspSyntaxHelperTests
 
         Assert.Single(context.Imports, i => i == "System.Linq");
         Assert.Single(context.StaticTypes, s => s == "System.Math");
+    }
+
+    [Fact]
+    public void IsLikelyQueryPreviewCandidate_QueryChain_ReturnsTrue()
+    {
+        var candidate = LspSyntaxHelper.IsLikelyQueryPreviewCandidate(
+            "dbContext.Customers.Where(c => c.IsActive)");
+
+        Assert.True(candidate);
+    }
+
+    [Fact]
+    public void IsLikelyQueryPreviewCandidate_NonQueryInvocation_ReturnsFalse()
+    {
+        var candidate = LspSyntaxHelper.IsLikelyQueryPreviewCandidate(
+            "Math.Max(request.Page, 1)");
+
+        Assert.False(candidate);
+    }
+
+    [Fact]
+    public void IsLikelyDbContextRootIdentifier_UnderscoreDb_ReturnsTrue()
+    {
+        var candidate = LspSyntaxHelper.IsLikelyDbContextRootIdentifier("_db");
+
+        Assert.True(candidate);
+    }
+
+    [Fact]
+    public void IsLikelyDbContextRootIdentifier_Service_ReturnsFalse()
+    {
+        var candidate = LspSyntaxHelper.IsLikelyDbContextRootIdentifier("service");
+
+        Assert.False(candidate);
     }
 
     private static (int line, int character) FindPosition(string source, string marker)

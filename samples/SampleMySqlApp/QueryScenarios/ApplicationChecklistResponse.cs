@@ -1,4 +1,4 @@
-namespace SampleApp.QueryScenarios;
+namespace SampleMySqlApp.QueryScenarios;
 
 public sealed class ApplicationChecklistResponse
 {

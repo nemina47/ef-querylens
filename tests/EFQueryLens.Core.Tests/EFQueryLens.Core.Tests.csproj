@@ -25,12 +25,12 @@
     <ProjectReference Include="..\..\src\EFQueryLens.Lsp\EFQueryLens.Lsp.csproj" />
   </ItemGroup>
 
-  <!-- Build SampleApp and copy its output to the test bin dir so ALC tests
-       can load it dynamically. ReferenceOutputAssembly=false keeps SampleApp
+  <!-- Build SampleMySqlApp and copy its output to the test bin dir so ALC tests
+       can load it dynamically. ReferenceOutputAssembly=false keeps SampleMySqlApp
        out of the test's compile references; the AfterTargets target does the
        actual file copy after both projects are built. -->
   <ItemGroup>
-    <ProjectReference Include="..\..\samples\SampleApp\SampleApp.csproj"
+    <ProjectReference Include="..\..\samples\SampleMySqlApp\SampleMySqlApp.csproj"
                       ReferenceOutputAssembly="false"
                       Private="false" />
     <ProjectReference Include="..\..\samples\SampleSqlServerApp\SampleSqlServerApp.csproj"
@@ -40,28 +40,28 @@
 
   <Target Name="CopySampleAppsToTestOutput" AfterTargets="Build">
     <PropertyGroup>
-      <SampleAppOutputDir>..\..\samples\SampleApp\bin\$(Configuration)\$(TargetFramework)\</SampleAppOutputDir>
+      <SampleMySqlAppOutputDir>..\..\samples\SampleMySqlApp\bin\$(Configuration)\$(TargetFramework)\</SampleMySqlAppOutputDir>
       <SampleSqlServerAppOutputDir>..\..\samples\SampleSqlServerApp\bin\$(Configuration)\$(TargetFramework)\</SampleSqlServerAppOutputDir>
     </PropertyGroup>
     <ItemGroup>
       <!-- Exclude Microsoft.CodeAnalysis* DLLs: EF Core Design brings in an older
            Roslyn version as a transitive dependency, which would overwrite the newer
            Roslyn used by Microsoft.CodeAnalysis.CSharp.Scripting 5.x in EFQueryLens.Core.
-           The test process always loads Roslyn via its own deps.json; SampleApp's copy
+         The test process always loads Roslyn via its own deps.json; SampleMySqlApp's copy
            must not shadow those with an older incompatible version. -->
-      <SampleAppFiles Include="$(SampleAppOutputDir)**\*.*"
-                      Exclude="$(SampleAppOutputDir)Microsoft.CodeAnalysis*.dll;
-                               $(SampleAppOutputDir)Microsoft.CodeAnalysis*.pdb;
-                               $(SampleAppOutputDir)System.Collections.Immutable.dll;
-                               $(SampleAppOutputDir)System.Reflection.Metadata.dll" />
+      <SampleMySqlAppFiles Include="$(SampleMySqlAppOutputDir)**\*.*"
+                           Exclude="$(SampleMySqlAppOutputDir)Microsoft.CodeAnalysis*.dll;
+                                    $(SampleMySqlAppOutputDir)Microsoft.CodeAnalysis*.pdb;
+                                    $(SampleMySqlAppOutputDir)System.Collections.Immutable.dll;
+                                    $(SampleMySqlAppOutputDir)System.Reflection.Metadata.dll" />
       <SampleSqlServerAppFiles Include="$(SampleSqlServerAppOutputDir)**\*.*"
                                Exclude="$(SampleSqlServerAppOutputDir)Microsoft.CodeAnalysis*.dll;
                                         $(SampleSqlServerAppOutputDir)Microsoft.CodeAnalysis*.pdb;
                                         $(SampleSqlServerAppOutputDir)System.Collections.Immutable.dll;
                                         $(SampleSqlServerAppOutputDir)System.Reflection.Metadata.dll" />
     </ItemGroup>
-        <Copy SourceFiles="@(SampleAppFiles)"
-          DestinationFolder="$(OutputPath)SampleApp\%(RecursiveDir)"
+        <Copy SourceFiles="@(SampleMySqlAppFiles)"
+          DestinationFolder="$(OutputPath)SampleMySqlApp\%(RecursiveDir)"
           SkipUnchangedFiles="true" />
         <Copy SourceFiles="@(SampleSqlServerAppFiles)"
           DestinationFolder="$(OutputPath)SampleSqlServerApp\%(RecursiveDir)"

@@ -5,8 +5,8 @@ namespace EFQueryLens.Core.Tests.AssemblyContext;
 /// <summary>
 /// Unit tests for <see cref="ProjectAssemblyContext"/>.
 ///
-/// SampleApp.dll is copied into an isolated SampleApp subfolder at build time
-/// because EFQueryLens.Core.Tests.csproj references SampleApp with
+/// SampleMySqlApp.dll is copied into an isolated SampleMySqlApp subfolder at build time
+/// because EFQueryLens.Core.Tests.csproj references SampleMySqlApp with
 /// ReferenceOutputAssembly="false". We locate it relative to this assembly's
 /// location at runtime.
 /// </summary>
@@ -16,18 +16,18 @@ public class ProjectAssemblyContextTests
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Returns the absolute path to SampleApp.dll in the test output directory.
+    /// Returns the absolute path to SampleMySqlApp.dll in the test output directory.
     /// </summary>
-    private static string GetSampleAppDll()
+    private static string GetSampleMySqlAppDll()
     {
         var testDir = Path.GetDirectoryName(
             typeof(ProjectAssemblyContextTests).Assembly.Location)!;
 
-        var dll = ResolveSampleDll(testDir, "SampleApp.dll");
+        var dll = ResolveSampleDll(testDir, "SampleMySqlApp.dll");
 
         if (!File.Exists(dll))
             throw new FileNotFoundException(
-                "SampleApp.dll not found in test output directory. " +
+                "SampleMySqlApp.dll not found in test output directory. " +
                 "Make sure the solution is built before running tests. " +
                 $"Expected: {dll}");
 
@@ -36,7 +36,7 @@ public class ProjectAssemblyContextTests
 
     private static string ResolveSampleDll(string testOutputDir, string dllName)
     {
-        var isolated = Path.Combine(testOutputDir, "SampleApp", dllName);
+        var isolated = Path.Combine(testOutputDir, "SampleMySqlApp", dllName);
         if (File.Exists(isolated))
             return isolated;
 
@@ -61,7 +61,7 @@ public class ProjectAssemblyContextTests
     [Fact]
     public void Constructor_ValidAssembly_DoesNotThrow()
     {
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         using var ctx = new ProjectAssemblyContext(dll);
         Assert.Equal(dll, ctx.AssemblyPath);
     }
@@ -82,7 +82,7 @@ public class ProjectAssemblyContextTests
     [Fact]
     public void AssemblyTimestamp_IsSet()
     {
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         using var ctx = new ProjectAssemblyContext(dll);
         Assert.NotEqual(default, ctx.AssemblyTimestamp);
     }
@@ -98,7 +98,7 @@ public class ProjectAssemblyContextTests
     [InlineData("Microsoft.Data.SqlClient", false)]
     [InlineData("Microsoft.EntityFrameworkCore", false)]
     [InlineData("Pomelo.EntityFrameworkCore.MySql", false)]
-    [InlineData("SampleApp", false)]
+    [InlineData("SampleMySqlApp", false)]
     [InlineData(null, false)]
     [InlineData("", false)]
     public void ShouldPreferDefaultLoadContext_ExpectedPolicy(string? assemblyName, bool expected)
@@ -158,9 +158,9 @@ public class ProjectAssemblyContextTests
     // ─── FindDbContextTypes ───────────────────────────────────────────────────
 
     [Fact]
-    public void FindDbContextTypes_SampleApp_FindsExactlyOneContext()
+    public void FindDbContextTypes_SampleMySqlApp_FindsExactlyOneContext()
     {
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         using var ctx = new ProjectAssemblyContext(dll);
 
         var types = ctx.FindDbContextTypes();
@@ -169,25 +169,25 @@ public class ProjectAssemblyContextTests
     }
 
     [Fact]
-    public void FindDbContextTypes_SampleApp_FindsAppDbContext()
+    public void FindDbContextTypes_SampleMySqlApp_FindsMySqlAppDbContext()
     {
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         using var ctx = new ProjectAssemblyContext(dll);
 
         var types = ctx.FindDbContextTypes();
 
-        Assert.Contains(types, t => t.Name == "AppDbContext");
+        Assert.Contains(types, t => t.Name == "MySqlAppDbContext");
     }
 
     [Fact]
-    public void FindDbContextTypes_SampleApp_FullNameIsCorrect()
+    public void FindDbContextTypes_SampleMySqlApp_FullNameIsCorrect()
     {
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         using var ctx = new ProjectAssemblyContext(dll);
 
         var types = ctx.FindDbContextTypes();
 
-        Assert.Contains(types, t => t.FullName == "SampleApp.AppDbContext");
+        Assert.Contains(types, t => t.FullName == "SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext");
     }
 
     // ─── FindDbContextType ────────────────────────────────────────────────────
@@ -195,40 +195,40 @@ public class ProjectAssemblyContextTests
     [Fact]
     public void FindDbContextType_NullName_AutoDiscoversWhenOne()
     {
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         using var ctx = new ProjectAssemblyContext(dll);
 
         var type = ctx.FindDbContextType(null);
 
-        Assert.Equal("SampleApp.AppDbContext", type.FullName);
+        Assert.Equal("SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext", type.FullName);
     }
 
     [Fact]
     public void FindDbContextType_SimpleName_Resolves()
     {
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         using var ctx = new ProjectAssemblyContext(dll);
 
-        var type = ctx.FindDbContextType("AppDbContext");
+        var type = ctx.FindDbContextType("MySqlAppDbContext");
 
-        Assert.Equal("SampleApp.AppDbContext", type.FullName);
+        Assert.Equal("SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext", type.FullName);
     }
 
     [Fact]
     public void FindDbContextType_FullyQualifiedName_Resolves()
     {
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         using var ctx = new ProjectAssemblyContext(dll);
 
-        var type = ctx.FindDbContextType("SampleApp.AppDbContext");
+        var type = ctx.FindDbContextType("SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext");
 
-        Assert.Equal("SampleApp.AppDbContext", type.FullName);
+        Assert.Equal("SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext", type.FullName);
     }
 
     [Fact]
     public void FindDbContextType_UnknownName_ThrowsInvalidOperationException()
     {
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         using var ctx = new ProjectAssemblyContext(dll);
 
         var ex = Assert.Throws<InvalidOperationException>(
@@ -250,10 +250,10 @@ public class ProjectAssemblyContextTests
         //   - AppDbContext lives in the user's ALC (not the default ALC).
         //   - The DbContext base class also lives in the user's ALC — confirming
         //     that EF Core loaded from the user's bin, not the tool's runtime.
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         using var ctx = new ProjectAssemblyContext(dll);
 
-        var alcType = ctx.FindDbContextType("AppDbContext");
+        var alcType = ctx.FindDbContextType("MySqlAppDbContext");
 
         // AppDbContext must be in the user's ALC, not the default ALC.
         var userAlc  = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(alcType.Assembly);
@@ -278,7 +278,7 @@ public class ProjectAssemblyContextTests
         // Verify the ALC is distinctly named (aids debugging in memory dumps).
         // We access this indirectly: the type's Assembly's AssemblyLoadContext
         // should not be the default one.
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         using var ctx = new ProjectAssemblyContext(dll);
 
         var alcType    = ctx.FindDbContextType();
@@ -287,7 +287,7 @@ public class ProjectAssemblyContextTests
 
         Assert.NotNull(typeAlc);
         Assert.NotSame(defaultAlc, typeAlc);
-        Assert.Contains("SampleApp", typeAlc.Name);
+        Assert.Contains("SampleMySqlApp", typeAlc.Name);
     }
 
     // ─── Dispose / unload ─────────────────────────────────────────────────────
@@ -295,7 +295,7 @@ public class ProjectAssemblyContextTests
     [Fact]
     public void FindDbContextType_AfterDispose_ThrowsObjectDisposedException()
     {
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         var ctx = new ProjectAssemblyContext(dll);
         ctx.Dispose();
 
@@ -305,7 +305,7 @@ public class ProjectAssemblyContextTests
     [Fact]
     public void FindDbContextTypes_AfterDispose_ThrowsObjectDisposedException()
     {
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         var ctx = new ProjectAssemblyContext(dll);
         ctx.Dispose();
 
@@ -315,7 +315,7 @@ public class ProjectAssemblyContextTests
     [Fact]
     public void Dispose_SecondCall_IsIdempotent()
     {
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         var ctx = new ProjectAssemblyContext(dll);
         ctx.Dispose();
         ctx.Dispose(); // must not throw
@@ -355,7 +355,7 @@ public class ProjectAssemblyContextTests
         System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private static WeakReference CreateAndDisposeContext()
     {
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         var ctx = new ProjectAssemblyContext(dll);
         var weakRef = ctx.GetAlcWeakReference();
         ctx.Dispose();
@@ -367,7 +367,7 @@ public class ProjectAssemblyContextTests
     [Fact]
     public void Factory_Create_ReturnsContextWithCorrectPath()
     {
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         using var ctx = ProjectAssemblyContextFactory.Create(dll);
         Assert.Equal(dll, ctx.AssemblyPath);
     }
@@ -375,7 +375,7 @@ public class ProjectAssemblyContextTests
     [Fact]
     public void Factory_IsStale_ReturnsFalseForFreshContext()
     {
-        var dll = GetSampleAppDll();
+        var dll = GetSampleMySqlAppDll();
         using var ctx = ProjectAssemblyContextFactory.Create(dll);
         Assert.False(ProjectAssemblyContextFactory.IsStale(ctx));
     }

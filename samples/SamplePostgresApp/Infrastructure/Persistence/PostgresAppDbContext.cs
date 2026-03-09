@@ -28,6 +28,7 @@ public sealed class PostgresAppDbContext : DbContext, IPostgresAppDbContext
             b.HasIndex(x => x.CustomerId).IsUnique();
             b.Property(x => x.Name).HasMaxLength(200);
             b.Property(x => x.Email).HasMaxLength(320);
+            b.Property(x => x.IsDeleted).HasDefaultValue(false);
             b.Property(x => x.IsActive).HasDefaultValue(true);
             b.Property(x => x.CreatedUtc);
         });

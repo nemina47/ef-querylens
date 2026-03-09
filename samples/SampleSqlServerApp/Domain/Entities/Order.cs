@@ -1,3 +1,4 @@
+using EntityFrameworkCore.Projectables;
 using SampleSqlServerApp.Domain.Enums;
 
 namespace SampleSqlServerApp.Domain.Entities;
@@ -11,6 +12,9 @@ public sealed class Order
     public OrderStatus Status { get; set; }
     public string? Notes { get; set; }
     public bool IsDeleted { get; set; }
+
+    [Projectable]
+    public bool IsNotDeleted => !IsDeleted;
 
     public Customer Customer { get; set; } = null!;
 }
