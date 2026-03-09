@@ -103,6 +103,7 @@ public class QueryEvaluatorTests : IDisposable
             {
                 AssemblyPath = sqlAlcCtx.AssemblyPath,
                 Expression = "db.Customers",
+                DbContextTypeName = "SampleSqlServerApp.SqlServerAppDbContext",
             });
 
         Assert.True(result.Success, result.ErrorMessage);

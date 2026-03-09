@@ -32,6 +32,42 @@ public class QueryLensEngineTests
 
     private static QueryLensEngine CreateEngine() => new();
 
+    private static async Task<ModelSnapshot> InspectModelWithRetryAsync(QueryLensEngine engine, string assemblyPath)
+    {
+        const int maxAttempts = 3;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                return await engine.InspectModelAsync(new ModelInspectionRequest
+                {
+                    AssemblyPath = assemblyPath,
+                });
+            }
+            catch (Exception ex) when (attempt < maxAttempts && IsTransientAlcUnload(ex))
+            {
+                await Task.Delay(100 * attempt);
+            }
+        }
+
+        throw new InvalidOperationException("InspectModelAsync failed after transient-retry attempts.");
+    }
+
+    private static bool IsTransientAlcUnload(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is InvalidOperationException ioe
+                && ioe.Message.Contains("AssemblyLoadContext is unloading", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     // ── TranslateAsync ────────────────────────────────────────────────────────
 
     [Fact]
@@ -182,10 +218,7 @@ public class QueryLensEngineTests
     public async Task InspectModelAsync_ReturnsExpectedEntities()
     {
         await using var engine = CreateEngine();
-        var snapshot = await engine.InspectModelAsync(new ModelInspectionRequest
-        {
-            AssemblyPath = GetSampleAppDll(),
-        });
+        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleAppDll());
 
         Assert.Equal("SampleApp.AppDbContext", snapshot.DbContextType);
         Assert.True(snapshot.Entities.Count >= 5);
@@ -202,10 +235,7 @@ public class QueryLensEngineTests
     public async Task InspectModelAsync_ContainsExpectedTableNames()
     {
         await using var engine = CreateEngine();
-        var snapshot = await engine.InspectModelAsync(new ModelInspectionRequest
-        {
-            AssemblyPath = GetSampleAppDll(),
-        });
+        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleAppDll());
 
         var names = snapshot.Entities.Select(e => e.TableName).ToList();
         Assert.Contains("Orders", names);
@@ -217,10 +247,7 @@ public class QueryLensEngineTests
     public async Task InspectModelAsync_OrderEntity_HasExpectedProperties()
     {
         await using var engine = CreateEngine();
-        var snapshot = await engine.InspectModelAsync(new ModelInspectionRequest
-        {
-            AssemblyPath = GetSampleAppDll(),
-        });
+        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleAppDll());
 
         var order = snapshot.Entities.FirstOrDefault(e => e.TableName == "Orders");
         Assert.NotNull(order);
@@ -235,10 +262,7 @@ public class QueryLensEngineTests
     public async Task InspectModelAsync_OrderEntity_IdIsKey()
     {
         await using var engine = CreateEngine();
-        var snapshot = await engine.InspectModelAsync(new ModelInspectionRequest
-        {
-            AssemblyPath = GetSampleAppDll(),
-        });
+        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleAppDll());
 
         var order = snapshot.Entities.First(e => e.TableName == "Orders");
         var id    = order.Properties.FirstOrDefault(p => p.Name == "Id");
@@ -250,10 +274,7 @@ public class QueryLensEngineTests
     public async Task InspectModelAsync_OrderEntity_HasNavigations()
     {
         await using var engine = CreateEngine();
-        var snapshot = await engine.InspectModelAsync(new ModelInspectionRequest
-        {
-            AssemblyPath = GetSampleAppDll(),
-        });
+        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleAppDll());
 
         var order = snapshot.Entities.First(e => e.TableName == "Orders");
         Assert.NotEmpty(order.Navigations);
@@ -263,10 +284,7 @@ public class QueryLensEngineTests
     public async Task InspectModelAsync_IncludesDbSetPropertyNames()
     {
         await using var engine = CreateEngine();
-        var snapshot = await engine.InspectModelAsync(new ModelInspectionRequest
-        {
-            AssemblyPath = GetSampleAppDll(),
-        });
+        var snapshot = await InspectModelWithRetryAsync(engine, GetSampleAppDll());
 
         Assert.Contains("Orders", snapshot.DbSetProperties);
         Assert.Contains("Users", snapshot.DbSetProperties);
