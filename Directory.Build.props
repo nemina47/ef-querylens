@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <Authors>EF QueryLens Contributors</Authors>
+    <Company>EF QueryLens Contributors</Company>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/CHANGE_ME/ef-querylens</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/CHANGE_ME/ef-querylens</PackageProjectUrl>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>

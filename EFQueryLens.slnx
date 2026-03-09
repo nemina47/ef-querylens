@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/SampleApp/SampleApp.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/EFQueryLens.Analyzer/EFQueryLens.Analyzer.csproj" />
+    <Project Path="src/EFQueryLens.Cli/EFQueryLens.Cli.csproj" />
+    <Project Path="src/EFQueryLens.Core/EFQueryLens.Core.csproj" />
+    <Project Path="src/EFQueryLens.Lsp/EFQueryLens.Lsp.csproj" />
+    <Project Path="src/EFQueryLens.Mcp/EFQueryLens.Mcp.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EFQueryLens.Core.Tests/EFQueryLens.Core.Tests.csproj" />
+    <Project Path="tests/EFQueryLens.Integration.Tests/EFQueryLens.Integration.Tests.csproj" />
+  </Folder>
+</Solution>

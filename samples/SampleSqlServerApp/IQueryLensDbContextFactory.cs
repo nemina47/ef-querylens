@@ -1,5 +1,5 @@
 // ReSharper disable once CheckNamespace
-namespace QueryLens.Core;
+namespace EFQueryLens.Core;
 
 public interface IQueryLensDbContextFactory<out TContext>
     where TContext : Microsoft.EntityFrameworkCore.DbContext

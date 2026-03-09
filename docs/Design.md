@@ -30,7 +30,7 @@ We depend only on `ToQueryString()` — the stable public API. Any dependency on
 
 \*\*2. Transport-agnostic core\*\*
 
-The engine is a pure library. The CLI, MCP server, and IDE analyzer are thin hosts. No UI, no transport, no IDE SDK references in `QueryLens.Core`.
+The engine is a pure library. The CLI, MCP server, and IDE analyzer are thin hosts. No UI, no transport, no IDE SDK references in `EFQueryLens.Core`.
 
 
 
@@ -72,27 +72,27 @@ QueryLens/
 
 ├── src/
 
-│   ├── QueryLens.Core/              ← engine, interfaces, records — no provider refs
+│   ├── EFQueryLens.Core/              ← engine, interfaces, records — no provider refs
 
-│   ├── QueryLens.MySql/             ← Pomelo bootstrap + MySQL explain parser
+│   ├── EFQueryLens.MySql/             ← Pomelo bootstrap + MySQL explain parser
 
-│   ├── QueryLens.Postgres/          ← (stub — Phase 2)
+│   ├── EFQueryLens.Postgres/          ← (stub — Phase 2)
 
-│   ├── QueryLens.SqlServer/         ← (stub — Phase 2)
+│   ├── EFQueryLens.SqlServer/         ← (stub — Phase 2)
 
-│   ├── QueryLens.Cli/               ← dotnet global tool
+│   ├── EFQueryLens.Cli/               ← dotnet global tool
 
-│   ├── QueryLens.Mcp/               ← MCP server
+│   ├── EFQueryLens.Mcp/               ← MCP server
 
-│   └── QueryLens.Analyzer/          ← Roslyn analyzer (ships as NuGet to user project)
+│   └── EFQueryLens.Analyzer/          ← Roslyn analyzer (ships as NuGet to user project)
 
 ├── tests/
 
-│   ├── QueryLens.Core.Tests/
+│   ├── EFQueryLens.Core.Tests/
 
-│   ├── QueryLens.MySql.Tests/
+│   ├── EFQueryLens.MySql.Tests/
 
-│   └── QueryLens.Integration.Tests/ ← TestContainers, real MySQL
+│   └── EFQueryLens.Integration.Tests/ ← TestContainers, real MySQL
 
 └── samples/
 
@@ -112,21 +112,21 @@ QueryLens/
 
 ```
 
-QueryLens.Core          (no EF, no provider — pure abstractions)
+EFQueryLens.Core          (no EF, no provider — pure abstractions)
 
 &nbsp;       ↑
 
-QueryLens.MySql         (depends on Core + Pomelo.EntityFrameworkCore.MySql)
+EFQueryLens.MySql         (depends on Core + Pomelo.EntityFrameworkCore.MySql)
 
 &nbsp;       ↑
 
-QueryLens.Cli           (depends on Core + MySql + System.CommandLine)
+EFQueryLens.Cli           (depends on Core + MySql + System.CommandLine)
 
-QueryLens.Mcp           (depends on Core + MySql + ModelContextProtocol SDK)
+EFQueryLens.Mcp           (depends on Core + MySql + ModelContextProtocol SDK)
 
 
 
-QueryLens.Analyzer      (Roslyn analyzer — communicates with engine over IPC,
+EFQueryLens.Analyzer      (Roslyn analyzer — communicates with engine over IPC,
 
 &nbsp;                         does NOT reference Core directly to avoid
 
@@ -772,7 +772,7 @@ The MCP server maintains a warm engine instance per project. First call to a pro
 
 
 
-Ships as a NuGet package: `<PackageReference Include="QueryLens.Analyzer" Version="..." />`
+Ships as a NuGet package: `<PackageReference Include="EFQueryLens.Analyzer" Version="..." />`
 
 
 
@@ -826,9 +826,9 @@ Communicates with the engine over a local named pipe / Unix socket. The analyzer
 
 \### Phase 1 — Core Engine (Weeks 1-2)
 
-\- `QueryLens.Core`: interfaces, records, AssemblyLoadContext, Roslyn scripting sandbox
+\- `EFQueryLens.Core`: interfaces, records, AssemblyLoadContext, Roslyn scripting sandbox
 
-\- `QueryLens.MySql`: Pomelo bootstrap, EXPLAIN FORMAT=JSON parser, EXPLAIN ANALYZE parser, warning rules
+\- `EFQueryLens.MySql`: Pomelo bootstrap, EXPLAIN FORMAT=JSON parser, EXPLAIN ANALYZE parser, warning rules
 
 \- Integration tests against SampleApp using TestContainers
 

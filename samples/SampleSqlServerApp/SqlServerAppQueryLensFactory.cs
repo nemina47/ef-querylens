@@ -1,5 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using QueryLens.Core;
+using EFQueryLens.Core;
 
 namespace SampleSqlServerApp;
 

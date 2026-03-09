@@ -19,24 +19,24 @@ A .NET library + CLI tool + MCP server that translates EF Core LINQ expressions 
 ```bash
 dotnet build
 dotnet test
-dotnet run --project src/QueryLens.Cli -- translate --help
+dotnet run --project src/EFQueryLens.Cli -- translate --help
 ```
 
 ## Project Structure
 
 ```
 src/
-  QueryLens.Core/          ← engine interfaces & records (no provider refs)
-  QueryLens.MySql/         ← Pomelo bootstrap + MySQL explain parser
-  QueryLens.Postgres/      ← stub (Phase 2)
-  QueryLens.SqlServer/     ← stub (Phase 2)
-  QueryLens.Cli/           ← dotnet global tool (System.CommandLine)
-  QueryLens.Mcp/           ← MCP server (ModelContextProtocol SDK)
-  QueryLens.Analyzer/      ← Roslyn analyzer (ships as NuGet to user projects)
+  EFQueryLens.Core/          ← engine interfaces & records (no provider refs)
+  EFQueryLens.MySql/         ← Pomelo bootstrap + MySQL explain parser
+  EFQueryLens.Postgres/      ← stub (Phase 2)
+  EFQueryLens.SqlServer/     ← stub (Phase 2)
+  EFQueryLens.Cli/           ← dotnet global tool (System.CommandLine)
+  EFQueryLens.Mcp/           ← MCP server (ModelContextProtocol SDK)
+  EFQueryLens.Analyzer/      ← Roslyn analyzer (ships as NuGet to user projects)
 tests/
-  QueryLens.Core.Tests/
-  QueryLens.MySql.Tests/
-  QueryLens.Integration.Tests/   ← TestContainers, real MySQL
+  EFQueryLens.Core.Tests/
+  EFQueryLens.MySql.Tests/
+  EFQueryLens.Integration.Tests/   ← TestContainers, real MySQL
 samples/
   SampleApp/               ← dogfood EF Core project for testing
 docs/
@@ -47,15 +47,15 @@ docs/
 
 - Each project assembly loads into its own **isolated, collectible AssemblyLoadContext** — prevents EF Core version conflicts between the tool and user projects
 - `ToQueryString()` is the **only** public EF API we depend on — no internals
-- MCP server, CLI, and analyzer are thin hosts over `QueryLens.Core`
+- MCP server, CLI, and analyzer are thin hosts over `EFQueryLens.Core`
 - All transport-agnostic output flows through the `QueryTranslationResult` record
-- `QueryLens.Analyzer` communicates with the engine over a named pipe — it NEVER loads EF Core/Pomelo directly (runs inside VS/Rider process)
+- `EFQueryLens.Analyzer` communicates with the engine over a named pipe — it NEVER loads EF Core/Pomelo directly (runs inside VS/Rider process)
 
 ## Current Phase
 
-**Phase 1 (active):** `QueryLens.Core` contracts + `QueryLens.MySql` stub
+**Phase 1 (active):** `EFQueryLens.Core` contracts + `EFQueryLens.MySql` stub
 - Target: `ToQueryString()` working against SampleApp's DbContext
-- Next up (Session 2): Implement `AssemblyLoadContext` loading in `QueryLens.Core`
+- Next up (Session 2): Implement `AssemblyLoadContext` loading in `EFQueryLens.Core`
 
 ## Progress
 
@@ -70,8 +70,8 @@ docs/
 ## Key Constraints — DO NOT Violate
 
 - **No EF Core internals** — only `ToQueryString()`, never internal query translators or expression visitors
-- **No cross-boundary refs** — `QueryLens.Analyzer` must NOT reference `QueryLens.Core` (different process)
-- **No provider code in Core** — `QueryLens.Core` stays provider-agnostic
+- **No cross-boundary refs** — `EFQueryLens.Analyzer` must NOT reference `EFQueryLens.Core` (different process)
+- **No provider code in Core** — `EFQueryLens.Core` stays provider-agnostic
 - **ALC isolation is mandatory** — user assemblies always load into their own isolated ALC
 
 ## Test MySQL (Docker)
@@ -86,7 +86,7 @@ docker run -d --name querylens-mysql -p 3306:3306 \
 ## Session Prompts (for continuing work)
 
 **Session 2 — AssemblyLoadContext:**
-> Implement `ProjectAssemblyContext` in `QueryLens.Core`. It should load a given assembly path + all its dependencies from the same directory into an isolated collectible ALC. Add unit tests. Use the SampleApp in /samples as the test subject.
+> Implement `ProjectAssemblyContext` in `EFQueryLens.Core`. It should load a given assembly path + all its dependencies from the same directory into an isolated collectible ALC. Add unit tests. Use the SampleApp in /samples as the test subject.
 
 **Session 3 — Roslyn Sandbox:**
-> Implement the Roslyn scripting sandbox in `QueryLens.Core`. It should take a DbContext instance and evaluate a LINQ expression string against it, returning the IQueryable result for `ToQueryString()`. Cache warm `ScriptState` per assembly path.
+> Implement the Roslyn scripting sandbox in `EFQueryLens.Core`. It should take a DbContext instance and evaluate a LINQ expression string against it, returning the IQueryable result for `ToQueryString()`. Cache warm `ScriptState` per assembly path.
