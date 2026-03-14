@@ -22,7 +22,6 @@ internal sealed record QueryLensHoverMetadataPayload
     [JsonPropertyName("SourceLine")] public int SourceLine { get; init; }
     [JsonPropertyName("DbContextType")] public string DbContextType { get; init; } = string.Empty;
     [JsonPropertyName("ProviderName")] public string ProviderName { get; init; } = string.Empty;
-    [JsonPropertyName("CreationStrategy")] public string CreationStrategy { get; init; } = string.Empty;
 }
 
 internal sealed record HoverPreviewComputationResult(bool Success, string Output);
@@ -178,7 +177,6 @@ internal sealed class HoverPreviewService
             SourceLine = line + 1,                   // convert 0-based LSP line to 1-based display
             DbContextType = metadata?.DbContextType ?? string.Empty,
             ProviderName = metadata?.ProviderName ?? string.Empty,
-            CreationStrategy = metadata?.CreationStrategy ?? string.Empty,
         };
         var metaJson = JsonSerializer.Serialize(metaPayload);
         var metaBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(metaJson));
@@ -225,4 +223,5 @@ internal sealed class HoverPreviewService
             return s.Trim();
         }
     }
+
 }

@@ -69,23 +69,28 @@ public sealed partial class QueryEvaluator
 
     private static string DetectProviderName(IEnumerable<Assembly> assemblies)
     {
+        var loadedAssemblyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var asm in assemblies)
         {
             var name = asm.GetName().Name;
             if (name is null)
                 continue;
 
-            if (name.StartsWith("Pomelo.EntityFrameworkCore", StringComparison.OrdinalIgnoreCase))
-                return "Pomelo.EntityFrameworkCore.MySql";
-            if (name.StartsWith("Npgsql.EntityFrameworkCore", StringComparison.OrdinalIgnoreCase))
-                return "Npgsql.EntityFrameworkCore.PostgreSQL";
-            if (name.Equals("Microsoft.EntityFrameworkCore.SqlServer", StringComparison.OrdinalIgnoreCase))
-                return "Microsoft.EntityFrameworkCore.SqlServer";
-            if (name.Equals("Microsoft.EntityFrameworkCore.Sqlite", StringComparison.OrdinalIgnoreCase))
-                return "Microsoft.EntityFrameworkCore.Sqlite";
-            if (name.Equals("Microsoft.EntityFrameworkCore.InMemory", StringComparison.OrdinalIgnoreCase))
-                return "Microsoft.EntityFrameworkCore.InMemory";
+            loadedAssemblyNames.Add(name);
         }
+
+        // Deterministic priority avoids enumeration-order drift when multiple providers are loaded.
+        if (loadedAssemblyNames.Any(name => name.StartsWith("Pomelo.EntityFrameworkCore", StringComparison.OrdinalIgnoreCase)))
+            return "Pomelo.EntityFrameworkCore.MySql";
+        if (loadedAssemblyNames.Any(name => name.StartsWith("Npgsql.EntityFrameworkCore", StringComparison.OrdinalIgnoreCase)))
+            return "Npgsql.EntityFrameworkCore.PostgreSQL";
+        if (loadedAssemblyNames.Contains("Microsoft.EntityFrameworkCore.SqlServer"))
+            return "Microsoft.EntityFrameworkCore.SqlServer";
+        if (loadedAssemblyNames.Contains("Microsoft.EntityFrameworkCore.Sqlite"))
+            return "Microsoft.EntityFrameworkCore.Sqlite";
+        if (loadedAssemblyNames.Contains("Microsoft.EntityFrameworkCore.InMemory"))
+            return "Microsoft.EntityFrameworkCore.InMemory";
 
         return "unknown";
     }
