@@ -13,12 +13,8 @@
     <Project Path="src/EFQueryLens.Lsp/EFQueryLens.Lsp.csproj" />
     <Project Path="src/EFQueryLens.Mcp/EFQueryLens.Mcp.csproj" />
   </Folder>
-  <Folder Name="/src/Plugins/">
-    <Project Path="src/Plugins/EFQueryLens.VisualStudio/EFQueryLens.VisualStudio.csproj" Id="d70b2379-b647-4009-8a98-1498cdf065c4" />
-    <Project Path="src/Plugins/EFQueryLens.VisualStudio2/EFQueryLens.VisualStudio2.csproj" Id="d152bafa-eeb9-4586-b092-a848fc8214e4" />
-  </Folder>
   <Folder Name="/src/Plugins/ef-querylens-visualstudio/">
-    <Project Path="src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio.csproj">
+    <Project Path="src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/EFQueryLens.VisualStudio.csproj">
       <Deploy />
     </Project>
   </Folder>

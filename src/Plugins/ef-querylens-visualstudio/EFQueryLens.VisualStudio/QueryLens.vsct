@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable">
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+
+  <Commands package="guidQueryLensPackage">
+    <Groups>
+      <Group guid="guidQueryLensCmdSet" id="QueryLensToolsParentGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS" />
+      </Group>
+
+      <Group guid="guidQueryLensCmdSet" id="QueryLensToolsGroup" priority="0x0600">
+        <Parent guid="guidQueryLensCmdSet" id="QueryLensToolsMenu" />
+      </Group>
+    </Groups>
+
+    <Menus>
+      <Menu guid="guidQueryLensCmdSet" id="QueryLensToolsMenu" priority="0x0900" type="Menu">
+        <Parent guid="guidQueryLensCmdSet" id="QueryLensToolsParentGroup" />
+        <Strings>
+          <ButtonText>EF QueryLens</ButtonText>
+          <LocCanonicalName>EFQueryLensMenu</LocCanonicalName>
+        </Strings>
+      </Menu>
+    </Menus>
+
+    <Buttons>
+      <Button guid="guidQueryLensCmdSet" id="cmdidRestartDaemon" priority="0x0100" type="Button">
+        <Parent guid="guidQueryLensCmdSet" id="QueryLensToolsGroup" />
+        <Strings>
+          <ButtonText>Restart Daemon</ButtonText>
+          <LocCanonicalName>RestartDaemon</LocCanonicalName>
+        </Strings>
+      </Button>
+
+      <Button guid="guidQueryLensCmdSet" id="cmdidOpenLogs" priority="0x0110" type="Button">
+        <Parent guid="guidQueryLensCmdSet" id="QueryLensToolsGroup" />
+        <Strings>
+          <ButtonText>Tail Logs</ButtonText>
+          <LocCanonicalName>OpenLogs</LocCanonicalName>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+
+  <Symbols>
+    <GuidSymbol name="guidQueryLensPackage" value="{68c125f2-2efa-48fa-a7b9-c8f39147b14c}" />
+
+    <GuidSymbol name="guidQueryLensCmdSet" value="{4a10c5ce-3593-4e26-b316-212b4546f6c0}">
+      <IDSymbol name="QueryLensToolsParentGroup" value="0x101E" />
+      <IDSymbol name="QueryLensToolsMenu" value="0x101F" />
+      <IDSymbol name="QueryLensToolsGroup" value="0x1020" />
+      <IDSymbol name="cmdidRestartDaemon" value="0x0100" />
+      <IDSymbol name="cmdidOpenLogs" value="0x0101" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>

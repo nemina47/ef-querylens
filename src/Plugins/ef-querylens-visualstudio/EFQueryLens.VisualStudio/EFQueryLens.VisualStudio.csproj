@@ -1,0 +1,92 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>EFQueryLens.VisualStudio</AssemblyName>
+    <RootNamespace>EFQueryLens.VisualStudio</RootNamespace>
+    <Nullable>enable</Nullable>
+    <LangVersion>12</LangVersion>
+    <NeutralLanguage>en-US</NeutralLanguage>
+    <UseWindowsForms>true</UseWindowsForms>
+
+    <VssdkCompatibleExtension>true</VssdkCompatibleExtension>
+    <GeneratePkgDefFile>true</GeneratePkgDefFile>
+    <UseCodebase>true</UseCodebase>
+    <SignAssembly>True</SignAssembly>
+    <AssemblyOriginatorKeyFile>sgKey.snk</AssemblyOriginatorKeyFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.8.0" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.VisualStudio.Extensibility.Build" Version="17.14.40608" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.13.40008" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="System.ComponentModel.Composition" />
+    <Reference Include="System.Design" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="WindowsBase" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <VSCTCompile Include="QueryLens.vsct">
+      <ResourceName>Menus.ctmenu</ResourceName>
+    </VSCTCompile>
+  </ItemGroup>
+
+  <!-- Path to the built LSP server output (Debug or Release, matching this project's configuration) -->
+  <PropertyGroup>
+    <LspBinDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '..', '..', '..', 'EFQueryLens.Lsp', 'bin', '$(Configuration)', 'net10.0'))</LspBinDir>
+     <DaemonBinDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '..', '..', '..', 'EFQueryLens.Daemon', 'bin', '$(Configuration)', 'net10.0'))</DaemonBinDir>
+  </PropertyGroup>
+
+  <!-- Ensure EFQueryLens.Lsp is built before VSIX packaging; do not add it as an assembly reference -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\EFQueryLens.Lsp\EFQueryLens.Lsp.csproj"
+                      ReferenceOutputAssembly="false"
+                      SkipGetTargetFrameworkProperties="true" />
+     <ProjectReference Include="..\..\..\EFQueryLens.Daemon\EFQueryLens.Daemon.csproj"
+                       ReferenceOutputAssembly="false"
+                       SkipGetTargetFrameworkProperties="true" />
+  </ItemGroup>
+
+  <!--
+    Copy all LSP server files into $(TargetDir)server\ and register them as VSIX content.
+    Runs before GetVsixSourceItems so the VSIX packager picks them up under server/.
+    The recursive glob preserves Roslyn locale subdirs (de/, fr/, etc.).
+  -->
+  <Target Name="BundleLspServer" BeforeTargets="GetVsixSourceItems">
+    <ItemGroup>
+      <_LspServerFiles Include="$(LspBinDir)**\*"
+                       Exclude="$(LspBinDir)**\*.pdb;$(LspBinDir)ref\**;$(LspBinDir)publish\**" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_LspServerFiles)"
+          DestinationFiles="@(_LspServerFiles->'$(TargetDir)server\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <Content Include="$(TargetDir)server\**\*">
+        <Link>server\%(RecursiveDir)%(Filename)%(Extension)</Link>
+        <IncludeInVSIX>true</IncludeInVSIX>
+      </Content>
+    </ItemGroup>
+  </Target>
+
+  <!-- Copy EFQueryLens.Daemon output into $(TargetDir)daemon\ and include in VSIX. -->
+  <Target Name="BundleDaemon" BeforeTargets="GetVsixSourceItems">
+    <ItemGroup>
+      <_DaemonFiles Include="$(DaemonBinDir)**\*"
+                    Exclude="$(DaemonBinDir)**\*.pdb;$(DaemonBinDir)ref\**;$(DaemonBinDir)publish\**" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_DaemonFiles)"
+          DestinationFiles="@(_DaemonFiles->'$(TargetDir)daemon\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <Content Include="$(TargetDir)daemon\**\*">
+        <Link>daemon\%(RecursiveDir)%(Filename)%(Extension)</Link>
+        <IncludeInVSIX>true</IncludeInVSIX>
+      </Content>
+    </ItemGroup>
+  </Target>
+
+</Project>

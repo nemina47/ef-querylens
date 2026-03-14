@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+  <Metadata>
+    <Identity Id="EFQueryLens.VisualStudio.9f5a9a8e-f220-4ef0-be7c-a3cff5c767a5" Version="1.0.4" Language="en-US" Publisher="Microsoft" />
+    <DisplayName>EFQueryLens.VisualStudio</DisplayName>
+    <Description>EFQueryLens Visual Studio extension with LSP-backed LINQ SQL hover previews and daemon controls.</Description>
+    <Preview>true</Preview>
+  </Metadata>
+  <Installation ExtensionType="VSSDK+VisualStudio.Extensibility">
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.14,)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.14,)">
+      <ProductArchitecture>arm64</ProductArchitecture>
+    </InstallationTarget>
+  </Installation>
+  <Prerequisites>
+    <Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="[17.14,)" DisplayName="Visual Studio core editor" />
+  </Prerequisites>
+  <Assets>
+    <Asset Type="Microsoft.VisualStudio.VsPackage" Path="EFQueryLens.VisualStudio.pkgdef" />
+    <Asset Type="Microsoft.VisualStudio.MefComponent" Path="EFQueryLens.VisualStudio.dll" />
+  </Assets>
+</PackageManifest>

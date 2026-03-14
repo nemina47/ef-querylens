@@ -324,27 +324,32 @@ internal sealed class LanguageServerHandler
                || raw.Equals("on", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static JObject CreateInitializeResult() => new()
+    private static JObject CreateInitializeResult()
     {
-        ["capabilities"] = new JObject
+        var enableLspHover = ReadBoolEnvironmentVariable("QUERYLENS_ENABLE_LSP_HOVER", fallback: true);
+
+        return new JObject
         {
-            ["textDocumentSync"] = new JObject
+            ["capabilities"] = new JObject
             {
-                ["openClose"] = true,
-                ["change"] = (int)TextDocumentSyncKind.Full,
-                ["save"] = new JObject { ["includeText"] = true },
+                ["textDocumentSync"] = new JObject
+                {
+                    ["openClose"] = true,
+                    ["change"] = (int)TextDocumentSyncKind.Full,
+                    ["save"] = new JObject { ["includeText"] = true },
+                },
+                ["hoverProvider"] = enableLspHover,
+                ["inlayHintProvider"] = new JObject
+                {
+                    ["resolveProvider"] = true,
+                },
+                ["executeCommandProvider"] = new JObject
+                {
+                    ["commands"] = new JArray(
+                        "efquerylens.warmup",
+                        "efquerylens.daemon.restart")
+                },
             },
-            ["hoverProvider"] = true,
-            ["inlayHintProvider"] = new JObject
-            {
-                ["resolveProvider"] = true,
-            },
-            ["executeCommandProvider"] = new JObject
-            {
-                ["commands"] = new JArray(
-                    "efquerylens.warmup",
-                    "efquerylens.daemon.restart")
-            },
-        },
-    };
+        };
+    }
 }
