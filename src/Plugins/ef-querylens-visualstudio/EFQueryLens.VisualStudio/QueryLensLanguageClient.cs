@@ -703,4 +703,7 @@ internal sealed class QueryLensStructuredHoverResponse
     public List<string>? Warnings { get; set; }
     public string? EnrichedSql { get; set; }
     public string? Mode { get; set; }
+    public int Status { get; set; }
+    public string? StatusMessage { get; set; }
+    public double AvgTranslationMs { get; set; }
 }

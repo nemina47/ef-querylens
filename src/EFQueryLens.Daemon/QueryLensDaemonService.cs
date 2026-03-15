@@ -13,6 +13,8 @@ namespace EFQueryLens.Daemon;
 /// </summary>
 internal sealed class QueryLensDaemonService(
     IQueryLensEngine engine,
+    SqlTranslationQueue queue,
+    TranslationMetrics metrics,
     CancellationTokenSource shutdownCts,
     ConcurrentDictionary<string, DaemonWarmState> contextStates,
     DateTime startedUtc)
@@ -49,6 +51,54 @@ internal sealed class QueryLensDaemonService(
                 $"translate-failed context={request.ContextName} elapsedMs={sw.ElapsedMilliseconds} " +
                 $"type={ex.GetType().Name} message={ex.Message}");
             throw;
+        }
+    }
+
+    [JsonRpcMethod(DaemonMethods.TranslateQueued)]
+    public async Task<DaemonQueuedTranslateResponse> TranslateQueuedAsync(
+        DaemonQueuedTranslateRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var queued = await queue.EnqueueOrGetAsync(
+                request.SemanticKey,
+                request.ContextName,
+                request.Request,
+                cancellationToken);
+
+            if (queued.Status is QueryTranslationStatus.Ready)
+            {
+                TrackState(request.ContextName, queued.Result?.Success == true
+                    ? DaemonWarmState.Ready
+                    : DaemonWarmState.Cold);
+            }
+            else
+            {
+                TrackState(request.ContextName, DaemonWarmState.Warming);
+            }
+
+            return new DaemonQueuedTranslateResponse
+            {
+                Status = queued.Status,
+                JobId = queued.JobId,
+                AverageTranslationMs = queued.AverageTranslationMs,
+                Result = queued.Result,
+            };
+        }
+        catch (Exception ex)
+        {
+            LogDebug(
+                $"translate-queued-failed context={request.ContextName} " +
+                $"type={ex.GetType().Name} message={ex.Message}");
+
+            return new DaemonQueuedTranslateResponse
+            {
+                Status = QueryTranslationStatus.Unreachable,
+                JobId = null,
+                AverageTranslationMs = metrics.GetAverageMs(request.ContextName),
+                Result = null,
+            };
         }
     }
 

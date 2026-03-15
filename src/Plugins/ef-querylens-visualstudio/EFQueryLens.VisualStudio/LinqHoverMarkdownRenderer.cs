@@ -132,7 +132,11 @@ internal static class LinqHoverMarkdownRenderer
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        if (!response.Success)
+        var status = response.Status;
+        var isQueueStatus = status is 1 or 2;
+        var isServiceUnavailable = status is 3;
+
+        if (!response.Success && !isQueueStatus && !isServiceUnavailable)
         {
             var errorMessage = response.ErrorMessage ?? "Translation failed.";
             return CreateFromMarkdown($"**QueryLens Error**\n```text\n{errorMessage}\n```");
@@ -147,9 +151,10 @@ internal static class LinqHoverMarkdownRenderer
 
         var queryParams = $"uri={Uri.EscapeDataString(uri)}&line={line}&character={character}";
         var statementWord = response.CommandCount == 1 ? "query" : "queries";
+        var statusLabel = BuildStructuredStatusLabel(status, response.AvgTranslationMs);
         var headerText = string.IsNullOrWhiteSpace(copySql)
-            ? $"**QueryLens · {response.CommandCount} {statementWord}**"
-            : $"**QueryLens · {response.CommandCount} {statementWord}** | [Copy SQL](efquerylens://copySql?{queryParams}) | [Open SQL Editor](efquerylens://openSqlEditor?{queryParams})";
+            ? $"**QueryLens · {response.CommandCount} {statementWord} · {statusLabel}**"
+            : $"**QueryLens · {response.CommandCount} {statementWord} · {statusLabel}** | [Copy SQL](efquerylens://copySql?{queryParams}) | [Open SQL Editor](efquerylens://openSqlEditor?{queryParams})";
 
         var hostBorder = new Border
         {
@@ -178,6 +183,13 @@ internal static class LinqHoverMarkdownRenderer
         };
 
         var stack = new StackPanel();
+
+        if (!response.Success && (!string.IsNullOrWhiteSpace(response.StatusMessage) || !string.IsNullOrWhiteSpace(response.ErrorMessage)))
+        {
+            var statusMessage = response.StatusMessage ?? response.ErrorMessage ?? "EF QueryLens is processing this query.";
+            stack.Children.Add(RenderParagraph(statusMessage, copySql));
+        }
+
         foreach (var stmt in statements)
         {
             if (!string.IsNullOrWhiteSpace(stmt.SplitLabel))
@@ -204,6 +216,22 @@ internal static class LinqHoverMarkdownRenderer
         hostBorder.Child = layoutGrid;
 
         return hostBorder;
+    }
+
+    private static string BuildStructuredStatusLabel(int status, double avgTranslationMs)
+    {
+        return status switch
+        {
+            0 => "🟢 ready",
+            1 => avgTranslationMs > 0
+                ? $"🔵 queued ({avgTranslationMs:0} ms avg)"
+                : "🔵 queued",
+            2 => avgTranslationMs > 0
+                ? $"🟠 starting ({avgTranslationMs:0} ms avg)"
+                : "🟠 starting",
+            3 => "🔴 unavailable",
+            _ => "ready",
+        };
     }
 
     private static string? BuildEnrichedSqlContentFromResponse(string? rawSql, QueryLensStructuredHoverResponse response)

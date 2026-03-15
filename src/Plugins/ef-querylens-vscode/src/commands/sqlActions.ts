@@ -152,6 +152,23 @@ export function createSqlActionHandlers(getClient: () => LanguageClient | undefi
             // Prefer structured hover which carries server-built EnrichedSql, avoiding
             // client-side markdown extraction + metadata decoding + enrichment rebuild.
             const structured = await tryGetStructuredHover(client, uriString, line, character);
+            if (structured && structured.Status !== 0) {
+                const statusMessage = structured.StatusMessage
+                    ?? (structured.Status === 3
+                        ? 'EF QueryLens services are unavailable and cannot communicate right now.'
+                        : structured.Status === 2
+                            ? 'EF QueryLens is starting up and warming translation services.'
+                            : 'EF QueryLens queued this query and is still processing it.');
+
+                if (structured.Status === 3) {
+                    window.showWarningMessage(statusMessage);
+                } else {
+                    window.showInformationMessage(statusMessage);
+                }
+
+                return null;
+            }
+
             if (structured?.Success && structured.EnrichedSql) {
                 const rawSql = structured.Statements?.[0]?.Sql ?? structured.EnrichedSql;
                 const formattedSql = formatSqlOnShow ? formatSql(rawSql, sqlDialect) : rawSql;

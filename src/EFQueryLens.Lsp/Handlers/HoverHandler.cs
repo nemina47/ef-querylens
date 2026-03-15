@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using EFQueryLens.Core;
 using Microsoft.VisualStudio.LanguageServer.Protocol;
 using EFQueryLens.Lsp.Parsing;
 using EFQueryLens.Lsp.Services;
@@ -20,12 +21,14 @@ internal sealed class HoverHandler
     private readonly HoverPreviewService _hoverPreviewService;
     private readonly ConcurrentDictionary<string, CachedHoverResult> _hoverCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CachedHoverResult> _semanticHoverCache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, Lazy<Task<Hover?>>> _inflightSemanticHover = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Lazy<Task<ComputedHover>>> _inflightSemanticHover = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CachedStructuredResult> _structuredHoverCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CachedStructuredResult> _semanticStructuredHoverCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Lazy<Task<QueryLensStructuredHoverResult?>>> _inflightSemanticStructuredHover = new(StringComparer.OrdinalIgnoreCase);
     private readonly int _hoverCacheTtlMs;
     private readonly int _hoverCancellationGraceMs;
+    private readonly int _hoverQueuedAdaptiveWaitMs;
+    private readonly int _structuredQueuedAdaptiveWaitMs;
     private readonly bool _debugEnabled;
 
     public HoverHandler(DocumentManager documentManager, HoverPreviewService hoverPreviewService)
@@ -42,6 +45,16 @@ internal sealed class HoverHandler
             fallback: 350,
             min: 0,
             max: 5_000);
+        _hoverQueuedAdaptiveWaitMs = ReadIntEnvironmentVariable(
+            "QUERYLENS_MARKDOWN_QUEUE_ADAPTIVE_WAIT_MS",
+            fallback: 200,
+            min: 0,
+            max: 2_000);
+        _structuredQueuedAdaptiveWaitMs = ReadIntEnvironmentVariable(
+            "QUERYLENS_STRUCTURED_QUEUE_ADAPTIVE_WAIT_MS",
+            fallback: 200,
+            min: 0,
+            max: 2_000);
         _debugEnabled = ReadBoolEnvironmentVariable("QUERYLENS_DEBUG", fallback: false);
     }
 
@@ -57,6 +70,7 @@ internal sealed class HoverHandler
 
         LogHoverDebug($"hover-request path={filePath} line={request.Position.Line} char={request.Position.Character}");
         var hasSemanticContext = TryResolveSemanticHoverContext(
+            filePath,
             sourceText,
             request.Position.Line,
             request.Position.Character,
@@ -96,7 +110,7 @@ internal sealed class HoverHandler
             var inFlightKey = BuildInFlightKey(filePath, semanticContext);
             var lazyTask = _inflightSemanticHover.GetOrAdd(
                 inFlightKey,
-                _ => new Lazy<Task<Hover?>>(
+                _ => new Lazy<Task<ComputedHover>>(
                     () => ComputeAndCacheSemanticHoverAsync(
                         inFlightKey,
                         cacheKey,
@@ -118,8 +132,11 @@ internal sealed class HoverHandler
             {
                 var sharedTask = lazyTask.Value;
                 var sharedResult = await WaitWithCancellationAsync(sharedTask, cancellationToken);
-                CacheHover(cacheKey, sharedResult, semanticContext);
-                return sharedResult;
+                if (sharedResult.Status is QueryTranslationStatus.Ready)
+                {
+                    CacheHover(cacheKey, sharedResult.Hover, semanticContext);
+                }
+                return sharedResult.Hover;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -127,11 +144,14 @@ internal sealed class HoverHandler
                 var (completed, salvagedResult) = await TryGetResultWithinGraceAsync(sharedTask, _hoverCancellationGraceMs);
                 if (completed)
                 {
-                    CacheHover(cacheKey, salvagedResult, semanticContext);
+                    if (salvagedResult.Status is QueryTranslationStatus.Ready)
+                    {
+                        CacheHover(cacheKey, salvagedResult.Hover, semanticContext);
+                    }
                     LogHoverDebug(
                         $"hover-cancel-salvaged line={effectiveLine} char={effectiveCharacter} " +
                         $"graceMs={_hoverCancellationGraceMs}");
-                    return salvagedResult;
+                    return salvagedResult.Hover;
                 }
 
                 if (TryGetSemanticCachedHover(semanticContext.SemanticKey, out var semanticCachedHoverAfterCancel))
@@ -147,7 +167,7 @@ internal sealed class HoverHandler
         }
 
         var sw = Stopwatch.StartNew();
-        Hover? computed;
+        ComputedHover computed;
         try
         {
             computed = await ComputeHoverAsync(
@@ -175,8 +195,11 @@ internal sealed class HoverHandler
                             semanticContext.EffectiveLine,
                             semanticContext.EffectiveCharacter,
                             CancellationToken.None);
-                        CacheHover(cacheKey, warmed, semanticContext);
-                        LogHoverDebug($"hover-warm-cache-ready line={semanticContext.EffectiveLine} char={semanticContext.EffectiveCharacter}");
+                        if (warmed.Status is QueryTranslationStatus.Ready)
+                        {
+                            CacheHover(cacheKey, warmed.Hover, semanticContext);
+                            LogHoverDebug($"hover-warm-cache-ready line={semanticContext.EffectiveLine} char={semanticContext.EffectiveCharacter}");
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -189,13 +212,16 @@ internal sealed class HoverHandler
         }
         sw.Stop();
 
-        LogHoverDebug($"hover-compute-finished line={effectiveLine} char={effectiveCharacter} elapsedMs={sw.ElapsedMilliseconds} hasResult={computed is not null}");
+        LogHoverDebug($"hover-compute-finished line={effectiveLine} char={effectiveCharacter} elapsedMs={sw.ElapsedMilliseconds} hasResult={computed.Hover is not null}");
 
-        CacheHover(cacheKey, computed, semanticContext);
-        return computed;
+        if (computed.Status is QueryTranslationStatus.Ready)
+        {
+            CacheHover(cacheKey, computed.Hover, semanticContext);
+        }
+        return computed.Hover;
     }
 
-    private async Task<Hover?> ComputeAndCacheSemanticHoverAsync(
+    private async Task<ComputedHover> ComputeAndCacheSemanticHoverAsync(
         string inFlightKey,
         string cacheKey,
         string filePath,
@@ -211,13 +237,17 @@ internal sealed class HoverHandler
                 semanticContext.EffectiveLine,
                 semanticContext.EffectiveCharacter,
                 CancellationToken.None);
+
             sw.Stop();
 
             LogHoverDebug(
                 $"hover-compute-finished line={semanticContext.EffectiveLine} char={semanticContext.EffectiveCharacter} " +
-                $"elapsedMs={sw.ElapsedMilliseconds} hasResult={computed is not null}");
+                $"elapsedMs={sw.ElapsedMilliseconds} hasResult={computed.Hover is not null}");
 
-            CacheHover(cacheKey, computed, semanticContext);
+            if (computed.Status is QueryTranslationStatus.Ready)
+            {
+                CacheHover(cacheKey, computed.Hover, semanticContext);
+            }
             return computed;
         }
         catch (Exception ex)
@@ -248,6 +278,7 @@ internal sealed class HoverHandler
 
         LogHoverDebug($"structured-hover-request path={filePath} line={request.Position.Line} char={request.Position.Character}");
         var hasSemanticContext = TryResolveSemanticHoverContext(
+            filePath,
             sourceText,
             request.Position.Line,
             request.Position.Character,
@@ -392,6 +423,32 @@ internal sealed class HoverHandler
             character,
             cancellationToken);
 
+        if (result.Status is QueryTranslationStatus.InQueue or QueryTranslationStatus.Starting
+            && result.AvgTranslationMs > 0
+            && result.AvgTranslationMs < 200
+            && _structuredQueuedAdaptiveWaitMs > 0)
+        {
+            LogHoverDebug(
+                $"structured-hover-adaptive-wait line={line} char={character} " +
+                $"waitMs={_structuredQueuedAdaptiveWaitMs} avgMs={result.AvgTranslationMs:0.##}");
+
+            await Task.Delay(_structuredQueuedAdaptiveWaitMs, cancellationToken);
+
+            var secondAttempt = await _hoverPreviewService.BuildStructuredAsync(
+                filePath,
+                sourceText,
+                line,
+                character,
+                cancellationToken);
+
+            if (secondAttempt.Status is QueryTranslationStatus.Ready)
+            {
+                return secondAttempt;
+            }
+
+            return secondAttempt;
+        }
+
         if (!result.Success &&
             result.ErrorMessage?.StartsWith("Could not extract a LINQ query expression", StringComparison.OrdinalIgnoreCase) == true)
         {
@@ -434,8 +491,10 @@ internal sealed class HoverHandler
     private void CacheStructured(string cacheKey, QueryLensStructuredHoverResult? result, SemanticHoverContext? semanticContext)
     {
         if (_hoverCacheTtlMs <= 0) return;
+        if (result is null || result.Status is not QueryTranslationStatus.Ready) return;
+
         _structuredHoverCache[cacheKey] = new CachedStructuredResult(DateTime.UtcNow.Ticks, result);
-        if (semanticContext is not null && result is not null)
+        if (semanticContext is not null)
         {
             _semanticStructuredHoverCache[semanticContext.SemanticKey] = new CachedStructuredResult(DateTime.UtcNow.Ticks, result);
         }
@@ -459,7 +518,7 @@ internal sealed class HoverHandler
         return await File.ReadAllTextAsync(filePath, cancellationToken);
     }
 
-    private async Task<Hover?> ComputeHoverAsync(
+    private async Task<ComputedHover> ComputeHoverAsync(
         string filePath,
         string sourceText,
         int line,
@@ -473,10 +532,29 @@ internal sealed class HoverHandler
             character,
             cancellationToken);
 
+        if (result.Status is QueryTranslationStatus.InQueue or QueryTranslationStatus.Starting
+            && result.AvgTranslationMs > 0
+            && result.AvgTranslationMs < 200
+            && _hoverQueuedAdaptiveWaitMs > 0)
+        {
+            LogHoverDebug(
+                $"hover-adaptive-wait line={line} char={character} " +
+                $"waitMs={_hoverQueuedAdaptiveWaitMs} avgMs={result.AvgTranslationMs:0.##}");
+
+            await Task.Delay(_hoverQueuedAdaptiveWaitMs, cancellationToken);
+
+            result = await _hoverPreviewService.BuildMarkdownAsync(
+                filePath,
+                sourceText,
+                line,
+                character,
+                cancellationToken);
+        }
+
         if (!result.Success &&
             result.Output.StartsWith("Could not extract a LINQ query expression", StringComparison.OrdinalIgnoreCase))
         {
-            return null;
+            return new ComputedHover(null, result.Status);
         }
 
         var markdown = result.Success
@@ -489,10 +567,12 @@ internal sealed class HoverHandler
             Value = markdown,
         };
 
-        return new Hover
+        var hover = new Hover
         {
             Contents = new SumType<SumType<string, MarkedString>, SumType<string, MarkedString>[], MarkupContent>(content),
         };
+
+        return new ComputedHover(hover, result.Status);
     }
 
     private string BuildHoverCacheKey(
@@ -513,17 +593,19 @@ internal sealed class HoverHandler
     }
 
     private static bool TryResolveSemanticHoverContext(
+        string filePath,
         string sourceText,
         int line,
         int character,
         out SemanticHoverContext? semanticContext)
     {
         semanticContext = null;
+        var projectKey = ProjectKeyHelper.GetProjectKey(filePath);
 
         if (TryFindContainingChain(sourceText, line, character, out var containingChain))
         {
             semanticContext = new SemanticHoverContext(
-                SemanticKey: $"{containingChain.ContextVariableName.Trim()}|{NormalizeWhitespace(containingChain.Expression)}",
+                SemanticKey: $"{projectKey}|{containingChain.ContextVariableName.Trim()}|{NormalizeWhitespace(containingChain.Expression)}",
                 EffectiveLine: containingChain.Line,
                 EffectiveCharacter: containingChain.Character);
             return true;
@@ -552,7 +634,7 @@ internal sealed class HoverHandler
         }
 
         semanticContext = new SemanticHoverContext(
-            SemanticKey: $"{contextVariableName.Trim()}|{NormalizeWhitespace(expression)}",
+            SemanticKey: $"{projectKey}|{contextVariableName.Trim()}|{NormalizeWhitespace(expression)}",
             EffectiveLine: line,
             EffectiveCharacter: character);
         return true;
@@ -817,4 +899,6 @@ internal sealed class HoverHandler
     private sealed record CachedHoverResult(long CreatedAtTicks, Hover? Hover);
 
     private sealed record CachedStructuredResult(long CreatedAtTicks, QueryLensStructuredHoverResult? Result);
+
+    private readonly record struct ComputedHover(Hover? Hover, QueryTranslationStatus Status);
 }

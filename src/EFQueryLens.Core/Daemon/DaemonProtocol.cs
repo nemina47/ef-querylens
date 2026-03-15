@@ -6,6 +6,7 @@ namespace EFQueryLens.Core.Daemon;
 public static class DaemonMethods
 {
     public const string Translate = "ql/translate";
+    public const string TranslateQueued = "ql/translateQueued";
     public const string InspectModel = "ql/inspectModel";
     public const string GetState = "ql/getState";
     public const string Ping = "ql/ping";
@@ -32,6 +33,21 @@ public sealed record DaemonTranslateRequest
 public sealed record DaemonTranslateResponse
 {
     public required QueryTranslationResult Result { get; init; }
+}
+
+public sealed record DaemonQueuedTranslateRequest
+{
+    public required string ContextName { get; init; }
+    public required string SemanticKey { get; init; }
+    public required TranslationRequest Request { get; init; }
+}
+
+public sealed record DaemonQueuedTranslateResponse
+{
+    public required QueryTranslationStatus Status { get; init; }
+    public string? JobId { get; init; }
+    public required double AverageTranslationMs { get; init; }
+    public QueryTranslationResult? Result { get; init; }
 }
 
 public sealed record DaemonInspectRequest

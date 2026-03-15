@@ -110,6 +110,18 @@ public sealed class QueryLensEngine : IQueryLensEngine, IDbContextPoolProvider
         return retryResult;
     }
 
+    public async Task<QueuedTranslationResult> TranslateQueuedAsync(
+        TranslationRequest request, CancellationToken ct = default)
+    {
+        var result = await TranslateAsync(request, ct);
+        return new QueuedTranslationResult
+        {
+            Status = QueryTranslationStatus.Ready,
+            AverageTranslationMs = 0,
+            Result = result,
+        };
+    }
+
     public Task<ExplainResult> ExplainAsync(
         ExplainRequest request, CancellationToken ct = default) =>
         throw new NotImplementedException(

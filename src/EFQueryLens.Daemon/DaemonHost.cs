@@ -7,7 +7,11 @@ using StreamJsonRpc;
 
 namespace EFQueryLens.Daemon;
 
-internal sealed class DaemonHost(string pipeName, IQueryLensEngine engine)
+internal sealed class DaemonHost(
+    string pipeName,
+    IQueryLensEngine engine,
+    SqlTranslationQueue queue,
+    TranslationMetrics metrics)
 {
     private readonly DateTime _startedUtc = DateTime.UtcNow;
     private readonly bool _debugEnabled = ReadBoolEnvironmentVariable("QUERYLENS_DEBUG", fallback: false);
@@ -65,7 +69,7 @@ internal sealed class DaemonHost(string pipeName, IQueryLensEngine engine)
             }
 
             var sessionId = Interlocked.Increment(ref _nextSessionId);
-            var service = new QueryLensDaemonService(engine, _shutdownCts, _contextStates, _startedUtc);
+            var service = new QueryLensDaemonService(engine, queue, metrics, _shutdownCts, _contextStates, _startedUtc);
             var rpc = new JsonRpc(BuildMessageHandler(pipe), service);
             LogDebug("daemon-client-connected");
             _clientSessions[sessionId] = RunSessionAsync(sessionId, rpc, pipe);

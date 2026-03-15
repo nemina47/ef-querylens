@@ -11,6 +11,9 @@ public interface IDaemonService
     [JsonRpcMethod(DaemonMethods.Translate)]
     Task<DaemonTranslateResponse> TranslateAsync(DaemonTranslateRequest request, CancellationToken cancellationToken = default);
 
+    [JsonRpcMethod(DaemonMethods.TranslateQueued)]
+    Task<DaemonQueuedTranslateResponse> TranslateQueuedAsync(DaemonQueuedTranslateRequest request, CancellationToken cancellationToken = default);
+
     [JsonRpcMethod(DaemonMethods.InspectModel)]
     Task<DaemonInspectResponse> InspectModelAsync(DaemonInspectRequest request, CancellationToken cancellationToken = default);
 

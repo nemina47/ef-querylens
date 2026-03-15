@@ -23,9 +23,16 @@ internal sealed record QueryLensHoverMetadataPayload
     [JsonPropertyName("DbContextType")] public string DbContextType { get; init; } = string.Empty;
     [JsonPropertyName("ProviderName")] public string ProviderName { get; init; } = string.Empty;
     [JsonPropertyName("EnrichedSql")] public string EnrichedSql { get; init; } = string.Empty;
+    [JsonPropertyName("Status")] public int Status { get; init; }
+    [JsonPropertyName("StatusMessage")] public string StatusMessage { get; init; } = string.Empty;
+    [JsonPropertyName("AvgTranslationMs")] public double AvgTranslationMs { get; init; }
 }
 
-internal sealed record HoverPreviewComputationResult(bool Success, string Output);
+internal sealed record HoverPreviewComputationResult(
+    bool Success,
+    string Output,
+    QueryTranslationStatus Status = QueryTranslationStatus.Ready,
+    double AvgTranslationMs = 0);
 
 internal sealed record QueryLensSqlStatement(string Sql, string? SplitLabel);
 
@@ -41,7 +48,10 @@ internal sealed record QueryLensStructuredHoverResult(
     int SourceLine,
     IReadOnlyList<string> Warnings,
     string? EnrichedSql,
-    string? Mode);
+    string? Mode,
+    QueryTranslationStatus Status = QueryTranslationStatus.Ready,
+    string? StatusMessage = null,
+    double AvgTranslationMs = 0);
 
 internal sealed class HoverPreviewService
 {
@@ -97,7 +107,7 @@ internal sealed class HoverPreviewService
             var sw = Stopwatch.StartNew();
             Console.Error.WriteLine($"[QL-Hover] translate-start line={line} char={character} assembly={targetAssembly}");
 
-            var translation = await _engine.TranslateAsync(new TranslationRequest
+            var queued = await _engine.TranslateQueuedAsync(new TranslationRequest
             {
                 AssemblyPath = targetAssembly,
                 Expression = expression,
@@ -106,6 +116,36 @@ internal sealed class HoverPreviewService
                 UsingAliases = new Dictionary<string, string>(usingContext.Aliases, StringComparer.Ordinal),
                 UsingStaticTypes = usingContext.StaticTypes.ToArray(),
             }, cancellationToken);
+
+            if (queued.Status is not QueryTranslationStatus.Ready)
+            {
+                sw.Stop();
+                var statusMessage = queued.Status switch
+                {
+                    QueryTranslationStatus.Starting => "EF QueryLens is starting up and warming the translation pipeline.",
+                    QueryTranslationStatus.InQueue => "EF QueryLens queued this query and is still processing it.",
+                    QueryTranslationStatus.Unreachable => "EF QueryLens services are unavailable. Could not communicate with daemon.",
+                    _ => "EF QueryLens is processing this query.",
+                };
+
+                Console.Error.WriteLine(
+                    $"[QL-Hover] queued-status line={line} char={character} " +
+                    $"status={queued.Status} avgMs={queued.AverageTranslationMs:0.##}");
+
+                return new HoverPreviewComputationResult(
+                    Success: true,
+                    Output: BuildQueuedStatusMarkdown(queued.Status, statusMessage, queued.AverageTranslationMs),
+                    Status: queued.Status,
+                    AvgTranslationMs: queued.AverageTranslationMs);
+            }
+
+            var translation = queued.Result;
+            if (translation is null)
+            {
+                sw.Stop();
+                Console.Error.WriteLine($"[QL-Hover] translate-missing-result line={line} char={character}");
+                return new HoverPreviewComputationResult(false, "Queued translation completed without a result payload.");
+            }
 
             sw.Stop();
             Console.Error.WriteLine($"[QL-Hover] translate-finished line={line} char={character} success={translation.Success} elapsedMs={sw.ElapsedMilliseconds} commands={translation.Commands.Count} sqlLen={(translation.Sql?.Length ?? 0)}");
@@ -134,13 +174,33 @@ internal sealed class HoverPreviewService
                 commands, translation.Warnings, documentUri, line, character,
                 expression ?? string.Empty, filePath, metadata);
             Console.Error.WriteLine($"[QL-Hover] hover-markdown-ready line={line} char={character} markdownLen={markdown.Length}");
-            return new HoverPreviewComputationResult(true, markdown);
+            return new HoverPreviewComputationResult(true, markdown, QueryTranslationStatus.Ready, queued.AverageTranslationMs);
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[QL-Hover] translate-exception line={line} char={character} type={ex.GetType().Name} message={ex.Message}");
-            return new HoverPreviewComputationResult(false, $"{ex.GetType().Name}: {ex.Message}");
+            return new HoverPreviewComputationResult(false, $"{ex.GetType().Name}: {ex.Message}", QueryTranslationStatus.Unreachable);
         }
+    }
+
+    private static string BuildQueuedStatusMarkdown(
+        QueryTranslationStatus status,
+        string statusMessage,
+        double avgTranslationMs)
+    {
+        var statusLabel = status switch
+        {
+            QueryTranslationStatus.Starting => "🟠 starting",
+            QueryTranslationStatus.InQueue => "🔵 queued",
+            QueryTranslationStatus.Unreachable => "🔴 unavailable",
+            _ => "🟢 ready",
+        };
+
+        var avgLine = avgTranslationMs > 0
+            ? $"\n\nAverage SQL generation time: {avgTranslationMs:0} ms."
+            : string.Empty;
+
+        return $"**QueryLens · {statusLabel}**\n\n{statusMessage}{avgLine}";
     }
 
     public async Task<QueryLensStructuredHoverResult> BuildStructuredAsync(
@@ -150,8 +210,11 @@ internal sealed class HoverPreviewService
         int character,
         CancellationToken cancellationToken)
     {
-        static QueryLensStructuredHoverResult Fail(string msg) =>
-            new(false, msg, [], 0, null, null, null, null, 0, [], null, null);
+        static QueryLensStructuredHoverResult Fail(
+            string msg,
+            QueryTranslationStatus status = QueryTranslationStatus.Ready,
+            double avgTranslationMs = 0) =>
+            new(false, msg, [], 0, null, null, null, null, 0, [], null, null, status, msg, avgTranslationMs);
 
         var expression = LspSyntaxHelper.TryExtractLinqExpression(sourceText, line, character, out var contextVariableName);
         Console.Error.WriteLine($"[QL-Hover] structured extract-linq line={line} char={character} found={!string.IsNullOrWhiteSpace(expression)} ctx={contextVariableName}");
@@ -191,7 +254,7 @@ internal sealed class HoverPreviewService
             var sw = Stopwatch.StartNew();
             Console.Error.WriteLine($"[QL-Hover] structured translate-start line={line} char={character} assembly={targetAssembly}");
 
-            var translation = await _engine.TranslateAsync(new TranslationRequest
+            var queued = await _engine.TranslateQueuedAsync(new TranslationRequest
             {
                 AssemblyPath = targetAssembly,
                 Expression = expression,
@@ -200,6 +263,47 @@ internal sealed class HoverPreviewService
                 UsingAliases = new Dictionary<string, string>(usingContext.Aliases, StringComparer.Ordinal),
                 UsingStaticTypes = usingContext.StaticTypes.ToArray(),
             }, cancellationToken);
+
+            if (queued.Status is not QueryTranslationStatus.Ready)
+            {
+                sw.Stop();
+                var statusMessage = queued.Status switch
+                {
+                    QueryTranslationStatus.Starting => "EF QueryLens is starting up and warming the translation pipeline.",
+                    QueryTranslationStatus.InQueue => "EF QueryLens queued this query and is still processing it.",
+                    QueryTranslationStatus.Unreachable => "EF QueryLens services are unavailable. Could not communicate with daemon.",
+                    _ => "EF QueryLens is processing this query.",
+                };
+
+                Console.Error.WriteLine(
+                    $"[QL-Hover] structured queued-status line={line} char={character} " +
+                    $"status={queued.Status} avgMs={queued.AverageTranslationMs:0.##}");
+
+                return new QueryLensStructuredHoverResult(
+                    Success: false,
+                    ErrorMessage: statusMessage,
+                    Statements: [],
+                    CommandCount: 0,
+                    SourceExpression: expression,
+                    DbContextType: null,
+                    ProviderName: null,
+                    SourceFile: filePath,
+                    SourceLine: line + 1,
+                    Warnings: [],
+                    EnrichedSql: null,
+                    Mode: "queued",
+                    Status: queued.Status,
+                    StatusMessage: statusMessage,
+                    AvgTranslationMs: queued.AverageTranslationMs);
+            }
+
+            var translation = queued.Result;
+            if (translation is null)
+            {
+                sw.Stop();
+                Console.Error.WriteLine($"[QL-Hover] structured translate-missing-result line={line} char={character}");
+                return Fail("Queued translation completed without a result payload.");
+            }
 
             sw.Stop();
             Console.Error.WriteLine($"[QL-Hover] structured translate-finished line={line} char={character} success={translation.Success} elapsedMs={sw.ElapsedMilliseconds} commands={translation.Commands.Count}");
@@ -256,12 +360,15 @@ internal sealed class HoverPreviewService
                 SourceLine: line + 1,
                 Warnings: warnings,
                 EnrichedSql: enrichedSql,
-                Mode: "direct");
+                Mode: "direct",
+                Status: QueryTranslationStatus.Ready,
+                StatusMessage: null,
+                AvgTranslationMs: queued.AverageTranslationMs);
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[QL-Hover] structured translate-exception line={line} char={character} type={ex.GetType().Name} message={ex.Message}");
-            return Fail($"{ex.GetType().Name}: {ex.Message}");
+            return Fail($"{ex.GetType().Name}: {ex.Message}", QueryTranslationStatus.Unreachable);
         }
     }
 
@@ -326,6 +433,9 @@ internal sealed class HoverPreviewService
             DbContextType = metadata?.DbContextType ?? string.Empty,
             ProviderName = metadata?.ProviderName ?? string.Empty,
             EnrichedSql = enrichedSqlForMeta,
+            Status = (int)QueryTranslationStatus.Ready,
+            StatusMessage = string.Empty,
+            AvgTranslationMs = 0,
         };
         var metaJson = JsonSerializer.Serialize(metaPayload);
         var metaBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(metaJson));

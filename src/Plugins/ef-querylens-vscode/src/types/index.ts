@@ -34,6 +34,9 @@ export type QueryLensStructuredHoverResponse = {
     Warnings: string[] | null;
     EnrichedSql: string | null;
     Mode: string | null;
+    Status: number;
+    StatusMessage: string | null;
+    AvgTranslationMs: number;
 };
 
 export type QueryLensSettings = {

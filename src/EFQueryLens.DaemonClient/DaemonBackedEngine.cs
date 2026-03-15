@@ -1,5 +1,5 @@
-using System.Text.Json;
 using System.Diagnostics;
+using System.Text.Json;
 using EFQueryLens.Core;
 using EFQueryLens.Core.Daemon;
 using StreamJsonRpc;
@@ -57,6 +57,27 @@ public sealed class DaemonBackedEngine : IQueryLensEngine, IAsyncDisposable
                 $"type={ex.GetType().Name} message={ex.Message}");
             throw;
         }
+    }
+
+    public async Task<QueuedTranslationResult> TranslateQueuedAsync(
+        TranslationRequest request,
+        CancellationToken ct = default)
+    {
+        var payload = new DaemonQueuedTranslateRequest
+        {
+            ContextName = _contextName,
+            SemanticKey = BuildSemanticKey(request),
+            Request = request,
+        };
+
+        var response = await _proxy.TranslateQueuedAsync(payload, ct);
+        return new QueuedTranslationResult
+        {
+            Status = response.Status,
+            JobId = response.JobId,
+            AverageTranslationMs = response.AverageTranslationMs,
+            Result = response.Result,
+        };
     }
 
     public Task<ExplainResult> ExplainAsync(
@@ -125,5 +146,65 @@ public sealed class DaemonBackedEngine : IQueryLensEngine, IAsyncDisposable
             JsonSerializerOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web),
         };
         return new LengthHeaderMessageHandler(stream, stream, formatter);
+    }
+
+    private static string BuildSemanticKey(TranslationRequest request)
+    {
+        static string NormalizeWhitespace(string value)
+        {
+            var buffer = new char[value.Length];
+            var index = 0;
+            var previousWasWhitespace = false;
+
+            foreach (var current in value)
+            {
+                if (char.IsWhiteSpace(current))
+                {
+                    if (previousWasWhitespace)
+                    {
+                        continue;
+                    }
+
+                    buffer[index++] = ' ';
+                    previousWasWhitespace = true;
+                }
+                else
+                {
+                    buffer[index++] = current;
+                    previousWasWhitespace = false;
+                }
+            }
+
+            return new string(buffer, 0, index).Trim();
+        }
+
+        static string ResolveProjectKey(string? assemblyPath)
+        {
+            if (string.IsNullOrWhiteSpace(assemblyPath))
+            {
+                return "unknown";
+            }
+
+            var normalizedAssemblyPath = Path.GetFullPath(assemblyPath);
+            var currentDir = Path.GetDirectoryName(normalizedAssemblyPath);
+            while (!string.IsNullOrWhiteSpace(currentDir))
+            {
+                var hasProject = Directory.EnumerateFiles(currentDir, "*.csproj", SearchOption.TopDirectoryOnly)
+                    .Any();
+                if (hasProject)
+                {
+                    return DaemonWorkspaceIdentity.ComputeWorkspaceHash(currentDir);
+                }
+
+                currentDir = Directory.GetParent(currentDir)?.FullName;
+            }
+
+            return DaemonWorkspaceIdentity.ComputeWorkspaceHash(Path.GetDirectoryName(normalizedAssemblyPath) ?? normalizedAssemblyPath);
+        }
+
+        var projectKey = ResolveProjectKey(request.AssemblyPath);
+        var contextName = request.ContextVariableName?.Trim().ToLowerInvariant() ?? string.Empty;
+        var expression = NormalizeWhitespace(request.Expression ?? string.Empty);
+        return $"{projectKey}|{contextName}|{expression}";
     }
 }

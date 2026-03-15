@@ -51,6 +51,11 @@ public sealed class ResiliencyDaemonEngine : IQueryLensEngine, IAsyncDisposable
         TranslationRequest request, CancellationToken ct = default) =>
         await ExecuteWithReconnectAsync(e => e.TranslateAsync(request, ct), ct);
 
+    public async Task<QueuedTranslationResult> TranslateQueuedAsync(
+        TranslationRequest request,
+        CancellationToken ct = default) =>
+        await ExecuteWithReconnectAsync(e => e.TranslateQueuedAsync(request, ct), ct);
+
     public Task<ExplainResult> ExplainAsync(
         ExplainRequest request, CancellationToken ct = default) =>
         _inner.ExplainAsync(request, ct);

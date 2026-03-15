@@ -15,6 +15,14 @@ public interface IQueryLensEngine : IAsyncDisposable
         CancellationToken ct = default);
 
     /// <summary>
+    /// Queues or retrieves a translation result without forcing callers to block.
+    /// Hosts can poll this method until status becomes <see cref="QueryTranslationStatus.Ready"/>.
+    /// </summary>
+    Task<QueuedTranslationResult> TranslateQueuedAsync(
+        TranslationRequest request,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Runs EXPLAIN (ANALYZE) against a real database and returns the normalized plan.
     /// Requires a live connection string.
     /// </summary>
