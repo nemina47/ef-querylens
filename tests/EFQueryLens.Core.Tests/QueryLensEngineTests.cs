@@ -10,6 +10,8 @@ namespace EFQueryLens.Core.Tests;
 [Collection("AssemblyLoadContextIsolation")]
 public class QueryLensEngineTests
 {
+    private const string DefaultMySqlDbContextType = "SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext";
+
     private static string GetSampleMySqlAppDll()
     {
         var dir = Path.GetDirectoryName(typeof(QueryLensEngineTests).Assembly.Location)!;
@@ -43,6 +45,7 @@ public class QueryLensEngineTests
                 return await engine.InspectModelAsync(new ModelInspectionRequest
                 {
                     AssemblyPath = assemblyPath,
+                    DbContextTypeName = DefaultMySqlDbContextType,
                 });
             }
             catch (Exception ex) when (attempt < maxAttempts && IsTransientAlcUnload(ex))
@@ -78,6 +81,7 @@ public class QueryLensEngineTests
         {
             AssemblyPath = GetSampleMySqlAppDll(),
             Expression   = "db.Orders",
+            DbContextTypeName = DefaultMySqlDbContextType,
         });
 
         Assert.True(result.Success, result.ErrorMessage);
@@ -93,6 +97,7 @@ public class QueryLensEngineTests
         {
             AssemblyPath = GetSampleMySqlAppDll(),
             Expression   = "db.Orders.Where(o => o.UserId == 5)",
+            DbContextTypeName = DefaultMySqlDbContextType,
         });
 
         Assert.True(result.Success, result.ErrorMessage);
@@ -107,6 +112,7 @@ public class QueryLensEngineTests
         {
             AssemblyPath = GetSampleMySqlAppDll(),
             Expression   = "db.Orders.Where(o => o.UserId == 5).Include(o => o.Items)",
+            DbContextTypeName = DefaultMySqlDbContextType,
         });
 
         Assert.True(result.Success, result.ErrorMessage);
@@ -127,6 +133,7 @@ public class QueryLensEngineTests
         {
             AssemblyPath = GetSampleMySqlAppDll(),
             Expression   = "db.Orders.Include(o => o.Items).ThenInclude(i => i.Product)",
+            DbContextTypeName = DefaultMySqlDbContextType,
         });
 
         Assert.True(result.Success, result.ErrorMessage);
@@ -141,6 +148,7 @@ public class QueryLensEngineTests
         {
             AssemblyPath = GetSampleMySqlAppDll(),
             Expression   = "db.Users.Select(u => new { u.Id, u.Email })",
+            DbContextTypeName = DefaultMySqlDbContextType,
         });
 
         Assert.True(result.Success, result.ErrorMessage);
@@ -155,6 +163,7 @@ public class QueryLensEngineTests
         {
             AssemblyPath = GetSampleMySqlAppDll(),
             Expression   = "db.NonExistentTable.Where(x => x.Foo == 1)",
+            DbContextTypeName = DefaultMySqlDbContextType,
         });
 
         Assert.False(result.Success);
@@ -169,6 +178,7 @@ public class QueryLensEngineTests
         {
             AssemblyPath = GetSampleMySqlAppDll(),
             Expression   = "42",
+            DbContextTypeName = DefaultMySqlDbContextType,
         });
 
         Assert.False(result.Success);
@@ -184,12 +194,14 @@ public class QueryLensEngineTests
         {
             AssemblyPath = dll,
             Expression   = "db.Orders",
+            DbContextTypeName = DefaultMySqlDbContextType,
         });
 
         var r2 = await engine.TranslateAsync(new TranslationRequest
         {
             AssemblyPath = dll,
             Expression   = "db.Products",
+            DbContextTypeName = DefaultMySqlDbContextType,
         });
 
         Assert.True(r1.Success, r1.ErrorMessage);
@@ -232,6 +244,7 @@ public class QueryLensEngineTests
                     {
                         AssemblyPath = assemblyPath,
                         Expression = expressions[i % expressions.Length],
+                        DbContextTypeName = DefaultMySqlDbContextType,
                     });
                 })
                 .ToArray();
@@ -260,6 +273,7 @@ public class QueryLensEngineTests
         {
             AssemblyPath = GetSampleMySqlAppDll(),
             Expression   = "db.Categories",
+            DbContextTypeName = DefaultMySqlDbContextType,
         });
 
         Assert.True(result.Success, result.ErrorMessage);

@@ -13,6 +13,8 @@ namespace EFQueryLens.Core.Tests.Scripting;
 [Collection("AssemblyLoadContextIsolation")]
 public class QueryEvaluatorTests : IDisposable
 {
+    private const string DefaultMySqlDbContextType = "SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext";
+
     private readonly ProjectAssemblyContext _alcCtx;
     private readonly QueryEvaluator _evaluator;
 
@@ -72,7 +74,7 @@ public class QueryEvaluatorTests : IDisposable
             {
                 AssemblyPath      = _alcCtx.AssemblyPath,
                 Expression        = expression,
-                DbContextTypeName = dbContextTypeName,
+                DbContextTypeName = dbContextTypeName ?? DefaultMySqlDbContextType,
                 AdditionalImports = additionalImports ?? [],
                 UsingAliases = usingAliases
                     ?? new Dictionary<string, string>(StringComparer.Ordinal),

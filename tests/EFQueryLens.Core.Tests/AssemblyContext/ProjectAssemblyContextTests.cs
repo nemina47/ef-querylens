@@ -158,14 +158,16 @@ public class ProjectAssemblyContextTests
     // ─── FindDbContextTypes ───────────────────────────────────────────────────
 
     [Fact]
-    public void FindDbContextTypes_SampleMySqlApp_FindsExactlyOneContext()
+    public void FindDbContextTypes_SampleMySqlApp_FindsExpectedContexts()
     {
         var dll = GetSampleMySqlAppDll();
         using var ctx = new ProjectAssemblyContext(dll);
 
         var types = ctx.FindDbContextTypes();
 
-        Assert.Single(types);
+        Assert.Equal(2, types.Count);
+        Assert.Contains(types, t => t.Name == "MySqlAppDbContext");
+        Assert.Contains(types, t => t.Name == "MySqlReportingDbContext");
     }
 
     [Fact]
@@ -198,9 +200,11 @@ public class ProjectAssemblyContextTests
         var dll = GetSampleMySqlAppDll();
         using var ctx = new ProjectAssemblyContext(dll);
 
-        var type = ctx.FindDbContextType(null);
+        var ex = Assert.Throws<InvalidOperationException>(() => ctx.FindDbContextType(null));
 
-        Assert.Equal("SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext", type.FullName);
+        Assert.Contains("Multiple DbContext types found", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("MySqlAppDbContext", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("MySqlReportingDbContext", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -281,7 +285,7 @@ public class ProjectAssemblyContextTests
         var dll = GetSampleMySqlAppDll();
         using var ctx = new ProjectAssemblyContext(dll);
 
-        var alcType    = ctx.FindDbContextType();
+        var alcType    = ctx.FindDbContextType("MySqlAppDbContext");
         var typeAlc    = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(alcType.Assembly);
         var defaultAlc = System.Runtime.Loader.AssemblyLoadContext.Default;
 
