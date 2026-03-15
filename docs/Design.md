@@ -136,7 +136,7 @@ EFQueryLens.Analyzer      (Roslyn analyzer — communicates with engine over IPC
 
 
 
-The IPC boundary between the analyzer and the engine (named pipe / Unix socket) is critical. The analyzer runs inside the VS/Rider process. We cannot have Pomelo or EF Core loaded there.
+The IPC boundary between the analyzer and the engine (local loopback gRPC over HTTP/2) is critical. The analyzer runs inside the VS/Rider process. We cannot have Pomelo or EF Core loaded there.
 
 
 
@@ -776,7 +776,7 @@ Ships as a NuGet package: `<PackageReference Include="EFQueryLens.Analyzer" Vers
 
 
 
-Communicates with the engine over a local named pipe / Unix socket. The analyzer process (running inside VS/Rider) never loads EF Core or Pomelo directly.
+Communicates with the engine over a local loopback gRPC daemon endpoint. The analyzer process (running inside VS/Rider) never loads EF Core or Pomelo directly.
 
 
 
