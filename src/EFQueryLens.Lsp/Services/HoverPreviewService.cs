@@ -54,21 +54,6 @@ internal sealed class HoverPreviewService
 
         if (string.IsNullOrWhiteSpace(expression) || string.IsNullOrWhiteSpace(contextVariableName))
         {
-            var fallback = LspSyntaxHelper.FindAllLinqChains(sourceText)
-                .OrderBy(chain => Math.Abs(chain.Line - line))
-                .ThenBy(chain => Math.Abs(chain.Character - character))
-                .FirstOrDefault();
-
-            if (fallback is not null)
-            {
-                Console.Error.WriteLine($"[QL-Hover] fallback-chain line={fallback.Line} char={fallback.Character} ctx={fallback.ContextVariableName}");
-                expression = fallback.Expression;
-                contextVariableName = fallback.ContextVariableName;
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(expression) || string.IsNullOrWhiteSpace(contextVariableName))
-        {
             return new HoverPreviewComputationResult(false, "Could not extract a LINQ query expression at the current caret location.");
         }
 
@@ -197,21 +182,6 @@ internal sealed class HoverPreviewService
 
         var expression = LspSyntaxHelper.TryExtractLinqExpression(sourceText, line, character, out var contextVariableName);
         Console.Error.WriteLine($"[QL-Hover] structured extract-linq line={line} char={character} found={!string.IsNullOrWhiteSpace(expression)} ctx={contextVariableName}");
-
-        if (string.IsNullOrWhiteSpace(expression) || string.IsNullOrWhiteSpace(contextVariableName))
-        {
-            var fallback = LspSyntaxHelper.FindAllLinqChains(sourceText)
-                .OrderBy(chain => Math.Abs(chain.Line - line))
-                .ThenBy(chain => Math.Abs(chain.Character - character))
-                .FirstOrDefault();
-
-            if (fallback is not null)
-            {
-                Console.Error.WriteLine($"[QL-Hover] structured fallback-chain line={fallback.Line} char={fallback.Character} ctx={fallback.ContextVariableName}");
-                expression = fallback.Expression;
-                contextVariableName = fallback.ContextVariableName;
-            }
-        }
 
         if (string.IsNullOrWhiteSpace(expression) || string.IsNullOrWhiteSpace(contextVariableName))
         {
