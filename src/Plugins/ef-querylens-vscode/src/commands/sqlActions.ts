@@ -17,7 +17,7 @@ import {
     prependQueryLensContextComments,
 } from '../hover/markdown';
 import { formatSql } from '../sql/formatting';
-import { QueryLensSqlDialect } from '../types';
+import { QueryLensHoverMetadata, QueryLensSqlDialect } from '../types';
 import { clamp, coerceNonNegativeInt, parseUri } from '../utils/parsing';
 
 export type SqlActionHandlers = {
@@ -160,7 +160,8 @@ export function createSqlActionHandlers(getClient: () => LanguageClient | undefi
                 return null;
             }
 
-            const metadata = extractQueryLensMetadata(hoverText);
+            const metadata = extractQueryLensMetadata(hoverText)
+                ?? createFallbackMetadata(uri.toString(), line);
             const sqlText = extractSqlBlocks(hoverText);
             if (sqlText) {
                 const formattedSql = formatSqlOnShow ? formatSql(sqlText, sqlDialect) : sqlText;
@@ -175,6 +176,21 @@ export function createSqlActionHandlers(getClient: () => LanguageClient | undefi
             window.showErrorMessage(`EF QueryLens: failed to retrieve SQL preview. ${message}`);
             return null;
         }
+    }
+
+    function createFallbackMetadata(sourceUri: string, zeroBasedLine: number): QueryLensHoverMetadata {
+        return {
+            SourceExpression: '',
+            ExecutedExpression: '',
+            Mode: 'direct',
+            ModeDescription: '',
+            Warnings: [],
+            SourceFile: sourceUri,
+            SourceLine: Math.max(1, zeroBasedLine + 1),
+            DbContextType: '',
+            ProviderName: '',
+            CreationStrategy: '',
+        };
     }
 
     return {

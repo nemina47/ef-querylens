@@ -18,7 +18,6 @@ internal static class MicrosoftLspHost
             hover: new HoverHandler(documentManager, new HoverPreviewService(engine)),
             warmup: new WarmupHandler(documentManager, engine),
             daemonControl: new DaemonControlHandler(engine),
-            inlayHint: new InlayHintHandler(documentManager, new CodeLensPreviewService()),
             textSync: new TextDocumentSyncHandler(documentManager),
             debugEnabled: debugEnabled);
 

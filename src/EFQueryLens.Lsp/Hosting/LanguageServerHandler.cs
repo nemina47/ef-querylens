@@ -16,7 +16,6 @@ internal sealed class LanguageServerHandler
     private readonly HoverHandler _hover;
     private readonly WarmupHandler _warmup;
     private readonly DaemonControlHandler _daemonControl;
-    private readonly InlayHintHandler _inlayHint;
     private readonly TextDocumentSyncHandler _textSync;
     private readonly bool _debugEnabled;
     private readonly bool _hoverProgressEnabled;
@@ -33,14 +32,12 @@ internal sealed class LanguageServerHandler
         HoverHandler hover,
         WarmupHandler warmup,
         DaemonControlHandler daemonControl,
-        InlayHintHandler inlayHint,
         TextDocumentSyncHandler textSync,
         bool debugEnabled = false)
     {
         _hover = hover;
         _warmup = warmup;
         _daemonControl = daemonControl;
-        _inlayHint = inlayHint;
         _textSync = textSync;
         _debugEnabled = debugEnabled;
         _hoverProgressEnabled = ReadBoolEnvironmentVariable(
@@ -196,20 +193,6 @@ internal sealed class LanguageServerHandler
         };
     }
 
-    // ── Inlay hints ──────────────────────────────────────────────────────────
-
-    [JsonRpcMethod("textDocument/inlayHint", UseSingleObjectParameterDeserialization = true)]
-    public async Task<JObject[]> InlayHintAsync(JObject request, CancellationToken ct)
-    {
-        if (_debugEnabled) Console.Error.WriteLine($"[QL-LSP] request method=textDocument/inlayHint");
-        var result = await _inlayHint.HandleAsync(request, ct);
-        return result ?? [];
-    }
-
-    [JsonRpcMethod("inlayHint/resolve", UseSingleObjectParameterDeserialization = true)]
-    public Task<JObject> InlayHintResolveAsync(JObject request, CancellationToken ct) =>
-        _inlayHint.ResolveAsync(request, ct);
-
     // ── Server capabilities ──────────────────────────────────────────────────
 
     private async Task<bool> TryStartHoverProgressAsync(string progressToken)
@@ -339,10 +322,6 @@ internal sealed class LanguageServerHandler
                     ["save"] = new JObject { ["includeText"] = true },
                 },
                 ["hoverProvider"] = enableLspHover,
-                ["inlayHintProvider"] = new JObject
-                {
-                    ["resolveProvider"] = true,
-                },
                 ["executeCommandProvider"] = new JObject
                 {
                     ["commands"] = new JArray(

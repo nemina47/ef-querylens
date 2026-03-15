@@ -5,6 +5,8 @@ out/
 
 # Generated VS extension payload (copied from LSP build output)
 src/Plugins/ef-querylens-visualstudio/server/
+src/Plugins/ef-querylens-vscode/server/
+src/Plugins/ef-querylens-vscode/daemon/
 
 # NuGet
 *.nupkg

@@ -1,4 +1,4 @@
-import { Uri, window } from 'vscode';
+import { Uri } from 'vscode';
 
 export function parseUri(uriInput: unknown): Uri | null {
     if (typeof uriInput !== 'string' || uriInput.length === 0) {
@@ -40,25 +40,3 @@ export function coerceNonNegativeInt(value: unknown, fallback: number): number {
     return fallback;
 }
 
-export function getActiveEditorLocation(): { uri: Uri; line: number; character: number } | null {
-    const editor = window.activeTextEditor;
-    if (!editor) {
-        return null;
-    }
-
-    const uri = editor.document.uri;
-    if (uri.scheme !== 'file') {
-        return null;
-    }
-
-    if (editor.document.languageId !== 'csharp') {
-        return null;
-    }
-
-    const position = editor.selection.active;
-    return {
-        uri,
-        line: position.line,
-        character: position.character,
-    };
-}

@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.intellij.platform") version "2.12.0"
 }
 
+import org.gradle.api.GradleException
+import org.gradle.api.tasks.Sync
+
 group = providers.gradleProperty("pluginGroup").get()
 version = providers.gradleProperty("pluginVersion").get()
 
@@ -28,6 +31,36 @@ dependencies {
     implementation("org.commonmark:commonmark:0.27.1")
 }
 
+val bundledRuntimeOutputDir = layout.buildDirectory.dir("generated/querylens-runtime")
+
+fun resolveRuntimeBuildDir(projectName: String, requiredFileName: String): File {
+    val releaseDir = projectDir.resolve("../../../src/$projectName/bin/Release/net10.0")
+    if (releaseDir.resolve(requiredFileName).exists()) {
+        return releaseDir
+    }
+
+    val debugDir = projectDir.resolve("../../../src/$projectName/bin/Debug/net10.0")
+    if (debugDir.resolve(requiredFileName).exists()) {
+        return debugDir
+    }
+
+    throw GradleException(
+        "Could not find $requiredFileName for $projectName. Build $projectName first (Debug or Release, net10.0)."
+    )
+}
+
+val bundleQueryLensRuntime by tasks.registering(Sync::class) {
+    into(bundledRuntimeOutputDir)
+
+    from(providers.provider { resolveRuntimeBuildDir("EFQueryLens.Lsp", "EFQueryLens.Lsp.dll") }) {
+        into("server")
+    }
+
+    from(providers.provider { resolveRuntimeBuildDir("EFQueryLens.Daemon", "EFQueryLens.Daemon.dll") }) {
+        into("daemon")
+    }
+}
+
 intellijPlatform {
     pluginConfiguration {
         ideaVersion {
@@ -38,14 +71,13 @@ intellijPlatform {
 }
 
 tasks {
+    prepareSandbox {
+        dependsOn(bundleQueryLensRuntime)
+        from(bundledRuntimeOutputDir)
+    }
+
     runIde {
-        val repoRoot = projectDir.toPath().resolve("../../..").normalize().toAbsolutePath()
-        val lspDll = repoRoot.resolve("src/EFQueryLens.Lsp/bin/Debug/net10.0/EFQueryLens.Lsp.dll")
-        environment("QUERYLENS_REPOSITORY_ROOT", repoRoot.toString())
-        // Force this exact LSP binary (avoids stale shadow cache using an old build)
-        if (lspDll.toFile().exists()) {
-            environment("QUERYLENS_LSP_DLL", lspDll.toString())
-        }
+        dependsOn(bundleQueryLensRuntime)
         environment("QUERYLENS_CLIENT", "rider")
         environment("QUERYLENS_STARTUP_BROWSER", "true")
         environment("QUERYLENS_DEBUG", "true")

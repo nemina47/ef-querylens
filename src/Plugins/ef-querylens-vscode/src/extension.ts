@@ -30,30 +30,40 @@ export function activate(context: ExtensionContext) {
     queryLensOutputChannel = window.createOutputChannel('EF QueryLens');
     context.subscriptions.push(queryLensOutputChannel);
 
-    const lspBuildDir = context.asAbsolutePath(
-        path.join('..', '..', 'EFQueryLens.Lsp', 'bin', 'Debug', 'net10.0')
-    );
-    const daemonBuildDir = context.asAbsolutePath(
-        path.join('..', '..', 'EFQueryLens.Daemon', 'bin', 'Debug', 'net10.0')
-    );
+    const packagedLspDir = context.asAbsolutePath('server');
+    const packagedDaemonDir = context.asAbsolutePath('daemon');
 
-    const stagedRuntime = stageRuntimeBinaries(lspBuildDir, daemonBuildDir);
+    const hasPackagedRuntime =
+        fs.existsSync(path.join(packagedLspDir, 'EFQueryLens.Lsp.dll'))
+        && fs.existsSync(path.join(packagedDaemonDir, 'EFQueryLens.Daemon.dll'));
+
+    if (!hasPackagedRuntime) {
+        const missingMessage =
+            `EF QueryLens runtime is missing from extension package. ` +
+            `Expected '${packagedLspDir}' and '${packagedDaemonDir}'.`;
+        logOutput(`[EFQueryLens] ${missingMessage}`);
+        void window.showErrorMessage(missingMessage);
+        return;
+    }
+
+    const stagedRuntime = stageRuntimeBinaries(packagedLspDir, packagedDaemonDir);
 
     const serverPath = stagedRuntime?.lspDllPath
-        ?? path.join(lspBuildDir, 'EFQueryLens.Lsp.dll');
+        ?? path.join(packagedLspDir, 'EFQueryLens.Lsp.dll');
     const fallbackRepoRoot = path.resolve(context.extensionPath, '..', '..', '..');
     const workspaceRoot = workspace.workspaceFolders?.[0]?.uri.fsPath ?? fallbackRepoRoot;
     const daemonDllPath = stagedRuntime?.daemonDllPath
-        ?? path.join(daemonBuildDir, 'EFQueryLens.Daemon.dll');
+        ?? path.join(packagedDaemonDir, 'EFQueryLens.Daemon.dll');
     const daemonExePath = stagedRuntime?.daemonExePath
-        ?? path.join(daemonBuildDir, 'EFQueryLens.Daemon.exe');
+        ?? path.join(packagedDaemonDir, 'EFQueryLens.Daemon.exe');
 
     const settings = readSettings();
     logOutput(`activate workspace=${workspaceRoot}`);
+    logOutput(`[EFQueryLens] runtime source=packaged lsp=${packagedLspDir} daemon=${packagedDaemonDir}`);
     if (stagedRuntime) {
         logOutput(`[EFQueryLens] runtime staging root=${stagedRuntime.stagingRoot}`);
     } else {
-        logOutput('[EFQueryLens] runtime staging unavailable; using build output paths directly');
+        logOutput('[EFQueryLens] runtime staging unavailable; using packaged runtime paths directly');
     }
 
     const serverEnv: NodeJS.ProcessEnv = {
@@ -63,7 +73,10 @@ export function activate(context: ExtensionContext) {
         QUERYLENS_DAEMON_START_TIMEOUT_MS: '30000',
         QUERYLENS_DAEMON_CONNECT_TIMEOUT_MS: '10000',
         QUERYLENS_DAEMON_SHUTDOWN_ON_DISPOSE: '1',
-        QUERYLENS_MAX_CODELENS_PER_DOCUMENT: String(settings.maxCodeLensPerDocument),
+        // VS Code hides inline SQL Preview badges; hover/command actions remain available.
+        QUERYLENS_MAX_CODELENS_PER_DOCUMENT: '0',
+        // InlayHint SQL Preview labels are used by Rider; disable them for VS Code UX.
+        QUERYLENS_MAX_INLAY_HINTS_PER_DOCUMENT: '0',
         QUERYLENS_CODELENS_DEBOUNCE_MS: String(settings.codeLensDebounceMs),
         QUERYLENS_CODELENS_USE_MODEL_FILTER: settings.codeLensUseModelFilter ? '1' : '0',
         QUERYLENS_DEBUG: settings.debugLogsEnabled ? '1' : '0',
@@ -94,6 +107,10 @@ export function activate(context: ExtensionContext) {
         documentSelector: [{ scheme: 'file', language: 'csharp' }],
         outputChannel: queryLensOutputChannel,
         middleware: {
+            provideCodeLenses: async (_document, _token, _next) => {
+                // VS Code UX choice: use hover + explicit commands, no inline SQL Preview code lenses.
+                return [];
+            },
             provideHover: async (document, position, token, next) => {
                 const hover = await next(document, position, token);
                 return enableTrustedHoverCommands(hover as Hover | null, ['efquerylens.copySql', 'efquerylens.showSql', 'efquerylens.openSqlEditor']);

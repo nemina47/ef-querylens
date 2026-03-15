@@ -8,7 +8,6 @@ import { LanguageClient } from 'vscode-languageclient/node';
 
 import { SqlActionHandlers } from './sqlActions';
 import { QueryLensSettings } from '../types';
-import { getActiveEditorLocation } from '../utils/parsing';
 
 export type QueryLensCommandRegistryOptions = {
     settings: QueryLensSettings;
@@ -69,42 +68,6 @@ export function registerQueryLensCommands(options: QueryLensCommandRegistryOptio
         }
     );
 
-    const showSqlFromCursorCommand = commands.registerCommand(
-        'efquerylens.showSqlFromCursor',
-        async () => {
-            const location = getActiveEditorLocation();
-            if (!location) {
-                window.showInformationMessage('EF QueryLens: open a C# file and place the cursor on a query first.');
-                return;
-            }
-
-            await sqlActions.showSqlPopupFromLens(
-                location.uri.toString(),
-                location.line,
-                location.character
-            );
-        }
-    );
-
-    const copySqlFromCursorCommand = commands.registerCommand(
-        'efquerylens.copySqlFromCursor',
-        async () => {
-            const location = getActiveEditorLocation();
-            if (!location) {
-                window.showInformationMessage('EF QueryLens: open a C# file and place the cursor on a query first.');
-                return;
-            }
-
-            await sqlActions.copySqlFromLens(
-                location.uri.toString(),
-                location.line,
-                location.character,
-                settings.formatSqlOnShow,
-                settings.sqlDialect
-            );
-        }
-    );
-
     const openOutputCommand = commands.registerCommand(
         'efquerylens.openOutput',
         async () => {
@@ -141,8 +104,6 @@ export function registerQueryLensCommands(options: QueryLensCommandRegistryOptio
         showSqlCommand,
         copySqlCommand,
         openSqlEditorCommand,
-        showSqlFromCursorCommand,
-        copySqlFromCursorCommand,
         openOutputCommand,
         restartCommand,
     ];

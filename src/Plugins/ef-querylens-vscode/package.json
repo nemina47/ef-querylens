@@ -12,6 +12,13 @@
     "Programming Languages"
   ],
   "main": "./out/extension.js",
+  "files": [
+    "out/**",
+    "server/**",
+    "daemon/**",
+    "package.json",
+    "README.md"
+  ],
   "contributes": {
     "commands": [
       {
@@ -21,14 +28,6 @@
       {
         "command": "efquerylens.copySql",
         "title": "EF QueryLens: Copy SQL"
-      },
-      {
-        "command": "efquerylens.showSqlFromCursor",
-        "title": "EF QueryLens: Show SQL From Cursor"
-      },
-      {
-        "command": "efquerylens.copySqlFromCursor",
-        "title": "EF QueryLens: Copy SQL From Cursor"
       },
       {
         "command": "efquerylens.restart",
@@ -89,9 +88,10 @@
     "onLanguage:csharp"
   ],
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run compile && npm run prepare-runtime",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "prepare-runtime": "node ./scripts/prepareRuntime.mjs"
   },
   "dependencies": {
     "sql-formatter": "^15.7.2",

@@ -45,6 +45,7 @@ internal static class LinqHoverMarkdownRenderer
             ? "**QueryLens Error**\n```text\nNo hover content was returned by QueryLens.\n```"
             : markdown;
 
+        var previewMarkdown = StripQueryLensMetadataComment(effectiveMarkdown);
         var preferredCopySql = TryExtractFirstCodeBlock(effectiveMarkdown, "sql");
         var metadata = TryExtractQueryLensMetadata(effectiveMarkdown);
         var enrichedSql = BuildEnrichedSqlContent(preferredCopySql, metadata);
@@ -68,7 +69,7 @@ internal static class LinqHoverMarkdownRenderer
         };
 
         var stack = new StackPanel();
-        foreach (FrameworkElement? element in ParseMarkdown(effectiveMarkdown, enrichedSql))
+        foreach (FrameworkElement? element in ParseMarkdown(previewMarkdown, enrichedSql))
         {
             stack.Children.Add(element);
         }
@@ -76,6 +77,15 @@ internal static class LinqHoverMarkdownRenderer
         scrollViewer.Content = stack;
         hostBorder.Child = scrollViewer;
         return hostBorder;
+    }
+
+    private static string StripQueryLensMetadataComment(string markdown)
+    {
+        return System.Text.RegularExpressions.Regex.Replace(
+            markdown,
+            @"\n?<!--\s*QUERYLENS_META:[A-Za-z0-9+/=]+\s*-->\n?",
+            "\n",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     }
 
     private static IEnumerable<FrameworkElement> ParseMarkdown(string markdown, string? preferredCopySql)
