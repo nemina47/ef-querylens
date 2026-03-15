@@ -70,6 +70,36 @@ public class DaemonLocatorTests
         }
     }
 
+    [Fact]
+    public void TryGetPort_RequiredProcessIdMismatch_ReturnsNull()
+    {
+        var workspacePath = Path.Combine(Path.GetTempPath(), "querylens-workspace", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workspacePath);
+
+        var pidFilePath = DaemonWorkspaceIdentity.BuildPidFilePath(workspacePath);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(pidFilePath)!);
+
+            var payload = new
+            {
+                processId = Process.GetCurrentProcess().Id,
+                port = 51234,
+                workspacePath = DaemonWorkspaceIdentity.NormalizeWorkspacePath(workspacePath),
+            };
+
+            File.WriteAllText(pidFilePath, JsonSerializer.Serialize(payload));
+
+            var port = DaemonLocator.TryGetPort(workspacePath, requiredProcessId: Process.GetCurrentProcess().Id + 1);
+            Assert.Null(port);
+        }
+        finally
+        {
+            TryDeleteFile(pidFilePath);
+            TryDeleteDirectory(workspacePath);
+        }
+    }
+
     private static void TryDeleteFile(string path)
     {
         try

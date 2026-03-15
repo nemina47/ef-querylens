@@ -119,8 +119,9 @@ public sealed class ResiliencyDaemonEngine : IQueryLensEngine, IAsyncDisposable
                 _debugLog?.Invoke($"daemon-restart shutdown phase warning type={ex.GetType().Name} message={ex.Message}");
             }
 
-            await Task.Delay(150, ct);
-            await ReconnectCoreAsync(ct);
+            // Restart path is authoritative: current daemon is being shut down,
+            // so reconnect must skip stale pid-file discovery and start fresh.
+            await ReconnectCoreAsync(ct, forceFreshStart: true);
             _ownsDaemonLifecycle = true;
             _debugLog?.Invoke("daemon-restart success");
             return true;
@@ -212,7 +213,7 @@ public sealed class ResiliencyDaemonEngine : IQueryLensEngine, IAsyncDisposable
         }
     }
 
-    private async Task ReconnectCoreAsync(CancellationToken ct)
+    private async Task ReconnectCoreAsync(CancellationToken ct, bool forceFreshStart = false)
     {
         _debugLog?.Invoke($"daemon-reconnect workspace={_workspacePath}");
 
@@ -222,6 +223,7 @@ public sealed class ResiliencyDaemonEngine : IQueryLensEngine, IAsyncDisposable
             _daemonAssemblyPath,
             timeoutMilliseconds: _startTimeoutMs,
             debugLog: _debugLog,
+            forceFreshStart: forceFreshStart,
             ct: ct);
 
         if (newPort is null)
@@ -230,24 +232,30 @@ public sealed class ResiliencyDaemonEngine : IQueryLensEngine, IAsyncDisposable
 
         _debugLog?.Invoke($"daemon-reconnect new-port={newPort.Value}");
 
-        var candidate = new DaemonBackedEngine("127.0.0.1", newPort.Value, _contextName);
-        try
-        {
-            using var timeoutCts = new CancellationTokenSource(_connectTimeoutMs);
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
-            await candidate.PingAsync(linkedCts.Token);
-        }
-        catch
-        {
-            await candidate.DisposeAsync();
-            throw;
-        }
+        var candidate = await ConnectCandidateAsync(newPort.Value, ct);
 
         var oldEngine = _inner;
         _inner = candidate;
         await oldEngine.DisposeAsync();
 
         _debugLog?.Invoke("daemon-reconnect success");
+    }
+
+    private async Task<DaemonBackedEngine> ConnectCandidateAsync(int port, CancellationToken ct)
+    {
+        var candidate = new DaemonBackedEngine("127.0.0.1", port, _contextName);
+        try
+        {
+            using var timeoutCts = new CancellationTokenSource(_connectTimeoutMs);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+            await candidate.PingAsync(linkedCts.Token);
+            return candidate;
+        }
+        catch
+        {
+            await candidate.DisposeAsync();
+            throw;
+        }
     }
 
     private static bool IsDaemonTransportFailure(Exception ex)

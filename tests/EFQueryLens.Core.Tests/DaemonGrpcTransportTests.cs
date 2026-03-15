@@ -193,6 +193,16 @@ public class DaemonGrpcTransportTests
             var daemonAssemblyPath = ResolveDaemonAssemblyPath();
             var port = await StartDaemonAsync(workspacePath, daemonAssemblyPath, TimeSpan.FromSeconds(20));
             var contextName = $"test-{Guid.NewGuid():N}";
+            var debugLogs = new List<string>();
+            var debugLogGate = new object();
+
+            void CaptureDebugLog(string message)
+            {
+                lock (debugLogGate)
+                {
+                    debugLogs.Add(message);
+                }
+            }
 
             await using var baseEngine = new DaemonBackedEngine("127.0.0.1", port, contextName);
             await using var resiliency = new ResiliencyDaemonEngine(
@@ -204,7 +214,8 @@ public class DaemonGrpcTransportTests
                 connectTimeoutMs: 4000,
                 startTimeoutMs: 15000,
                 shutdownDaemonOnDispose: true,
-                ownsDaemonLifecycle: true);
+                ownsDaemonLifecycle: true,
+                debugLog: CaptureDebugLog);
 
             var translationRequest = new TranslationRequest
             {
@@ -221,6 +232,11 @@ public class DaemonGrpcTransportTests
                 var restarted = await resiliency.RestartDaemonAsync(restartCts.Token);
                 Assert.True(restarted);
             }
+
+            Assert.Contains(debugLogs,
+                message => message.Contains("daemon-autostart force-fresh", StringComparison.Ordinal));
+            Assert.DoesNotContain(debugLogs,
+                message => message.Contains("stale-endpoint", StringComparison.OrdinalIgnoreCase));
 
             var secondReady = await WaitForReadyAsync(resiliency, translationRequest, TimeSpan.FromSeconds(10));
             Assert.NotNull(secondReady.Result);

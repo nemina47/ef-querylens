@@ -120,7 +120,8 @@ public static class DaemonLocator
         string workspacePath,
         string? expectedDaemonExecutablePath = null,
         string? expectedDaemonAssemblyPath = null,
-        Action<string>? debugLog = null)
+        Action<string>? debugLog = null,
+        int? requiredProcessId = null)
     {
         var normalizedWorkspacePath = DaemonWorkspaceIdentity.NormalizeWorkspacePath(workspacePath);
         var pidFilePath = DaemonWorkspaceIdentity.BuildPidFilePath(normalizedWorkspacePath);
@@ -155,6 +156,11 @@ public static class DaemonLocator
                 {
                     return null;
                 }
+            }
+
+            if (requiredProcessId is > 0 && info.ProcessId != requiredProcessId.Value)
+            {
+                return null;
             }
 
             if (!string.IsNullOrWhiteSpace(normalizedExpectedExe)
@@ -214,17 +220,25 @@ public static class DaemonLocator
         string? daemonAssemblyPath,
         int timeoutMilliseconds,
         Action<string>? debugLog = null,
+        bool forceFreshStart = false,
         CancellationToken ct = default)
     {
         var normalizedWorkspacePath = DaemonWorkspaceIdentity.NormalizeWorkspacePath(workspacePath);
-        var existingPort = TryGetPort(
-            normalizedWorkspacePath,
-            expectedDaemonExecutablePath: daemonExecutablePath,
-            expectedDaemonAssemblyPath: daemonAssemblyPath,
-            debugLog: debugLog);
-        if (existingPort is > 0)
+        if (!forceFreshStart)
         {
-            return existingPort;
+            var existingPort = TryGetPort(
+                normalizedWorkspacePath,
+                expectedDaemonExecutablePath: daemonExecutablePath,
+                expectedDaemonAssemblyPath: daemonAssemblyPath,
+                debugLog: debugLog);
+            if (existingPort is > 0)
+            {
+                return existingPort;
+            }
+        }
+        else
+        {
+            debugLog?.Invoke($"daemon-autostart force-fresh workspace={normalizedWorkspacePath}");
         }
 
         var startInfo = CreateDaemonStartInfo(
@@ -269,7 +283,8 @@ public static class DaemonLocator
                     normalizedWorkspacePath,
                     expectedDaemonExecutablePath: daemonExecutablePath,
                     expectedDaemonAssemblyPath: daemonAssemblyPath,
-                    debugLog: debugLog);
+                    debugLog: debugLog,
+                    requiredProcessId: process.Id);
                 if (discoveredPort is > 0)
                 {
                     debugLog?.Invoke($"daemon-autostart ready port={discoveredPort.Value}");
