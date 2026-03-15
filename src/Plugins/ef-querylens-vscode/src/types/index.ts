@@ -1,21 +1,5 @@
 export type QueryLensSqlDialect = 'auto' | 'sql' | 'mysql' | 'transactsql';
 
-export type QueryLensMetadataProvenance = 'server' | 'fallback';
-
-export type QueryLensHoverMetadata = {
-    MetadataProvenance: QueryLensMetadataProvenance;
-    SourceExpression: string;
-    ExecutedExpression: string;
-    Mode: string;
-    ModeDescription: string;
-    Warnings: string[];
-    SourceFile: string;
-    SourceLine: number;
-    DbContextType: string;
-    ProviderName: string;
-    CreationStrategy: string;
-};
-
 export type QueryLensStructuredHoverStatement = {
     Sql: string | null;
     SplitLabel: string | null;

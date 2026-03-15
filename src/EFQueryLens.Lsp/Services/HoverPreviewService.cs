@@ -5,28 +5,8 @@ using SQL.Formatter.Core;
 using SQL.Formatter.Language;
 using System.Diagnostics;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace EFQueryLens.Lsp.Services;
-
-/// <summary>Embedded in each hover response as <!-- QUERYLENS_META:{base64} --> so all clients can build enriched copy/open content.</summary>
-internal sealed record QueryLensHoverMetadataPayload
-{
-    [JsonPropertyName("SourceExpression")] public string SourceExpression { get; init; } = string.Empty;
-    [JsonPropertyName("ExecutedExpression")] public string ExecutedExpression { get; init; } = string.Empty;
-    [JsonPropertyName("Mode")] public string Mode { get; init; } = "direct";
-    [JsonPropertyName("ModeDescription")] public string ModeDescription { get; init; } = string.Empty;
-    [JsonPropertyName("Warnings")] public IReadOnlyList<string> Warnings { get; init; } = [];
-    [JsonPropertyName("SourceFile")] public string SourceFile { get; init; } = string.Empty;
-    [JsonPropertyName("SourceLine")] public int SourceLine { get; init; }
-    [JsonPropertyName("DbContextType")] public string DbContextType { get; init; } = string.Empty;
-    [JsonPropertyName("ProviderName")] public string ProviderName { get; init; } = string.Empty;
-    [JsonPropertyName("EnrichedSql")] public string EnrichedSql { get; init; } = string.Empty;
-    [JsonPropertyName("Status")] public int Status { get; init; }
-    [JsonPropertyName("StatusMessage")] public string StatusMessage { get; init; } = string.Empty;
-    [JsonPropertyName("AvgTranslationMs")] public double AvgTranslationMs { get; init; }
-}
 
 internal sealed record HoverPreviewComputationResult(
     bool Success,
@@ -171,8 +151,7 @@ internal sealed class HoverPreviewService
             var documentUri = DocumentPathResolver.ToUri(filePath);
             var metadata = translation.Metadata;
             var markdown = BuildHoverMarkdown(
-                commands, translation.Warnings, documentUri, line, character,
-                expression ?? string.Empty, filePath, metadata);
+                commands, translation.Warnings, documentUri, line, character, metadata);
             Console.Error.WriteLine($"[QL-Hover] hover-markdown-ready line={line} char={character} markdownLen={markdown.Length}");
             return new HoverPreviewComputationResult(true, markdown, QueryTranslationStatus.Ready, queued.AverageTranslationMs);
         }
@@ -378,8 +357,6 @@ internal sealed class HoverPreviewService
         string uri,
         int line,
         int character,
-        string sourceExpression,
-        string sourceFile,
         TranslationMetadata? metadata)
     {
         var providerName = metadata?.ProviderName;
@@ -412,36 +389,7 @@ internal sealed class HoverPreviewService
             ? $"{header}\n\n```sql\n{sql}\n```"
             : $"{header}\n\n```sql\n{sql}\n```\n\n**Notes**\n{string.Join("\n", warningLines)}";
 
-        // Append embedded metadata comment so all 3 clients can build enriched copy/open content.
-        var firstSqlForMeta = commands.Count > 0 ? FormatSqlForDisplay(commands[0].Sql.Trim(), metadata?.ProviderName) : null;
-        var enrichedSqlForMeta = BuildStructuredEnrichedSql(
-            firstSqlForMeta,
-            sourceFile: sourceFile,
-            sourceLine: line + 1,
-            sourceExpression: sourceExpression,
-            dbContextType: metadata?.DbContextType,
-            providerName: metadata?.ProviderName) ?? string.Empty;
-
-        var metaPayload = new QueryLensHoverMetadataPayload
-        {
-            SourceExpression = sourceExpression,
-            ExecutedExpression = sourceExpression,   // always same for now; future: rewrite detection
-            Mode = "direct",
-            ModeDescription = "Direct query translation",
-            Warnings = warnings.Select(w => $"{w.Code}: {w.Message}").ToArray(),
-            SourceFile = sourceFile,
-            SourceLine = line + 1,                   // convert 0-based LSP line to 1-based display
-            DbContextType = metadata?.DbContextType ?? string.Empty,
-            ProviderName = metadata?.ProviderName ?? string.Empty,
-            EnrichedSql = enrichedSqlForMeta,
-            Status = (int)QueryTranslationStatus.Ready,
-            StatusMessage = string.Empty,
-            AvgTranslationMs = 0,
-        };
-        var metaJson = JsonSerializer.Serialize(metaPayload);
-        var metaBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(metaJson));
-
-        return $"{body}\n\n<!-- QUERYLENS_META:{metaBase64} -->";
+        return body;
     }
 
     private static string? BuildStructuredEnrichedSql(
