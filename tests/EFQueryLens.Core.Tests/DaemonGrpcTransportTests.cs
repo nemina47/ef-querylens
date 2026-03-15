@@ -2,12 +2,60 @@ using System.Diagnostics;
 using System.Text.Json;
 using EFQueryLens.Core;
 using EFQueryLens.Core.Daemon;
+using EFQueryLens.Core.Grpc;
 using EFQueryLens.DaemonClient;
+using Grpc.Core;
+using Grpc.Net.Client;
 
 namespace EFQueryLens.Core.Tests;
 
 public class DaemonGrpcTransportTests
 {
+    [Fact]
+    public async Task Subscribe_WhenTranslationStateChanges_StreamsStateChangedEvent()
+    {
+        var workspacePath = CreateWorkspacePath();
+        Directory.CreateDirectory(workspacePath);
+
+        try
+        {
+            var daemonAssemblyPath = ResolveDaemonAssemblyPath();
+            var port = await StartDaemonAsync(workspacePath, daemonAssemblyPath, TimeSpan.FromSeconds(20));
+            var contextName = $"sub-{Guid.NewGuid():N}";
+
+            await using var engine = new DaemonBackedEngine("127.0.0.1", port, contextName);
+            using var channel = GrpcChannel.ForAddress($"http://127.0.0.1:{port}");
+            var grpcClient = new DaemonService.DaemonServiceClient(channel);
+
+            using var subscribeCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            using var subscribeCall = grpcClient.Subscribe(new SubscribeRequest(), cancellationToken: subscribeCts.Token);
+
+            var waitEventTask = WaitForStateChangedEventAsync(
+                subscribeCall.ResponseStream,
+                contextName,
+                TimeSpan.FromSeconds(10));
+
+            var request = new TranslationRequest
+            {
+                AssemblyPath = Path.Combine(workspacePath, "missing-sample.dll"),
+                Expression = "db.Users.Where(u => u.IsActive)",
+            };
+
+            _ = await WaitForReadyAsync(engine, request, TimeSpan.FromSeconds(10));
+            var stateChanged = await waitEventTask;
+
+            Assert.Equal(contextName, stateChanged.ContextName);
+            Assert.True(
+                stateChanged.State is DaemonWarmState.Warming or DaemonWarmState.Cold or DaemonWarmState.Ready,
+                $"Unexpected state: {stateChanged.State}");
+        }
+        finally
+        {
+            TryKillDaemonFromPidFile(workspacePath);
+            TryDeleteDirectory(workspacePath);
+        }
+    }
+
     [Fact]
     public async Task DaemonGrpc_StartPingTranslateQueued_Shutdown()
     {
@@ -177,6 +225,32 @@ public class DaemonGrpcTransportTests
 
             await Task.Delay(120);
         }
+    }
+
+    private static async Task<StateChangedEvent> WaitForStateChangedEventAsync(
+        IAsyncStreamReader<DaemonEvent> stream,
+        string contextName,
+        TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+
+        while (await stream.MoveNext(cts.Token))
+        {
+            var daemonEvent = stream.Current;
+            if (daemonEvent.EventCase is not DaemonEvent.EventOneofCase.StateChanged)
+            {
+                continue;
+            }
+
+            if (!string.Equals(daemonEvent.StateChanged.ContextName, contextName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            return daemonEvent.StateChanged;
+        }
+
+        throw new TimeoutException($"Timed out waiting for StateChanged event for context '{contextName}'.");
     }
 
     private static void TryKillDaemonFromPidFile(string workspacePath)

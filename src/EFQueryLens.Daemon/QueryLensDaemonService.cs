@@ -12,6 +12,7 @@ internal sealed class QueryLensDaemonService(
     SqlTranslationQueue queue,
     TranslationMetrics metrics,
     ConcurrentDictionary<string, DaemonWarmState> contextStates,
+    DaemonEventStreamBroker eventStreamBroker,
     IHostApplicationLifetime hostLifetime)
     : DaemonService.DaemonServiceBase
 {
@@ -168,21 +169,51 @@ internal sealed class QueryLensDaemonService(
         IServerStreamWriter<DaemonEvent> responseStream,
         ServerCallContext context)
     {
+        var subscription = eventStreamBroker.Subscribe(context.CancellationToken);
+
         try
         {
-            await Task.Delay(Timeout.InfiniteTimeSpan, context.CancellationToken);
+            // Send current known states first so new subscribers receive immediate context.
+            foreach (var entry in contextStates.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+            {
+                await responseStream.WriteAsync(new DaemonEvent
+                {
+                    StateChanged = new StateChangedEvent
+                    {
+                        ContextName = entry.Key,
+                        State = entry.Value,
+                    },
+                });
+            }
+
+            await foreach (var daemonEvent in subscription.Reader.ReadAllAsync(context.CancellationToken))
+            {
+                await responseStream.WriteAsync(daemonEvent);
+            }
         }
         catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
         {
+        }
+        finally
+        {
+            subscription.Dispose();
         }
     }
 
     private void TrackState(string contextName, DaemonWarmState state)
     {
-        if (!string.IsNullOrWhiteSpace(contextName))
+        if (string.IsNullOrWhiteSpace(contextName))
         {
-            contextStates[contextName] = state;
+            return;
         }
+
+        if (contextStates.TryGetValue(contextName, out var existing) && existing == state)
+        {
+            return;
+        }
+
+        contextStates[contextName] = state;
+        eventStreamBroker.PublishStateChanged(contextName, state);
     }
 
     private static bool ReadBoolEnvironmentVariable(string variableName, bool fallback)
