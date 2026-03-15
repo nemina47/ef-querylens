@@ -299,58 +299,6 @@ internal sealed class QueryLensLanguageClient : ILanguageClient, ILanguageClient
         }
     }
 
-    internal static async Task<string?> TryGetHoverMarkdownAsync(
-        string filePath,
-        int line,
-        int character,
-        CancellationToken cancellationToken)
-    {
-        var client = Current;
-        if (client is null)
-        {
-            return null;
-        }
-
-        var languageServerRpc = client.rpc;
-        if (languageServerRpc is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            Log($"hover-request-start file={Path.GetFileName(filePath)} line={line} char={character}");
-            var uri = new Uri(filePath).AbsoluteUri;
-            var response = await languageServerRpc.InvokeWithParameterObjectAsync<JToken?>(
-                "textDocument/hover",
-                new JObject
-                {
-                    ["textDocument"] = new JObject { ["uri"] = uri },
-                    ["position"] = new JObject
-                    {
-                        ["line"] = Math.Max(0, line),
-                        ["character"] = Math.Max(0, character),
-                    }
-                },
-                cancellationToken);
-
-            var markdown = ExtractHoverText(response);
-            if (string.IsNullOrWhiteSpace(markdown))
-            {
-                Log($"hover-request-empty file={Path.GetFileName(filePath)} line={line} char={character}");
-                return null;
-            }
-
-            Log($"hover-request-success file={Path.GetFileName(filePath)} line={line} char={character} markdownLength={markdown.Length}");
-            return markdown;
-        }
-        catch (Exception ex)
-        {
-            Log($"hover-request-failed type={ex.GetType().Name} message={ex.Message}");
-            return null;
-        }
-    }
-
     private static string ResolveWorkspacePath(string extensionDirectory)
     {
         var solutionRoot = TryGetSolutionDirectory();
@@ -427,6 +375,8 @@ internal sealed class QueryLensLanguageClient : ILanguageClient, ILanguageClient
         processStartInfo.Environment["QUERYLENS_DAEMON_CONNECT_TIMEOUT_MS"] = "10000";
         // Keep daemon alive across VS language-client disposal to avoid UI teardown stalls.
         processStartInfo.Environment["QUERYLENS_DAEMON_SHUTDOWN_ON_DISPOSE"] = "0";
+        // Use a fixed rolling window (last N samples) for status average latency.
+        processStartInfo.Environment["QUERYLENS_AVG_WINDOW_SAMPLES"] = "20";
         processStartInfo.Environment["QUERYLENS_MAX_CODELENS_PER_DOCUMENT"] = DefaultMaxCodeLensPerDocument.ToString(System.Globalization.CultureInfo.InvariantCulture);
         processStartInfo.Environment["QUERYLENS_CODELENS_DEBOUNCE_MS"] = DefaultCodeLensDebounceMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
         processStartInfo.Environment["QUERYLENS_CODELENS_USE_MODEL_FILTER"] = "0";
@@ -593,42 +543,6 @@ internal sealed class QueryLensLanguageClient : ILanguageClient, ILanguageClient
         {
             Log($"lsp-stderr-pump-failed type={ex.GetType().Name} message={ex.Message}");
         }
-    }
-
-    private static string ExtractHoverText(JToken? hover)
-    {
-        var contents = hover?["contents"];
-        if (contents is null)
-        {
-            return string.Empty;
-        }
-
-        if (contents.Type == JTokenType.String)
-        {
-            return contents.Value<string>() ?? string.Empty;
-        }
-
-        if (contents.Type == JTokenType.Array)
-        {
-            var segments = new List<string>();
-            foreach (var item in contents)
-            {
-                var value = item?["value"]?.Value<string>() ?? item?.Value<string>();
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    segments.Add(value!);
-                }
-            }
-
-            return string.Join("\n\n", segments);
-        }
-
-        if (contents.Type == JTokenType.Object)
-        {
-            return contents["value"]?.Value<string>() ?? string.Empty;
-        }
-
-        return string.Empty;
     }
 
     private static void Log(string message)

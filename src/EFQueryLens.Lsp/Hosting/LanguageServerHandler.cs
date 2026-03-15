@@ -243,6 +243,31 @@ internal sealed class LanguageServerHandler
             return await RecalculatePreviewAsync(recalculateRequest, ct);
         }
 
+        if (command.Equals("efquerylens.preview.structuredHover", StringComparison.OrdinalIgnoreCase))
+        {
+            var arguments = request["arguments"] as JArray;
+            var structuredHoverRequest = arguments?.Count > 0
+                ? arguments[0].ToObject<TextDocumentPositionParams>()
+                : null;
+
+            if (structuredHoverRequest is null)
+            {
+                return new JObject
+                {
+                    ["success"] = false,
+                    ["message"] = "Missing or invalid structured hover request payload.",
+                };
+            }
+
+            var hover = await _hover.HandleStructuredAsync(structuredHoverRequest, ct);
+            return new JObject
+            {
+                ["success"] = hover is not null,
+                ["message"] = hover?.ErrorMessage,
+                ["hover"] = hover is null ? null : JObject.FromObject(hover),
+            };
+        }
+
         return new JObject
         {
             ["success"] = false,
@@ -384,7 +409,8 @@ internal sealed class LanguageServerHandler
                     ["commands"] = new JArray(
                         "efquerylens.warmup",
                         "efquerylens.daemon.restart",
-                        "efquerylens.preview.recalculate")
+                        "efquerylens.preview.recalculate",
+                        "efquerylens.preview.structuredHover")
                 },
             },
         };

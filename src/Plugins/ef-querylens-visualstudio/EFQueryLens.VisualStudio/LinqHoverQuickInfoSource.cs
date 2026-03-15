@@ -54,11 +54,28 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
             return new QuickInfoItem(applicableTrackingSpan, structuredElement);
         }
 
-        // Markdown fallback for compatibility with older daemon builds.
-        var hoverMarkdown = await TryGetHoverMarkdownAsync(triggerPoint.Value, snapshot, applicableSpan, cancellationToken);
+        var documentUri = "about:blank";
+        if (textBuffer.Properties.TryGetProperty(typeof(ITextDocument), out ITextDocument unavailableDocument)
+            && !string.IsNullOrWhiteSpace(unavailableDocument.FilePath))
+        {
+            documentUri = new Uri(unavailableDocument.FilePath).AbsoluteUri;
+        }
 
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
-        var content = BuildQuickInfoContent(hoverMarkdown);
+        var content = LinqHoverMarkdownRenderer.CreateFromStructured(
+            new QueryLensStructuredHoverResponse
+            {
+                Success = false,
+                Status = 3,
+                StatusMessage = "EF QueryLens structured hover response is unavailable. Ensure daemon/LSP are running and retry.",
+                ErrorMessage = "EF QueryLens structured hover response is unavailable.",
+                CommandCount = 0,
+                Statements = [],
+                Warnings = [],
+            },
+            documentUri,
+            0,
+            0);
         var item = new QuickInfoItem(applicableTrackingSpan, content);
         return item;
     }
@@ -112,45 +129,8 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
             }
         }
 
-        Log("Structured hover returned null for all attempts, falling back to markdown.");
+        Log("Structured hover returned null for all attempts.");
         return null;
-    }
-
-    private async Task<string> TryGetHoverMarkdownAsync(SnapshotPoint triggerPoint, ITextSnapshot snapshot, Span applicableSpan, CancellationToken cancellationToken)
-    {
-        if (!textBuffer.Properties.TryGetProperty(typeof(ITextDocument), out ITextDocument document)
-            || string.IsNullOrWhiteSpace(document.FilePath))
-        {
-            return BuildErrorMarkdown("Could not resolve current document path for QueryLens hover.");
-        }
-
-        var attempts = BuildHoverAttempts(triggerPoint, snapshot, applicableSpan);
-        for (var i = 0; i < attempts.Count; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var attempt = attempts[i];
-            Log($"Hover attempt {i + 1}/{attempts.Count} ({attempt.Label}) line={attempt.Line} char={attempt.Character}");
-
-            var markdown = await QueryLensLanguageClient.TryGetHoverMarkdownAsync(
-                document.FilePath,
-                attempt.Line,
-                attempt.Character,
-                cancellationToken);
-
-            if (!string.IsNullOrWhiteSpace(markdown))
-            {
-                Log($"Hover resolved on attempt {i + 1} ({attempt.Label}), markdownLength={markdown!.Length}");
-                return markdown!;
-            }
-
-            if (i < attempts.Count - 1)
-            {
-                await Task.Delay(120, cancellationToken);
-            }
-        }
-
-        Log("Hover returned empty markdown for all attempts.");
-        return BuildErrorMarkdown("QueryLens hover response is not ready yet. Try hovering again in a moment.");
     }
 
     private static Span BuildApplicableSpan(ITextSnapshot snapshot, int position)
@@ -277,17 +257,6 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
         public int Line { get; } = line;
 
         public int Character { get; } = character;
-    }
-
-    private static object BuildQuickInfoContent(string markdown)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-        return LinqHoverMarkdownRenderer.CreateFromMarkdown(markdown);
-    }
-
-    private static string BuildErrorMarkdown(string message)
-    {
-        return $"**QueryLens Error**\n```text\n{message}\n```";
     }
 
     private static void Log(string message)

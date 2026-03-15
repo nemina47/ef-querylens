@@ -9,27 +9,13 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using Microsoft.VisualStudio.Shell;
-
-internal sealed class QueryLensHoverMetadata
-{
-    [JsonPropertyName("SourceExpression")] public string? SourceExpression { get; set; }
-    [JsonPropertyName("ExecutedExpression")] public string? ExecutedExpression { get; set; }
-    [JsonPropertyName("Mode")] public string? Mode { get; set; }
-    [JsonPropertyName("Warnings")] public IReadOnlyList<string>? Warnings { get; set; }
-    [JsonPropertyName("SourceFile")] public string? SourceFile { get; set; }
-    [JsonPropertyName("SourceLine")] public int SourceLine { get; set; }
-    [JsonPropertyName("DbContextType")] public string? DbContextType { get; set; }
-    [JsonPropertyName("ProviderName")] public string? ProviderName { get; set; }
-    [JsonPropertyName("CreationStrategy")] public string? CreationStrategy { get; set; }
-}
+using Microsoft.VisualStudio.Threading;
 
 internal static class LinqHoverMarkdownRenderer
 {
@@ -63,71 +49,6 @@ internal static class LinqHoverMarkdownRenderer
         "exists",
     };
 
-    public static FrameworkElement Create(string linqCode)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-        return CreateFromMarkdown(BuildMarkdown(linqCode));
-    }
-
-    public static FrameworkElement CreateFromMarkdown(string markdown)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-        var effectiveMarkdown = string.IsNullOrWhiteSpace(markdown)
-            ? "**QueryLens Error**\n```text\nNo hover content was returned by QueryLens.\n```"
-            : markdown;
-
-        var previewMarkdown = StripQueryLensMetadataComment(effectiveMarkdown);
-        var preferredCopySql = TryExtractFirstCodeBlock(effectiveMarkdown, "sql");
-        var metadata = TryExtractQueryLensMetadata(effectiveMarkdown);
-        var enrichedSql = BuildEnrichedSqlContent(preferredCopySql, metadata);
-
-        var hostBorder = new Border
-        {
-            Background = Brushes.Transparent,
-            BorderBrush = Brushes.Transparent,
-            BorderThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(4),
-            Padding = new Thickness(0),
-            MinWidth = 380,
-            MaxHeight = 420,
-            MaxWidth = 860,
-        };
-
-        var (extractedHeaderLine, bodyMarkdown) = ExtractPinnedHeaderAndBody(previewMarkdown);
-        var fallbackHeaderLine = BuildFallbackHeaderLine(enrichedSql ?? preferredCopySql);
-        var headerLine = extractedHeaderLine ?? fallbackHeaderLine;
-        var headerFromFallback = extractedHeaderLine is null;
-        Log($"hover-render headerDetected={!headerFromFallback} fallbackUsed={headerFromFallback} header='{TruncateForLog(headerLine, 160)}'");
-
-        var layoutGrid = new Grid();
-        layoutGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layoutGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-
-        var headerElement = RenderHeaderLine(headerLine, enrichedSql ?? preferredCopySql);
-        Grid.SetRow(headerElement, 0);
-        layoutGrid.Children.Add(headerElement);
-
-        var scrollViewer = new ScrollViewer
-        {
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-        };
-
-        var stack = new StackPanel();
-        foreach (FrameworkElement? element in ParseMarkdown(bodyMarkdown, enrichedSql, suppressHeaderLines: true))
-        {
-            stack.Children.Add(element);
-        }
-
-        scrollViewer.Content = stack;
-
-        Grid.SetRow(scrollViewer, 1);
-        layoutGrid.Children.Add(scrollViewer);
-        hostBorder.Child = layoutGrid;
-
-        return hostBorder;
-    }
-
     public static FrameworkElement CreateFromStructured(QueryLensStructuredHoverResponse response, string uri, int line, int character)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
@@ -139,15 +60,33 @@ internal static class LinqHoverMarkdownRenderer
         if (!response.Success && !isQueueStatus && !isServiceUnavailable)
         {
             var errorMessage = response.ErrorMessage ?? "Translation failed.";
-            return CreateFromMarkdown($"**QueryLens Error**\n```text\n{errorMessage}\n```");
+            response = new QueryLensStructuredHoverResponse
+            {
+                Success = false,
+                ErrorMessage = errorMessage,
+                Statements = [],
+                CommandCount = 0,
+                SourceExpression = response.SourceExpression,
+                DbContextType = response.DbContextType,
+                ProviderName = response.ProviderName,
+                SourceFile = response.SourceFile,
+                SourceLine = response.SourceLine,
+                Warnings = response.Warnings,
+                EnrichedSql = null,
+                Mode = response.Mode,
+                Status = 3,
+                StatusMessage = errorMessage,
+                AvgTranslationMs = response.AvgTranslationMs,
+            };
+            status = response.Status;
+            isServiceUnavailable = true;
         }
 
         var statements = response.Statements ?? [];
-        var firstSql = statements.Count > 0 ? statements[0].Sql : null;
         var enrichedSql = string.IsNullOrWhiteSpace(response.EnrichedSql)
-            ? BuildEnrichedSqlContentFromResponse(firstSql, response)
+            ? null
             : response.EnrichedSql;
-        var copySql = enrichedSql ?? firstSql;
+        var copySql = enrichedSql;
 
         var queryParams = $"uri={Uri.EscapeDataString(uri)}&line={line}&character={character}";
         var statementWord = response.CommandCount == 1 ? "query" : "queries";
@@ -234,175 +173,6 @@ internal static class LinqHoverMarkdownRenderer
         };
     }
 
-    private static string? BuildEnrichedSqlContentFromResponse(string? rawSql, QueryLensStructuredHoverResponse response)
-    {
-        if (string.IsNullOrWhiteSpace(rawSql)) return null;
-
-        var sb = new StringBuilder();
-        sb.AppendLine("-- EF QueryLens");
-
-        if (!string.IsNullOrWhiteSpace(response.SourceFile))
-        {
-            var lineDisplay = response.SourceLine > 0 ? $", line {response.SourceLine}" : string.Empty;
-            sb.AppendLine($"-- Source:    {response.SourceFile}{lineDisplay}");
-        }
-
-        AppendCommentedExpression(sb, "LINQ", response.SourceExpression);
-
-        if (!string.IsNullOrWhiteSpace(response.DbContextType))
-        {
-            sb.AppendLine($"-- DbContext: {response.DbContextType}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(response.ProviderName))
-        {
-            sb.AppendLine($"-- Provider:  {response.ProviderName}");
-        }
-
-        sb.AppendLine();
-        sb.Append(rawSql);
-        return sb.ToString();
-    }
-
-    private static string StripQueryLensMetadataComment(string markdown)
-    {
-        return System.Text.RegularExpressions.Regex.Replace(
-            markdown,
-            @"\n?<!--\s*QUERYLENS_META:[A-Za-z0-9+/=]+\s*-->\n?",
-            "\n",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-    }
-
-    private static (string? HeaderLine, string BodyMarkdown) ExtractPinnedHeaderAndBody(string markdown)
-    {
-        var lines = markdown.Replace("\r\n", "\n").Split('\n');
-        var outputLines = new List<string>(lines.Length);
-        string? headerLine = null;
-        var inCodeFence = false;
-
-        for (var i = 0; i < lines.Length; i++)
-        {
-            var line = lines[i];
-            if (line.StartsWith("```", StringComparison.Ordinal))
-            {
-                inCodeFence = !inCodeFence;
-                outputLines.Add(line);
-                continue;
-            }
-
-            if (headerLine is null
-                && !inCodeFence
-                && IsQueryLensHeaderLine(line))
-            {
-                headerLine = line;
-                Log($"hover-header-match line={i + 1} value='{TruncateForLog(line, 180)}'");
-                continue;
-            }
-
-            outputLines.Add(line);
-        }
-
-        var bodyMarkdown = string.Join("\n", outputLines);
-        if (headerLine is null)
-        {
-            var firstNonEmpty = lines.FirstOrDefault(l => !string.IsNullOrWhiteSpace(l));
-            Log($"hover-header-miss firstNonEmpty='{TruncateForLog(firstNonEmpty, 180)}'");
-        }
-
-        return (headerLine, bodyMarkdown);
-    }
-
-    private static IEnumerable<FrameworkElement> ParseMarkdown(string markdown, string? preferredCopySql, bool suppressHeaderLines = false)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-        var lines = markdown.Replace("\r\n", "\n").Split('\n');
-        var elements = new List<FrameworkElement>();
-
-        var inCodeFence = false;
-        var codeFenceLanguage = string.Empty;
-        var codeLines = new List<string>();
-
-        foreach (var raw in lines)
-        {
-            var line = raw;
-
-            if (line.StartsWith("```", StringComparison.Ordinal))
-            {
-                if (!inCodeFence)
-                {
-                    inCodeFence = true;
-                    codeFenceLanguage = line.Length > 3 ? line.Substring(3).Trim().ToLowerInvariant() : string.Empty;
-                    codeLines.Clear();
-                }
-                else
-                {
-                    elements.Add(RenderCodeBlock(codeFenceLanguage, codeLines));
-                    inCodeFence = false;
-                    codeFenceLanguage = string.Empty;
-                    codeLines.Clear();
-                }
-
-                continue;
-            }
-
-            if (inCodeFence)
-            {
-                codeLines.Add(line);
-                continue;
-            }
-
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                elements.Add(new Border { Height = 6, Background = Brushes.Transparent });
-                continue;
-            }
-
-            if (line.StartsWith("### ", StringComparison.Ordinal))
-            {
-                elements.Add(RenderHeading(line.Substring(4), 14, preferredCopySql));
-                continue;
-            }
-
-            if (line.StartsWith("## ", StringComparison.Ordinal))
-            {
-                elements.Add(RenderHeading(line.Substring(3), 16, preferredCopySql));
-                continue;
-            }
-
-            if (line.StartsWith("# ", StringComparison.Ordinal))
-            {
-                elements.Add(RenderHeading(line.Substring(2), 18, preferredCopySql));
-                continue;
-            }
-
-            if (IsQueryLensHeaderLine(line))
-            {
-                if (suppressHeaderLines)
-                {
-                    continue;
-                }
-
-                elements.Add(RenderHeaderLine(line, preferredCopySql));
-                continue;
-            }
-
-            if (line.StartsWith("- ", StringComparison.Ordinal))
-            {
-                elements.Add(RenderBullet(line.Substring(2), preferredCopySql));
-                continue;
-            }
-
-            elements.Add(RenderParagraph(line, preferredCopySql));
-        }
-
-        if (inCodeFence && codeLines.Count > 0)
-        {
-            elements.Add(RenderCodeBlock(codeFenceLanguage, codeLines));
-        }
-
-        return elements;
-    }
-
     private static FrameworkElement RenderHeading(string text, double size, string? preferredCopySql)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
@@ -418,63 +188,6 @@ internal static class LinqHoverMarkdownRenderer
 
         AppendInlineMarkdown(tb.Inlines, text, preferredCopySql);
         return tb;
-    }
-
-    private static bool IsQueryLensHeaderLine(string line)
-    {
-        if (string.IsNullOrWhiteSpace(line))
-        {
-            return false;
-        }
-
-        var candidate = line.Trim();
-
-        // Strip common markdown prefixes before checking for the QueryLens heading.
-        while (candidate.Length > 0)
-        {
-            var ch = candidate[0];
-            if (ch == '#'
-                || ch == '>'
-                || ch == '-'
-                || ch == '*'
-                || ch == '_'
-                || ch == '`'
-                || ch == ' '
-                || ch == '\t')
-            {
-                candidate = candidate.Substring(1).TrimStart();
-                continue;
-            }
-
-            break;
-        }
-
-        if (!candidate.StartsWith("QueryLens", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        // Avoid matching inline prose that merely mentions QueryLens.
-        if (candidate.Length > "QueryLens".Length)
-        {
-            var next = candidate["QueryLens".Length];
-            if (!char.IsWhiteSpace(next) && next != '|' && next != '·' && next != ':')
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static string BuildFallbackHeaderLine(string? sqlForActions)
-    {
-        if (string.IsNullOrWhiteSpace(sqlForActions))
-        {
-            return "**QueryLens SQL Preview**";
-        }
-
-        return "**QueryLens SQL Preview** | [Copy SQL](efquerylens://copySql) | [Open SQL Editor](efquerylens://openSqlEditor)";
     }
 
     private static string TruncateForLog(string? value, int maxLength)
@@ -914,7 +627,7 @@ internal static class LinqHoverMarkdownRenderer
             if (host == "recalculate"
                 && TryExtractHoverCommandArgs(uri, out var documentUri, out var line, out var character))
             {
-                var recalculateTask = ThreadHelper.JoinableTaskFactory.RunAsync(async delegate
+                JoinableTask recalculateTask = ThreadHelper.JoinableTaskFactory.RunAsync(async delegate
                 {
                     var result = await QueryLensLanguageClient.RequestPreviewRecalculateAsync(
                         documentUri,
@@ -1023,176 +736,5 @@ internal static class LinqHoverMarkdownRenderer
         return !string.IsNullOrWhiteSpace(documentUri);
     }
 
-    private static QueryLensHoverMetadata? TryExtractQueryLensMetadata(string markdown)
-    {
-        var match = System.Text.RegularExpressions.Regex.Match(
-            markdown, @"<!--\s*QUERYLENS_META:([A-Za-z0-9+/=]+)\s*-->",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        if (!match.Success)
-        {
-            return null;
-        }
-
-        try
-        {
-            var json = Encoding.UTF8.GetString(Convert.FromBase64String(match.Groups[1].Value));
-            return JsonSerializer.Deserialize<QueryLensHoverMetadata>(json);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static string? BuildEnrichedSqlContent(string? rawSql, QueryLensHoverMetadata? metadata)
-    {
-        if (string.IsNullOrWhiteSpace(rawSql))
-        {
-            return null;
-        }
-
-        if (metadata is null)
-        {
-            return rawSql;
-        }
-
-        var sb = new StringBuilder();
-        sb.AppendLine("-- EF QueryLens");
-
-        if (!string.IsNullOrWhiteSpace(metadata.SourceFile))
-        {
-            var lineDisplay = metadata.SourceLine > 0 ? $", line {metadata.SourceLine}" : string.Empty;
-            sb.AppendLine($"-- Source:    {metadata.SourceFile}{lineDisplay}");
-        }
-
-        AppendCommentedExpression(sb, "LINQ", metadata.SourceExpression);
-
-        if (!string.IsNullOrWhiteSpace(metadata.ExecutedExpression)
-            && metadata.ExecutedExpression != metadata.SourceExpression)
-        {
-            AppendCommentedExpression(sb, "Executed LINQ (differs from source)", metadata.ExecutedExpression);
-        }
-
-        if (!string.IsNullOrWhiteSpace(metadata.DbContextType))
-        {
-            sb.AppendLine($"-- DbContext: {metadata.DbContextType}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(metadata.ProviderName))
-        {
-            sb.AppendLine($"-- Provider:  {metadata.ProviderName}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(metadata.CreationStrategy))
-        {
-            sb.AppendLine($"-- Strategy:  {metadata.CreationStrategy}");
-        }
-
-        if (metadata.Warnings is { Count: > 0 })
-        {
-            sb.AppendLine("-- Notes:");
-            foreach (var w in metadata.Warnings)
-            {
-                sb.AppendLine($"--   {w}");
-            }
-        }
-
-        sb.AppendLine();
-        sb.Append(rawSql);
-        return sb.ToString();
-    }
-
-    private static void AppendCommentedExpression(StringBuilder sb, string label, string? expression)
-    {
-        if (string.IsNullOrWhiteSpace(expression))
-        {
-            return;
-        }
-
-        sb.AppendLine($"-- {label}:");
-        foreach (var exprLine in expression!.Replace("\r\n", "\n").Split('\n'))
-        {
-            sb.AppendLine(exprLine.Length == 0 ? "--" : $"--   {exprLine.TrimEnd()}");
-        }
-    }
-
-    private static string? TryExtractFirstCodeBlock(string markdown, string preferredLanguage)
-    {
-        var lines = markdown.Replace("\r\n", "\n").Split('\n');
-        var inCode = false;
-        var language = string.Empty;
-        var codeLines = new List<string>();
-
-        foreach (var raw in lines)
-        {
-            var line = raw;
-            if (line.StartsWith("```", StringComparison.Ordinal))
-            {
-                if (!inCode)
-                {
-                    inCode = true;
-                    language = line.Length > 3 ? line.Substring(3).Trim() : string.Empty;
-                    codeLines.Clear();
-                }
-                else
-                {
-                    if ((string.IsNullOrWhiteSpace(preferredLanguage)
-                            || string.Equals(language, preferredLanguage, StringComparison.OrdinalIgnoreCase))
-                        && codeLines.Count > 0)
-                    {
-                        return string.Join(Environment.NewLine, codeLines);
-                    }
-
-                    inCode = false;
-                    language = string.Empty;
-                    codeLines.Clear();
-                }
-
-                continue;
-            }
-
-            if (inCode)
-            {
-                codeLines.Add(line);
-            }
-        }
-
-        return null;
-    }
-
-    private static string BuildMarkdown(string? linqCode)
-    {
-        var safeQuery = (linqCode ?? string.Empty).Replace("\r\n", "\n").Trim();
-        var plusQuery = string.Join("\n", safeQuery.Split('\n').Select(l => $"+ {l}"));
-
-        return $@"# LINQ Hover Documentation
-This tooltip appears when you hover over a LINQ query.
-
-## Query Diff Preview
-```diff
-- // query before transformation
-{plusQuery}
-```
-
-## SQL examples
-```sql
-SELECT c.Id, c.Name
-FROM Customers c
-WHERE c.IsActive = 1
-ORDER BY c.Name;
-```
-
-```sql
-SELECT o.CustomerId, COUNT(*) AS OrderCount
-FROM Orders o
-GROUP BY o.CustomerId
-HAVING COUNT(*) > 5;
-```
-
-### Notes
-- Hover works across LINQ chains and related symbols in the same query.
-- Use More... for the larger scrollable documentation window.
-";
-    }
 }
 

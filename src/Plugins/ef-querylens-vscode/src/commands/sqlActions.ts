@@ -10,14 +10,8 @@ import {
 } from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 
-import {
-    extractHoverText,
-    extractQueryLensMetadata,
-    extractSqlBlocks,
-    prependQueryLensContextComments,
-} from '../hover/markdown';
 import { formatSql } from '../sql/formatting';
-import { QueryLensHoverMetadata, QueryLensSqlDialect, QueryLensStructuredHoverResponse } from '../types';
+import { QueryLensSqlDialect, QueryLensStructuredHoverResponse } from '../types';
 import { formatUserMessage } from '../utils/errors';
 import { clamp, coerceNonNegativeInt, parseUri } from '../utils/parsing';
 
@@ -193,10 +187,13 @@ export function createSqlActionHandlers(getClient: () => LanguageClient | undefi
             const character = coerceNonNegativeInt(characterInput, 0);
             const uriString = uri.toString();
 
-            // Prefer structured hover which carries server-built EnrichedSql, avoiding
-            // client-side markdown extraction + metadata decoding + enrichment rebuild.
             const structured = await tryGetStructuredHover(client, uriString, line, character);
-            if (structured && structured.Status !== 0) {
+            if (!structured) {
+                window.showWarningMessage('EF QueryLens structured hover response is unavailable.');
+                return null;
+            }
+
+            if (structured.Status !== 0) {
                 const statusMessage = structured.StatusMessage
                     ?? (structured.Status === 3
                         ? 'EF QueryLens services are unavailable and cannot communicate right now.'
@@ -213,35 +210,24 @@ export function createSqlActionHandlers(getClient: () => LanguageClient | undefi
                 return null;
             }
 
-            if (structured?.Success && structured.EnrichedSql) {
+            if (!structured.Success) {
+                const message = structured.ErrorMessage ?? 'No SQL preview available at this location.';
+                window.showInformationMessage(formatUserMessage('QL1003_HOVER_EMPTY', message));
+                return null;
+            }
+
+            if (!structured.EnrichedSql) {
+                window.showWarningMessage('EF QueryLens structured hover payload is missing EnrichedSql.');
+                return null;
+            }
+
+            if (structured.EnrichedSql) {
                 const rawSql = structured.Statements?.[0]?.Sql ?? structured.EnrichedSql;
                 const formattedSql = formatSqlOnShow ? formatSql(rawSql, sqlDialect) : rawSql;
                 return includeContextComments ? structured.EnrichedSql : formattedSql;
             }
 
-            // Markdown fallback for older daemon builds that don't return EnrichedSql.
-            const hover = await client.sendRequest('textDocument/hover', {
-                textDocument: { uri: uriString },
-                position: { line, character },
-            });
-
-            const hoverText = extractHoverText(hover);
-            if (!hoverText) {
-                window.showInformationMessage(formatUserMessage('QL1003_HOVER_EMPTY', 'No SQL preview available at this location.'));
-                return null;
-            }
-
-            const metadata = extractQueryLensMetadata(hoverText)
-                ?? createFallbackMetadata(uriString, line);
-            const sqlText = extractSqlBlocks(hoverText);
-            if (sqlText) {
-                const formattedSql = formatSqlOnShow ? formatSql(sqlText, sqlDialect) : sqlText;
-                return includeContextComments
-                    ? prependQueryLensContextComments(formattedSql, metadata)
-                    : formattedSql;
-            }
-
-            return hoverText;
+            return null;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             window.showErrorMessage(formatUserMessage('QL1004_HOVER_REQUEST_FAILED', `Failed to retrieve SQL preview. ${message}`));
@@ -267,22 +253,6 @@ export function createSqlActionHandlers(getClient: () => LanguageClient | undefi
         } catch {
             return null;
         }
-    }
-
-    function createFallbackMetadata(sourceUri: string, zeroBasedLine: number): QueryLensHoverMetadata {
-        return {
-            MetadataProvenance: 'fallback',
-            SourceExpression: '',
-            ExecutedExpression: '',
-            Mode: 'direct',
-            ModeDescription: '',
-            Warnings: [],
-            SourceFile: sourceUri,
-            SourceLine: Math.max(1, zeroBasedLine + 1),
-            DbContextType: '',
-            ProviderName: '',
-            CreationStrategy: '',
-        };
     }
 
     return {

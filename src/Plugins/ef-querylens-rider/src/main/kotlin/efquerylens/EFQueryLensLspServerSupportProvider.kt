@@ -249,6 +249,8 @@ private class EFQueryLensServerDescriptor(
         withEnvironment("QUERYLENS_DAEMON_START_TIMEOUT_MS", "30000")
         withEnvironment("QUERYLENS_DAEMON_CONNECT_TIMEOUT_MS", "10000")
         withEnvironment("QUERYLENS_DAEMON_SHUTDOWN_ON_DISPOSE", "1")
+        // Use a fixed rolling window (last N samples) for status average latency.
+        withEnvironment("QUERYLENS_AVG_WINDOW_SAMPLES", "20")
         withEnvironment("QUERYLENS_LSP_LOG_FILE", lspLogFilePath.absolutePathString())
 
         val workspacePath = workspaceRoot.absolutePathString()
