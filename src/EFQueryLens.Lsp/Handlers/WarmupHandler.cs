@@ -2,15 +2,13 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using EFQueryLens.Core;
 using EFQueryLens.Lsp.Parsing;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.VisualStudio.LanguageServer.Protocol;
 
 namespace EFQueryLens.Lsp.Handlers;
 
 internal sealed record WarmupResponse(bool Success, bool Cached, string? AssemblyPath, string? Message);
 
-internal sealed class WarmupHandler
+internal sealed partial class WarmupHandler
 {
     private readonly DocumentManager _documentManager;
     private readonly IQueryLensEngine _engine;
@@ -107,144 +105,4 @@ internal sealed class WarmupHandler
         }
     }
 
-    private static bool IsMultipleDbContextAmbiguity(Exception ex)
-    {
-        return ex.Message.Contains("Multiple DbContext types found", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string? TryResolveDbContextTypeName(string sourceText, int line, int character)
-    {
-        _ = LspSyntaxHelper.TryExtractLinqExpression(sourceText, line, character, out var contextVariableName);
-        if (string.IsNullOrWhiteSpace(contextVariableName))
-        {
-            return null;
-        }
-
-        var tree = CSharpSyntaxTree.ParseText(sourceText);
-        var root = tree.GetRoot();
-
-        // Prefer explicit fields/locals/parameters named as the context variable.
-        foreach (var field in root.DescendantNodes().OfType<FieldDeclarationSyntax>())
-        {
-            if (field.Declaration.Variables.Any(v => v.Identifier.ValueText.Equals(contextVariableName, StringComparison.Ordinal)))
-            {
-                return field.Declaration.Type.ToString();
-            }
-        }
-
-        foreach (var local in root.DescendantNodes().OfType<LocalDeclarationStatementSyntax>())
-        {
-            if (local.Declaration.Variables.Any(v => v.Identifier.ValueText.Equals(contextVariableName, StringComparison.Ordinal)))
-            {
-                return local.Declaration.Type.ToString();
-            }
-        }
-
-        foreach (var parameter in root.DescendantNodes().OfType<ParameterSyntax>())
-        {
-            if (parameter.Identifier.ValueText.Equals(contextVariableName, StringComparison.Ordinal)
-                && parameter.Type is not null)
-            {
-                return parameter.Type.ToString();
-            }
-        }
-
-        return null;
-    }
-
-    private bool TryGetCachedWarmup(string assemblyPath, out CachedWarmup cached)
-    {
-        cached = default!;
-        if (!_warmCache.TryGetValue(assemblyPath, out var existing))
-        {
-            return false;
-        }
-
-        if (existing.ExpiresAtUtcTicks <= DateTime.UtcNow.Ticks)
-        {
-            _warmCache.TryRemove(assemblyPath, out _);
-            return false;
-        }
-
-        cached = existing;
-        return true;
-    }
-
-    private void CacheWarmup(string assemblyPath, bool success, string message)
-    {
-        var ttlMs = success ? _successTtlMs : _failureCooldownMs;
-        if (ttlMs <= 0)
-        {
-            _warmCache.TryRemove(assemblyPath, out _);
-            return;
-        }
-
-        var expires = DateTime.UtcNow.AddMilliseconds(ttlMs).Ticks;
-        _warmCache[assemblyPath] = new CachedWarmup(expires, success, message);
-    }
-
-    private async Task<string?> GetSourceTextAsync(string documentUri, string filePath, CancellationToken cancellationToken)
-    {
-        var sourceText = _documentManager.GetDocumentText(documentUri);
-        if (!string.IsNullOrWhiteSpace(sourceText))
-        {
-            return sourceText;
-        }
-
-        if (!File.Exists(filePath))
-        {
-            return null;
-        }
-
-        return await File.ReadAllTextAsync(filePath, cancellationToken);
-    }
-
-    private static int ReadIntEnvironmentVariable(string variableName, int fallback, int min, int max)
-    {
-        var raw = Environment.GetEnvironmentVariable(variableName);
-        if (!int.TryParse(raw, out var value))
-        {
-            return fallback;
-        }
-
-        if (value < min)
-        {
-            return min;
-        }
-
-        if (value > max)
-        {
-            return max;
-        }
-
-        return value;
-    }
-
-    private static bool ReadBoolEnvironmentVariable(string variableName, bool fallback)
-    {
-        var raw = Environment.GetEnvironmentVariable(variableName);
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return fallback;
-        }
-
-        if (bool.TryParse(raw, out var parsed))
-        {
-            return parsed;
-        }
-
-        return raw.Equals("1", StringComparison.OrdinalIgnoreCase)
-               || raw.Equals("yes", StringComparison.OrdinalIgnoreCase)
-               || raw.Equals("on", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private void LogDebug(string message)
-    {
-        if (!_debugEnabled)
-        {
-            return;
-        }
-
-        Console.Error.WriteLine($"[QL-Warmup] {message}");
-    }
 }
