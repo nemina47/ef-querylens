@@ -33,6 +33,8 @@ internal sealed class QueryLensHoverMetadata
 
 internal static class LinqHoverMarkdownRenderer
 {
+    private static readonly string logPath = Path.Combine(Path.GetTempPath(), "EFQueryLens.VisualStudio.log");
+
     public static FrameworkElement Create(string linqCode)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
@@ -59,24 +61,42 @@ internal static class LinqHoverMarkdownRenderer
             CornerRadius = new CornerRadius(4),
             Padding = new Thickness(0),
             MinWidth = 380,
+            MaxHeight = 420,
             MaxWidth = 860,
         };
+
+        var (extractedHeaderLine, bodyMarkdown) = ExtractPinnedHeaderAndBody(previewMarkdown);
+        var fallbackHeaderLine = BuildFallbackHeaderLine(enrichedSql ?? preferredCopySql);
+        var headerLine = extractedHeaderLine ?? fallbackHeaderLine;
+        var headerFromFallback = extractedHeaderLine is null;
+        Log($"hover-render headerDetected={!headerFromFallback} fallbackUsed={headerFromFallback} header='{TruncateForLog(headerLine, 160)}'");
+
+        var layoutGrid = new Grid();
+        layoutGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layoutGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+        var headerElement = RenderHeaderLine(headerLine, enrichedSql ?? preferredCopySql);
+        Grid.SetRow(headerElement, 0);
+        layoutGrid.Children.Add(headerElement);
 
         var scrollViewer = new ScrollViewer
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            MaxHeight = 420,
         };
 
         var stack = new StackPanel();
-        foreach (FrameworkElement? element in ParseMarkdown(previewMarkdown, enrichedSql))
+        foreach (FrameworkElement? element in ParseMarkdown(bodyMarkdown, enrichedSql, suppressHeaderLines: true))
         {
             stack.Children.Add(element);
         }
 
         scrollViewer.Content = stack;
-        hostBorder.Child = scrollViewer;
+
+        Grid.SetRow(scrollViewer, 1);
+        layoutGrid.Children.Add(scrollViewer);
+        hostBorder.Child = layoutGrid;
+
         return hostBorder;
     }
 
@@ -89,7 +109,46 @@ internal static class LinqHoverMarkdownRenderer
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     }
 
-    private static IEnumerable<FrameworkElement> ParseMarkdown(string markdown, string? preferredCopySql)
+    private static (string? HeaderLine, string BodyMarkdown) ExtractPinnedHeaderAndBody(string markdown)
+    {
+        var lines = markdown.Replace("\r\n", "\n").Split('\n');
+        var outputLines = new List<string>(lines.Length);
+        string? headerLine = null;
+        var inCodeFence = false;
+
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            if (line.StartsWith("```", StringComparison.Ordinal))
+            {
+                inCodeFence = !inCodeFence;
+                outputLines.Add(line);
+                continue;
+            }
+
+            if (headerLine is null
+                && !inCodeFence
+                && IsQueryLensHeaderLine(line))
+            {
+                headerLine = line;
+                Log($"hover-header-match line={i + 1} value='{TruncateForLog(line, 180)}'");
+                continue;
+            }
+
+            outputLines.Add(line);
+        }
+
+        var bodyMarkdown = string.Join("\n", outputLines);
+        if (headerLine is null)
+        {
+            var firstNonEmpty = lines.FirstOrDefault(l => !string.IsNullOrWhiteSpace(l));
+            Log($"hover-header-miss firstNonEmpty='{TruncateForLog(firstNonEmpty, 180)}'");
+        }
+
+        return (headerLine, bodyMarkdown);
+    }
+
+    private static IEnumerable<FrameworkElement> ParseMarkdown(string markdown, string? preferredCopySql, bool suppressHeaderLines = false)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
         var lines = markdown.Replace("\r\n", "\n").Split('\n');
@@ -152,8 +211,13 @@ internal static class LinqHoverMarkdownRenderer
                 continue;
             }
 
-            if (line.StartsWith("QueryLens", StringComparison.OrdinalIgnoreCase))
+            if (IsQueryLensHeaderLine(line))
             {
+                if (suppressHeaderLines)
+                {
+                    continue;
+                }
+
                 elements.Add(RenderHeaderLine(line, preferredCopySql));
                 continue;
             }
@@ -190,6 +254,89 @@ internal static class LinqHoverMarkdownRenderer
 
         AppendInlineMarkdown(tb.Inlines, text, preferredCopySql);
         return tb;
+    }
+
+    private static bool IsQueryLensHeaderLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return false;
+        }
+
+        var candidate = line.Trim();
+
+        // Strip common markdown prefixes before checking for the QueryLens heading.
+        while (candidate.Length > 0)
+        {
+            var ch = candidate[0];
+            if (ch == '#'
+                || ch == '>'
+                || ch == '-'
+                || ch == '*'
+                || ch == '_'
+                || ch == '`'
+                || ch == ' '
+                || ch == '\t')
+            {
+                candidate = candidate.Substring(1).TrimStart();
+                continue;
+            }
+
+            break;
+        }
+
+        if (!candidate.StartsWith("QueryLens", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // Avoid matching inline prose that merely mentions QueryLens.
+        if (candidate.Length > "QueryLens".Length)
+        {
+            var next = candidate["QueryLens".Length];
+            if (!char.IsWhiteSpace(next) && next != '|' && next != '·' && next != ':')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string BuildFallbackHeaderLine(string? sqlForActions)
+    {
+        if (string.IsNullOrWhiteSpace(sqlForActions))
+        {
+            return "**QueryLens SQL Preview**";
+        }
+
+        return "**QueryLens SQL Preview** | [Copy SQL](efquerylens://copySql) | [Open SQL Editor](efquerylens://openSqlEditor)";
+    }
+
+    private static string TruncateForLog(string? value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        var sanitized = (value ?? string.Empty).Replace("\r", "\\r").Replace("\n", "\\n");
+        return sanitized.Length <= maxLength
+            ? sanitized
+            : sanitized.Substring(0, maxLength) + "...";
+    }
+
+    private static void Log(string message)
+    {
+        try
+        {
+            var line = $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}Z] [Renderer] {message}{Environment.NewLine}";
+            File.AppendAllText(logPath, line);
+        }
+        catch
+        {
+            // Ignore logging failures.
+        }
     }
 
     private static FrameworkElement RenderParagraph(string text, string? preferredCopySql)

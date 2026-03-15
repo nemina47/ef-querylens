@@ -116,7 +116,11 @@ public static class DaemonLocator
         return null;
     }
 
-    public static string? TryGetPipeName(string workspacePath)
+    public static string? TryGetPipeName(
+        string workspacePath,
+        string? expectedDaemonExecutablePath = null,
+        string? expectedDaemonAssemblyPath = null,
+        Action<string>? debugLog = null)
     {
         var normalizedWorkspacePath = DaemonWorkspaceIdentity.NormalizeWorkspacePath(workspacePath);
         var pidFilePath = DaemonWorkspaceIdentity.BuildPidFilePath(normalizedWorkspacePath);
@@ -136,6 +140,11 @@ public static class DaemonLocator
                 return null;
             }
 
+            var normalizedExpectedExe = NormalizePathOrNull(expectedDaemonExecutablePath);
+            var normalizedExpectedDll = NormalizePathOrNull(expectedDaemonAssemblyPath);
+            var normalizedPidProcessPath = NormalizePathOrNull(info.ProcessPath);
+            var normalizedPidAssemblyPath = NormalizePathOrNull(info.AssemblyPath);
+
             if (!string.IsNullOrWhiteSpace(info.WorkspacePath))
             {
                 var normalizedPidWorkspacePath = DaemonWorkspaceIdentity.NormalizeWorkspacePath(info.WorkspacePath);
@@ -148,7 +157,49 @@ public static class DaemonLocator
                 }
             }
 
-            Process.GetProcessById(info.ProcessId);
+            if (!string.IsNullOrWhiteSpace(normalizedExpectedExe)
+                && !string.IsNullOrWhiteSpace(normalizedPidProcessPath)
+                && !string.Equals(normalizedExpectedExe, normalizedPidProcessPath, StringComparison.OrdinalIgnoreCase))
+            {
+                debugLog?.Invoke(
+                    $"daemon-discovery stale-runtime reason=process-path-mismatch expected='{normalizedExpectedExe}' actual='{normalizedPidProcessPath}'");
+                CleanupStaleDaemonInstance(info.ProcessId, pidFilePath, debugLog);
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(normalizedExpectedDll)
+                && !string.IsNullOrWhiteSpace(normalizedPidAssemblyPath)
+                && !string.Equals(normalizedExpectedDll, normalizedPidAssemblyPath, StringComparison.OrdinalIgnoreCase))
+            {
+                debugLog?.Invoke(
+                    $"daemon-discovery stale-runtime reason=assembly-path-mismatch expected='{normalizedExpectedDll}' actual='{normalizedPidAssemblyPath}'");
+                CleanupStaleDaemonInstance(info.ProcessId, pidFilePath, debugLog);
+                return null;
+            }
+
+            var process = Process.GetProcessById(info.ProcessId);
+            var processPath = TryGetProcessPath(process);
+
+            if (!string.IsNullOrWhiteSpace(normalizedExpectedExe)
+                && !string.IsNullOrWhiteSpace(processPath)
+                && !string.Equals(normalizedExpectedExe, processPath, StringComparison.OrdinalIgnoreCase))
+            {
+                debugLog?.Invoke(
+                    $"daemon-discovery stale-runtime reason=live-process-path-mismatch expected='{normalizedExpectedExe}' actual='{processPath}'");
+                CleanupStaleDaemonInstance(info.ProcessId, pidFilePath, debugLog);
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(normalizedPidProcessPath)
+                && !string.IsNullOrWhiteSpace(processPath)
+                && !string.Equals(normalizedPidProcessPath, processPath, StringComparison.OrdinalIgnoreCase))
+            {
+                debugLog?.Invoke(
+                    $"daemon-discovery stale-runtime reason=pid-process-drift pidPath='{normalizedPidProcessPath}' processPath='{processPath}'");
+                CleanupStaleDaemonInstance(info.ProcessId, pidFilePath, debugLog);
+                return null;
+            }
+
             return info.PipeName;
         }
         catch
@@ -166,7 +217,11 @@ public static class DaemonLocator
         CancellationToken ct = default)
     {
         var normalizedWorkspacePath = DaemonWorkspaceIdentity.NormalizeWorkspacePath(workspacePath);
-        var existingPipe = TryGetPipeName(normalizedWorkspacePath);
+        var existingPipe = TryGetPipeName(
+            normalizedWorkspacePath,
+            expectedDaemonExecutablePath: daemonExecutablePath,
+            expectedDaemonAssemblyPath: daemonAssemblyPath,
+            debugLog: debugLog);
         if (!string.IsNullOrWhiteSpace(existingPipe))
         {
             return existingPipe;
@@ -210,7 +265,11 @@ public static class DaemonLocator
             {
                 ct.ThrowIfCancellationRequested();
 
-                var discoveredPipe = TryGetPipeName(normalizedWorkspacePath);
+                var discoveredPipe = TryGetPipeName(
+                    normalizedWorkspacePath,
+                    expectedDaemonExecutablePath: daemonExecutablePath,
+                    expectedDaemonAssemblyPath: daemonAssemblyPath,
+                    debugLog: debugLog);
                 if (!string.IsNullOrWhiteSpace(discoveredPipe))
                 {
                     debugLog?.Invoke($"daemon-autostart ready pipe={discoveredPipe}");
@@ -297,5 +356,68 @@ public static class DaemonLocator
         public int ProcessId { get; init; }
         public string PipeName { get; init; } = string.Empty;
         public string WorkspacePath { get; init; } = string.Empty;
+        public string ProcessPath { get; init; } = string.Empty;
+        public string AssemblyPath { get; init; } = string.Empty;
+    }
+
+    private static string? NormalizePathOrNull(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Path.GetFullPath(value);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? TryGetProcessPath(Process process)
+    {
+        try
+        {
+            var path = process.MainModule?.FileName;
+            return NormalizePathOrNull(path);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void CleanupStaleDaemonInstance(int processId, string pidFilePath, Action<string>? debugLog)
+    {
+        try
+        {
+            var process = Process.GetProcessById(processId);
+            if (!process.HasExited
+                && process.ProcessName.Equals("EFQueryLens.Daemon", StringComparison.OrdinalIgnoreCase))
+            {
+                debugLog?.Invoke($"daemon-discovery stale-runtime kill pid={processId}");
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(2000);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup; stale process may already be gone.
+        }
+
+        try
+        {
+            if (File.Exists(pidFilePath))
+            {
+                File.Delete(pidFilePath);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup.
+        }
     }
 }

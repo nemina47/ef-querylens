@@ -65,11 +65,20 @@ public sealed class ResiliencyDaemonEngine : IQueryLensEngine, IAsyncDisposable
 
         if (_shutdownDaemonOnDispose && _ownsDaemonLifecycle)
         {
+            _debugLog?.Invoke("daemon-shutdown-on-dispose begin");
             try
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                await _inner.ShutdownDaemonAsync(cts.Token);
-                _debugLog?.Invoke("daemon-shutdown-on-dispose requested");
+                await _inner.ShutdownDaemonAsync(cts.Token).WaitAsync(TimeSpan.FromSeconds(2));
+                _debugLog?.Invoke("daemon-shutdown-on-dispose completed");
+            }
+            catch (TimeoutException)
+            {
+                _debugLog?.Invoke("daemon-shutdown-on-dispose timeout");
+            }
+            catch (OperationCanceledException)
+            {
+                _debugLog?.Invoke("daemon-shutdown-on-dispose canceled");
             }
             catch (Exception ex)
             {

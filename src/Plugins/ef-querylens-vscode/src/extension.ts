@@ -68,11 +68,14 @@ export function activate(context: ExtensionContext) {
 
     const serverEnv: NodeJS.ProcessEnv = {
         ...process.env,
+        QUERYLENS_CLIENT: 'vscode',
         QUERYLENS_WORKSPACE: workspaceRoot,
         QUERYLENS_DAEMON_WORKSPACE: workspaceRoot,
         QUERYLENS_DAEMON_START_TIMEOUT_MS: '30000',
         QUERYLENS_DAEMON_CONNECT_TIMEOUT_MS: '10000',
         QUERYLENS_DAEMON_SHUTDOWN_ON_DISPOSE: '1',
+        // Keep shared hover computations alive briefly when VS Code rapidly cancels/reissues hover requests.
+        QUERYLENS_HOVER_CANCEL_GRACE_MS: '1500',
         // VS Code hides inline SQL Preview badges; hover/command actions remain available.
         QUERYLENS_MAX_CODELENS_PER_DOCUMENT: '0',
         // InlayHint SQL Preview labels are used by Rider; disable them for VS Code UX.

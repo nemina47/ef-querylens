@@ -42,6 +42,8 @@ internal sealed class PidManager : IDisposable
             ProcessId = Process.GetCurrentProcess().Id,
             PipeName = pipeName,
             WorkspacePath = DaemonWorkspaceIdentity.NormalizeWorkspacePath(workspacePath),
+            ProcessPath = Environment.ProcessPath ?? string.Empty,
+            AssemblyPath = typeof(PidManager).Assembly.Location,
             Version = typeof(PidManager).Assembly.GetName().Version?.ToString() ?? "0.0.0",
             StartedUtc = DateTime.UtcNow,
         };
@@ -60,6 +62,8 @@ internal sealed class PidManager : IDisposable
         public int ProcessId { get; init; }
         public string PipeName { get; init; } = string.Empty;
         public string WorkspacePath { get; init; } = string.Empty;
+        public string ProcessPath { get; init; } = string.Empty;
+        public string AssemblyPath { get; init; } = string.Empty;
         public string Version { get; init; } = string.Empty;
         public DateTime StartedUtc { get; init; }
     }
