@@ -12,6 +12,45 @@ namespace EFQueryLens.Core.Tests;
 public class DaemonGrpcTransportTests
 {
     [Fact]
+    public async Task Subscribe_WhenQueryLensConfigChanges_StreamsConfigReloadedEvent()
+    {
+        var workspacePath = CreateWorkspacePath();
+        Directory.CreateDirectory(workspacePath);
+
+        try
+        {
+            var daemonAssemblyPath = ResolveDaemonAssemblyPath();
+            var port = await StartDaemonAsync(workspacePath, daemonAssemblyPath, TimeSpan.FromSeconds(20));
+
+            using var channel = GrpcChannel.ForAddress($"http://127.0.0.1:{port}");
+            var grpcClient = new DaemonService.DaemonServiceClient(channel);
+
+            using var subscribeCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            using var subscribeCall = grpcClient.Subscribe(new SubscribeRequest(), cancellationToken: subscribeCts.Token);
+
+            var expectedContext = $"cfg-{Guid.NewGuid():N}";
+            var waitEventTask = WaitForConfigReloadedEventAsync(
+                subscribeCall.ResponseStream,
+                expectedContext,
+                TimeSpan.FromSeconds(12));
+
+            var configPath = Path.Combine(workspacePath, ".querylens.json");
+            await File.WriteAllTextAsync(configPath, BuildConfigJson("warmup-context"));
+            await Task.Delay(1300);
+            await File.WriteAllTextAsync(configPath, BuildConfigJson(expectedContext));
+
+            var configReloaded = await waitEventTask;
+
+            Assert.Contains(expectedContext, configReloaded.ContextNames);
+        }
+        finally
+        {
+            TryKillDaemonFromPidFile(workspacePath);
+            TryDeleteDirectory(workspacePath);
+        }
+    }
+
+    [Fact]
     public async Task Subscribe_WhenTranslationStateChanges_StreamsStateChangedEvent()
     {
         var workspacePath = CreateWorkspacePath();
@@ -251,6 +290,48 @@ public class DaemonGrpcTransportTests
         }
 
         throw new TimeoutException($"Timed out waiting for StateChanged event for context '{contextName}'.");
+    }
+
+    private static async Task<ConfigReloadedEvent> WaitForConfigReloadedEventAsync(
+        IAsyncStreamReader<DaemonEvent> stream,
+        string expectedContextName,
+        TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+
+        while (await stream.MoveNext(cts.Token))
+        {
+            var daemonEvent = stream.Current;
+            if (daemonEvent.EventCase is not DaemonEvent.EventOneofCase.ConfigReloaded)
+            {
+                continue;
+            }
+
+            if (!daemonEvent.ConfigReloaded.ContextNames.Contains(expectedContextName))
+            {
+                continue;
+            }
+
+            return daemonEvent.ConfigReloaded;
+        }
+
+        throw new TimeoutException(
+            $"Timed out waiting for ConfigReloaded event for context '{expectedContextName}'.");
+    }
+
+    private static string BuildConfigJson(string contextName)
+    {
+        return
+            $$"""
+              {
+                "contexts": [
+                  {
+                    "name": "{{contextName}}",
+                    "assembly": "sample.dll"
+                  }
+                ]
+              }
+              """;
     }
 
     private static void TryKillDaemonFromPidFile(string workspacePath)
