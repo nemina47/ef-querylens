@@ -19,9 +19,6 @@ public static class DaemonWorkspaceIdentity
         return Convert.ToHexString(bytes)[..12].ToLowerInvariant();
     }
 
-    public static string BuildPipeName(string workspacePath) =>
-        $"querylens-{ComputeWorkspaceHash(workspacePath)}";
-
     public static string BuildPidFilePath(string workspacePath)
     {
         var hash = ComputeWorkspaceHash(workspacePath);
