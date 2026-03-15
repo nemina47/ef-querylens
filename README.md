@@ -1,6 +1,6 @@
 # EF QueryLens
 
-SQL preview and analysis toolkit for Entity Framework Core.
+Hover-first SQL translation and analysis toolkit for Entity Framework Core.
 
 EF QueryLens helps you inspect generated SQL from LINQ during development through IDE integrations and language tooling.
 

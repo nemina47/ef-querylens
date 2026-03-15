@@ -788,7 +788,7 @@ Communicates with the engine over a local named pipe / Unix socket. The analyzer
 
 |----|-------|----------|
 
-| `QL0001` | SQL Preview (informational) | Info |
+| `QL0001` | Hover SQL Translation (informational) | Info |
 
 | `QL0002` | Full Table Scan | Warning |
 
@@ -804,11 +804,9 @@ Communicates with the engine over a local named pipe / Unix socket. The analyzer
 
 
 
-\- \*\*Inlay hints\*\* — ghost text on terminal calls showing column count + estimated rows + cost tier
-
 \- \*\*Hover (QuickInfo)\*\* — rich tooltip with full SQL, parameters, warnings on hover over terminal call
 
-\- \*\*CodeLens\*\* — per-method query count + warning rollup
+\- \*\*Hover actions\*\* — Copy SQL and Open SQL Editor actions directly from the hover preview
 
 \- \*\*Diagnostics\*\* — squiggles on queries with detected issues
 
@@ -860,7 +858,7 @@ Communicates with the engine over a local named pipe / Unix socket. The analyzer
 
 \- IPC channel to engine process
 
-\- VS extension: inlay hints + hover
+\- VS extension: hover preview + Copy/Open actions
 
 
 
