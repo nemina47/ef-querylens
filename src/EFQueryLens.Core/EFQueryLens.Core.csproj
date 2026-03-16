@@ -20,4 +20,10 @@
     <Protobuf Include="Transport\Daemon\querylens.proto" GrpcServices="Both" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Scripting\Compilation\Templates\*.cs.tmpl">
+      <WithCulture>false</WithCulture>
+    </EmbeddedResource>
+  </ItemGroup>
+
 </Project>

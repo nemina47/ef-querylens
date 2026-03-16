@@ -65,13 +65,20 @@ public sealed partial class QueryLensEngine
         _evaluator.InvalidateMetadataRefCache(entry.ShadowAssemblyPath);
         await EvictPooledDbContextsForAssemblyAsync(entry.SourceAssemblyPath);
         entry.Context.Dispose();
-        ForceUnloadCollection();
+        ForceUnloadCollection(aggressive: string.Equals(reason, "dispose", StringComparison.Ordinal));
 
         LogDebug($"alc-release reason={reason} source={entry.SourceAssemblyPath} shadow={entry.ShadowAssemblyPath}");
     }
 
-    private static void ForceUnloadCollection()
+    private static void ForceUnloadCollection(bool aggressive)
     {
+        if (!aggressive)
+        {
+            // Routine cache refreshes should avoid stop-the-world finalizer waits.
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: false, compacting: false);
+            return;
+        }
+
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: false);
         GC.WaitForPendingFinalizers();
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: false);

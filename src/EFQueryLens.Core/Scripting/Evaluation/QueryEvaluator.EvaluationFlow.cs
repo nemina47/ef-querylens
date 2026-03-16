@@ -94,7 +94,7 @@ public sealed partial class QueryEvaluator
             {
                 // 4. Retrieve or build MetadataReferences for this assembly set.
                 var metadataReferenceWatch = Stopwatch.StartNew();
-                var refs = GetOrBuildMetadataRefs(alcCtx, compilationAssemblies);
+                var refs = GetOrBuildMetadataRefs(alcCtx, compilationAssemblies, asmSetHash);
                 metadataReferenceWatch.Stop();
                 metadataReferenceBuildTime = metadataReferenceWatch.Elapsed;
 

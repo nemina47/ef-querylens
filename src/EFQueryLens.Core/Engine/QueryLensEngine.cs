@@ -26,6 +26,12 @@ public sealed partial class QueryLensEngine : IQueryLensEngine, IDbContextPoolPr
         SemaphoreSlim Gate,
         string CreationStrategy);
 
+    private sealed class CreateGateState
+    {
+        public SemaphoreSlim Gate { get; } = new(1, 1);
+        public int ActiveUsers;
+    }
+
     private sealed class DbContextLease : IDbContextLease
     {
         private readonly QueryLensEngine _owner;
@@ -67,7 +73,7 @@ public sealed partial class QueryLensEngine : IQueryLensEngine, IDbContextPoolPr
     // DbContext pool: keyed by "assemblyPath|dbContextTypeFullName" for isolation
     private readonly ConcurrentDictionary<string, PooledDbContext> _dbContextPool = new(
         StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _dbContextCreateGates = new(
+    private readonly ConcurrentDictionary<string, CreateGateState> _dbContextCreateGates = new(
         StringComparer.Ordinal);
     
     private readonly bool _debugEnabled;

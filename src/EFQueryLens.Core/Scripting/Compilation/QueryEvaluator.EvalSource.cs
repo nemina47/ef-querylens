@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using EFQueryLens.Core.Scripting.Compilation;
 
 namespace EFQueryLens.Core.Scripting;
 
@@ -18,11 +19,16 @@ public sealed partial class QueryEvaluator
 
         AppendBaseUsings(sb);
         AppendRequestUsings(sb, request, knownNamespaces, knownTypes, synthesizedUsingStaticTypes);
-        AppendCapturedTypes(sb);
-        AppendOfflineDbConnection(sb);
-        AppendFakeDbDataReader(sb);
-        AppendSqlCaptureScope(sb);
-        AppendOfflineCapture(sb);
+        sb.AppendLine();
+        sb.Append(EvalSourceTemplateCatalog.CapturedTypes);
+        sb.AppendLine();
+        sb.Append(EvalSourceTemplateCatalog.OfflineDbConnection);
+        sb.AppendLine();
+        sb.Append(EvalSourceTemplateCatalog.FakeDbDataReader);
+        sb.AppendLine();
+        sb.Append(EvalSourceTemplateCatalog.SqlCaptureScope);
+        sb.AppendLine();
+        sb.Append(EvalSourceTemplateCatalog.OfflineCapture);
         AppendRunner(sb, dbContextType, request, stubs);
 
         return sb.ToString();

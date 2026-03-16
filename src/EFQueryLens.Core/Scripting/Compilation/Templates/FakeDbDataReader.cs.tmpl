@@ -1,0 +1,52 @@
+internal sealed class __QueryLensFakeDbDataReader__ : DbDataReader
+{
+    private int _position = -1;
+    // Keep this high so EF buffered materialization doesn't fail for wide entities/projections.
+    public override int FieldCount => 1024;
+    public override bool HasRows => true;
+    public override bool IsClosed => false;
+    public override int RecordsAffected => 0;
+    public override int Depth => 0;
+    public override object this[int ordinal] => 0;
+    public override object this[string name] => 0;
+    public override bool Read() { _position++; return _position < 1; }
+    public override bool NextResult() => false;
+    public override string GetName(int ordinal) => $"c{ordinal}";
+    public override string GetDataTypeName(int ordinal) => "object";
+    public override Type GetFieldType(int ordinal) => typeof(object);
+    public override object GetValue(int ordinal) => 0;
+    public override int GetValues(object[] values)
+    {
+        var count = Math.Min(values.Length, FieldCount);
+        for (var i = 0; i < count; i++) values[i] = 0;
+        return count;
+    }
+    public override int GetOrdinal(string name) => 0;
+    public override bool GetBoolean(int ordinal) => false;
+    public override byte GetByte(int ordinal) => 0;
+    public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length) => 0;
+    public override char GetChar(int ordinal) => '\0';
+    public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length) => 0;
+    public override Guid GetGuid(int ordinal) => Guid.Empty;
+    public override short GetInt16(int ordinal) => 0;
+    public override int GetInt32(int ordinal) => 0;
+    public override long GetInt64(int ordinal) => 0;
+    public override float GetFloat(int ordinal) => 0;
+    public override double GetDouble(int ordinal) => 0;
+    public override string GetString(int ordinal) => string.Empty;
+    public override decimal GetDecimal(int ordinal) => 0m;
+    public override DateTime GetDateTime(int ordinal) => DateTime.UnixEpoch;
+    public override bool IsDBNull(int ordinal) => false;
+    public override T GetFieldValue<T>(int ordinal)
+    {
+        var t = typeof(T);
+        if (t == typeof(string)) return (T)(object)string.Empty;
+        if (t == typeof(Guid)) return (T)(object)Guid.Empty;
+        if (t == typeof(DateTime)) return (T)(object)DateTime.UnixEpoch;
+        if (t.IsValueType) return (T)Activator.CreateInstance(t)!;
+        return default!;
+    }
+    public override Task<T> GetFieldValueAsync<T>(int ordinal, CancellationToken cancellationToken) => Task.FromResult(GetFieldValue<T>(ordinal));
+    public override IEnumerator GetEnumerator() { while (Read()) yield return this; }
+    public override DataTable GetSchemaTable() => new();
+}

@@ -1,0 +1,74 @@
+internal sealed class __QueryLensOfflineDbConnection__ : DbConnection
+{
+    public override string ConnectionString { get; set; } = string.Empty;
+    public override string Database => "offline";
+    public override string DataSource => "localhost";
+    public override string ServerVersion => "0";
+    public override ConnectionState State => ConnectionState.Open;
+    public override void ChangeDatabase(string databaseName) { }
+    public override void Open() { }
+    public override void Close() { }
+    protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) => throw new InvalidOperationException("Offline mode: transactions not supported.");
+    protected override DbCommand CreateDbCommand() => new __QueryLensOfflineDbCommand__();
+
+    private sealed class __QueryLensOfflineDbCommand__ : DbCommand
+    {
+        private readonly __QueryLensOfflineDbParameterCollection__ _parameters = new();
+        public override string CommandText { get; set; } = string.Empty;
+        public override int CommandTimeout { get; set; }
+        public override CommandType CommandType { get; set; }
+        public override bool DesignTimeVisible { get; set; }
+        public override UpdateRowSource UpdatedRowSource { get; set; }
+        protected override DbConnection? DbConnection { get; set; }
+        protected override DbParameterCollection DbParameterCollection => _parameters;
+        protected override DbTransaction? DbTransaction { get; set; }
+        public override void Cancel() { }
+        public override void Prepare() { }
+        protected override DbParameter CreateDbParameter() => new __QueryLensOfflineDbParameter__();
+        public override int ExecuteNonQuery() { RecordCurrentCommand(); return 0; }
+        public override object? ExecuteScalar() { RecordCurrentCommand(); return null; }
+        protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) { RecordCurrentCommand(); return new __QueryLensFakeDbDataReader__(); }
+        private void RecordCurrentCommand() => __QueryLensSqlCaptureScope__.Record(CommandText, _parameters.Items);
+    }
+
+    private sealed class __QueryLensOfflineDbParameterCollection__ : DbParameterCollection
+    {
+        private readonly List<DbParameter> _items = new();
+        public IReadOnlyList<DbParameter> Items => _items;
+        public override int Count => _items.Count;
+        public override object SyncRoot => ((ICollection)_items).SyncRoot!;
+        public override bool IsFixedSize => false;
+        public override bool IsReadOnly => false;
+        public override bool IsSynchronized => false;
+        public override int Add(object value) { _items.Add((DbParameter)value); return _items.Count - 1; }
+        public override void AddRange(Array values) { foreach (var v in values) Add(v!); }
+        public override void Clear() => _items.Clear();
+        public override bool Contains(object value) => value is DbParameter p && _items.Contains(p);
+        public override bool Contains(string value) => IndexOf(value) >= 0;
+        public override void CopyTo(Array array, int index) => ((ICollection)_items).CopyTo(array, index);
+        public override IEnumerator GetEnumerator() => _items.GetEnumerator();
+        public override int IndexOf(object value) => value is DbParameter p ? _items.IndexOf(p) : -1;
+        public override int IndexOf(string parameterName) => _items.FindIndex(p => string.Equals(p.ParameterName, parameterName, StringComparison.Ordinal));
+        public override void Insert(int index, object value) => _items.Insert(index, (DbParameter)value);
+        public override void Remove(object value) { if (value is DbParameter p) _items.Remove(p); }
+        public override void RemoveAt(int index) => _items.RemoveAt(index);
+        public override void RemoveAt(string parameterName) { var i = IndexOf(parameterName); if (i >= 0) _items.RemoveAt(i); }
+        protected override DbParameter GetParameter(int index) => _items[index];
+        protected override DbParameter GetParameter(string parameterName) { var i = IndexOf(parameterName); return i >= 0 ? _items[i] : throw new IndexOutOfRangeException(parameterName); }
+        protected override void SetParameter(int index, DbParameter value) => _items[index] = value;
+        protected override void SetParameter(string parameterName, DbParameter value) { var i = IndexOf(parameterName); if (i >= 0) _items[i] = value; else _items.Add(value); }
+    }
+
+    private sealed class __QueryLensOfflineDbParameter__ : DbParameter
+    {
+        public override DbType DbType { get; set; }
+        public override ParameterDirection Direction { get; set; } = ParameterDirection.Input;
+        public override bool IsNullable { get; set; }
+        public override string ParameterName { get; set; } = string.Empty;
+        public override string SourceColumn { get; set; } = string.Empty;
+        public override object? Value { get; set; }
+        public override bool SourceColumnNullMapping { get; set; }
+        public override int Size { get; set; }
+        public override void ResetDbType() { }
+    }
+}

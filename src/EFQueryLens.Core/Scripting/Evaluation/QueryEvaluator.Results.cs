@@ -1,9 +1,13 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 
 namespace EFQueryLens.Core.Scripting;
 
 public sealed partial class QueryEvaluator
 {
+    private static readonly ConcurrentDictionary<string, (string ProviderName, string EfCoreVersion)>
+        SProviderMetadataCache = new(StringComparer.Ordinal);
+
     private static bool ShouldWarnExpressionPartialRisk(
         string expression,
         IReadOnlyList<QuerySqlCommand> commands)
@@ -49,12 +53,15 @@ public sealed partial class QueryEvaluator
         IEnumerable<Assembly>? userAssemblies,
         TimeSpan elapsed,
         string creationStrategy = "unknown",
-        EvaluationStageTimings? stageTimings = null) =>
-        new()
+        EvaluationStageTimings? stageTimings = null)
+    {
+        var (providerName, efCoreVersion) = GetProviderMetadata(userAssemblies);
+
+        return new TranslationMetadata
         {
             DbContextType = dbContextType?.FullName ?? "unknown",
-            ProviderName = userAssemblies is not null ? DetectProviderName(userAssemblies) : "unknown",
-            EfCoreVersion = GetEfCoreVersion(userAssemblies),
+            ProviderName = providerName,
+            EfCoreVersion = efCoreVersion,
             TranslationTime = elapsed,
             CreationStrategy = creationStrategy,
             ContextResolutionTime = stageTimings?.ContextResolution,
@@ -66,8 +73,27 @@ public sealed partial class QueryEvaluator
             RunnerExecutionTime = stageTimings?.RunnerExecution,
             ToQueryStringFallbackTime = stageTimings?.ToQueryStringFallback,
         };
+    }
 
-    private static string DetectProviderName(IEnumerable<Assembly> assemblies)
+    private static (string ProviderName, string EfCoreVersion) GetProviderMetadata(IEnumerable<Assembly>? userAssemblies)
+    {
+        if (userAssemblies is null)
+            return ("unknown", "unknown");
+
+        var assemblyList = userAssemblies.ToList();
+        if (assemblyList.Count == 0)
+            return ("unknown", "unknown");
+
+        var cacheKey = ComputeAssemblySetHash(assemblyList);
+        return SProviderMetadataCache.GetOrAdd(cacheKey, static (_, assemblies) =>
+        {
+            var provider = DetectProviderName(assemblies);
+            var efCoreVersion = GetEfCoreVersion(assemblies);
+            return (provider, efCoreVersion);
+        }, assemblyList);
+    }
+
+    private static string DetectProviderName(IReadOnlyCollection<Assembly> assemblies)
     {
         var loadedAssemblyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -95,11 +121,8 @@ public sealed partial class QueryEvaluator
         return "unknown";
     }
 
-    private static string GetEfCoreVersion(IEnumerable<Assembly>? assemblies)
+    private static string GetEfCoreVersion(IReadOnlyCollection<Assembly> assemblies)
     {
-        if (assemblies is null)
-            return "unknown";
-
         return assemblies.FirstOrDefault(a => a.GetName().Name == "Microsoft.EntityFrameworkCore")
             ?.GetName().Version?.ToString() ?? "unknown";
     }

@@ -1,0 +1,20 @@
+public sealed class __QueryLensCapturedParameter__
+{
+    public string Name { get; set; } = "@p";
+    public string ClrType { get; set; } = "object";
+    public string? InferredValue { get; set; }
+}
+
+public sealed class __QueryLensCapturedSqlCommand__
+{
+    public string Sql { get; set; } = string.Empty;
+    public __QueryLensCapturedParameter__[] Parameters { get; set; } = Array.Empty<__QueryLensCapturedParameter__>();
+}
+
+public sealed class __QueryLensExecutionResult__
+{
+    public object? Queryable { get; set; }
+    public string? CaptureSkipReason { get; set; }
+    public string? CaptureError { get; set; }
+    public __QueryLensCapturedSqlCommand__[] Commands { get; set; } = Array.Empty<__QueryLensCapturedSqlCommand__>();
+}

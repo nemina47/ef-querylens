@@ -1,9 +1,24 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 
 namespace EFQueryLens.Core.Scripting;
 
 public sealed partial class QueryEvaluator
 {
+    private sealed record PayloadAccessors(
+        PropertyInfo Queryable,
+        PropertyInfo CaptureSkipReason,
+        PropertyInfo CaptureError,
+        PropertyInfo Commands);
+
+    private sealed record CommandAccessors(PropertyInfo? Sql, PropertyInfo? Parameters);
+
+    private sealed record ParameterAccessors(PropertyInfo? Name, PropertyInfo? ClrType, PropertyInfo? InferredValue);
+
+    private static readonly ConcurrentDictionary<Type, PayloadAccessors> SPayloadAccessors = new();
+    private static readonly ConcurrentDictionary<Type, CommandAccessors> SCommandAccessors = new();
+    private static readonly ConcurrentDictionary<Type, ParameterAccessors> SParameterAccessors = new();
+
     private static (object? Queryable, string? CaptureSkipReason, string? CaptureError, IReadOnlyList<QuerySqlCommand> Commands)
         ParseExecutionPayload(object? payload)
     {
@@ -13,15 +28,12 @@ public sealed partial class QueryEvaluator
         var payloadType = payload.GetType();
 
         // Validate structure upfront to fail fast on runner/parser version mismatches.
-        var commandsProp = ValidatePayloadStructure(payloadType);
-        var queryable = payloadType.GetProperty("Queryable", BindingFlags.Public | BindingFlags.Instance)!
-            .GetValue(payload);
-        var captureSkipReason = payloadType.GetProperty("CaptureSkipReason", BindingFlags.Public | BindingFlags.Instance)!
-            .GetValue(payload) as string;
-        var captureError = payloadType.GetProperty("CaptureError", BindingFlags.Public | BindingFlags.Instance)!
-            .GetValue(payload) as string;
+        var payloadAccessors = ValidatePayloadStructure(payloadType);
+        var queryable = payloadAccessors.Queryable.GetValue(payload);
+        var captureSkipReason = payloadAccessors.CaptureSkipReason.GetValue(payload) as string;
+        var captureError = payloadAccessors.CaptureError.GetValue(payload) as string;
 
-        var commandsObj = commandsProp.GetValue(payload) as System.Collections.IEnumerable;
+        var commandsObj = payloadAccessors.Commands.GetValue(payload) as System.Collections.IEnumerable;
 
         var commands = new List<QuerySqlCommand>();
         if (commandsObj is null)
@@ -33,15 +45,20 @@ public sealed partial class QueryEvaluator
                 continue;
 
             var cmdType = cmdObj.GetType();
-            var sql = cmdType.GetProperty("Sql", BindingFlags.Public | BindingFlags.Instance)
-                ?.GetValue(cmdObj) as string;
+            var commandAccessors = SCommandAccessors.GetOrAdd(cmdType, static t =>
+            {
+                var sql = t.GetProperty("Sql", BindingFlags.Public | BindingFlags.Instance);
+                var parameters = t.GetProperty("Parameters", BindingFlags.Public | BindingFlags.Instance);
+                return new CommandAccessors(sql, parameters);
+            });
+
+            var sql = commandAccessors.Sql?.GetValue(cmdObj) as string;
 
             if (string.IsNullOrWhiteSpace(sql))
                 continue;
 
             var parameters = new List<QueryParameter>();
-            var paramsObj = cmdType.GetProperty("Parameters", BindingFlags.Public | BindingFlags.Instance)
-                ?.GetValue(cmdObj) as System.Collections.IEnumerable;
+            var paramsObj = commandAccessors.Parameters?.GetValue(cmdObj) as System.Collections.IEnumerable;
 
             if (paramsObj is not null)
             {
@@ -51,12 +68,17 @@ public sealed partial class QueryEvaluator
                         continue;
 
                     var paramType = paramObj.GetType();
-                    var name = paramType.GetProperty("Name", BindingFlags.Public | BindingFlags.Instance)
-                        ?.GetValue(paramObj) as string;
-                    var clrType = paramType.GetProperty("ClrType", BindingFlags.Public | BindingFlags.Instance)
-                        ?.GetValue(paramObj) as string;
-                    var inferredValue = paramType.GetProperty("InferredValue", BindingFlags.Public | BindingFlags.Instance)
-                        ?.GetValue(paramObj) as string;
+                    var parameterAccessors = SParameterAccessors.GetOrAdd(paramType, static t =>
+                    {
+                        var name = t.GetProperty("Name", BindingFlags.Public | BindingFlags.Instance);
+                        var clrType = t.GetProperty("ClrType", BindingFlags.Public | BindingFlags.Instance);
+                        var inferredValue = t.GetProperty("InferredValue", BindingFlags.Public | BindingFlags.Instance);
+                        return new ParameterAccessors(name, clrType, inferredValue);
+                    });
+
+                    var name = parameterAccessors.Name?.GetValue(paramObj) as string;
+                    var clrType = parameterAccessors.ClrType?.GetValue(paramObj) as string;
+                    var inferredValue = parameterAccessors.InferredValue?.GetValue(paramObj) as string;
 
                     parameters.Add(new QueryParameter
                     {
@@ -115,38 +137,38 @@ public sealed partial class QueryEvaluator
     /// Validates that the payload has the expected structure.
     /// Throws InvalidOperationException if structure mismatch is detected.
     /// </summary>
-    private static PropertyInfo ValidatePayloadStructure(Type payloadType)
+    private static PayloadAccessors ValidatePayloadStructure(Type payloadType)
     {
-        var expectedProperties = new[] { "Queryable", "CaptureSkipReason", "CaptureError", "Commands" };
-        var actualProperties = payloadType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Select(p => p.Name)
-            .ToHashSet(StringComparer.Ordinal);
-
-        foreach (var expected in expectedProperties)
+        return SPayloadAccessors.GetOrAdd(payloadType, static t =>
         {
-            if (!actualProperties.Contains(expected))
+            var properties = t.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .ToDictionary(p => p.Name, StringComparer.Ordinal);
+
+            var expectedProperties = new[] { "Queryable", "CaptureSkipReason", "CaptureError", "Commands" };
+            foreach (var expected in expectedProperties)
+            {
+                if (!properties.ContainsKey(expected))
+                {
+                    throw new InvalidOperationException(
+                        $"Payload structure mismatch: missing property '{expected}'. " +
+                        $"Actual: {string.Join(", ", properties.Keys.OrderBy(static x => x, StringComparer.Ordinal))}. " +
+                        "This may indicate a version conflict between the script runner and parser.");
+                }
+            }
+
+            var commandsProp = properties["Commands"];
+            if (!typeof(System.Collections.IEnumerable).IsAssignableFrom(commandsProp.PropertyType))
             {
                 throw new InvalidOperationException(
-                    $"Payload structure mismatch: missing property '{expected}'. " +
-                    $"Actual: {string.Join(", ", actualProperties)}. " +
-                    "This may indicate a version conflict between the script runner and parser.");
+                    $"Payload structure mismatch: property 'Commands' must be enumerable but was '{commandsProp.PropertyType.FullName}'.");
             }
-        }
 
-        // Ensure Commands exists and is enumerable.
-        var commandsProp = payloadType.GetProperty("Commands", BindingFlags.Public | BindingFlags.Instance);
-        if (commandsProp is null)
-        {
-            throw new InvalidOperationException("Payload structure mismatch: missing property 'Commands'.");
-        }
-
-        if (!typeof(System.Collections.IEnumerable).IsAssignableFrom(commandsProp.PropertyType))
-        {
-            throw new InvalidOperationException(
-                $"Payload structure mismatch: property 'Commands' must be enumerable but was '{commandsProp.PropertyType.FullName}'.");
-        }
-
-        return commandsProp;
+            return new PayloadAccessors(
+                properties["Queryable"],
+                properties["CaptureSkipReason"],
+                properties["CaptureError"],
+                commandsProp);
+        });
     }
 }
 

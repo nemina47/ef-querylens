@@ -71,6 +71,25 @@ public class QueryLensEngineTests
         return false;
     }
 
+    private static int GetPrivateCollectionCount(object instance, string fieldName)
+    {
+        var field = instance.GetType().GetField(
+            fieldName,
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException($"Field '{fieldName}' not found.");
+
+        var value = field.GetValue(instance)
+            ?? throw new InvalidOperationException($"Field '{fieldName}' is null.");
+
+        var countProperty = value.GetType().GetProperty(
+            "Count",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public)
+            ?? throw new InvalidOperationException($"Field '{fieldName}' does not expose Count.");
+
+        return (int)(countProperty.GetValue(value)
+            ?? throw new InvalidOperationException($"Field '{fieldName}' Count was null."));
+    }
+
     // ── TranslateAsync ────────────────────────────────────────────────────────
 
     [Fact]
@@ -210,6 +229,34 @@ public class QueryLensEngineTests
         Assert.True(r2.Metadata.TranslationTime < r1.Metadata.TranslationTime,
             $"Expected warm ({r2.Metadata.TranslationTime.TotalMilliseconds:F0} ms) " +
             $"< cold ({r1.Metadata.TranslationTime.TotalMilliseconds:F0} ms)");
+    }
+
+    [Fact]
+    public async Task TranslateAsync_CreateGate_IsPrunedAfterPoolWarmup()
+    {
+        await using var engine = CreateEngine();
+        var dll = GetSampleMySqlAppDll();
+
+        var first = await engine.TranslateAsync(new TranslationRequest
+        {
+            AssemblyPath = dll,
+            Expression = "db.Orders",
+            DbContextTypeName = DefaultMySqlDbContextType,
+        });
+
+        Assert.True(first.Success, first.ErrorMessage);
+        Assert.Equal(0, GetPrivateCollectionCount(engine, "_dbContextCreateGates"));
+
+        var second = await engine.TranslateAsync(new TranslationRequest
+        {
+            AssemblyPath = dll,
+            Expression = "db.Products",
+            DbContextTypeName = DefaultMySqlDbContextType,
+        });
+
+        Assert.True(second.Success, second.ErrorMessage);
+        Assert.Equal(0, GetPrivateCollectionCount(engine, "_dbContextCreateGates"));
+        Assert.True(GetPrivateCollectionCount(engine, "_dbContextPool") >= 1);
     }
 
     [Fact]

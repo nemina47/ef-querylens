@@ -10,10 +10,11 @@ public sealed partial class QueryEvaluator
 {
     private MetadataReference[] GetOrBuildMetadataRefs(
         ProjectAssemblyContext alcCtx,
-        List<Assembly> compilationAssemblies)
+        List<Assembly> compilationAssemblies,
+        string assemblySetHash)
     {
         var cacheKey = Path.GetFullPath(alcCtx.AssemblyPath);
-        var setHash = ComputeAssemblySetHash(compilationAssemblies.ToList());
+        var setHash = assemblySetHash;
         if (_refCache.TryGetValue(cacheKey, out var entry)
             && entry.AssemblyTimestamp == alcCtx.AssemblyTimestamp
             && entry.AssemblySetHash == setHash)

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -6,6 +7,9 @@ namespace EFQueryLens.Core.Scripting;
 
 public sealed partial class QueryEvaluator
 {
+    private static readonly ConcurrentDictionary<string, bool> SUsingNameValidity =
+        new(StringComparer.Ordinal);
+
     private static (HashSet<string> Namespaces, HashSet<string> Types) BuildKnownNamespaceAndTypeIndex(
         IEnumerable<Assembly> assemblies)
     {
@@ -80,6 +84,48 @@ public sealed partial class QueryEvaluator
         if (string.IsNullOrWhiteSpace(name))
             return false;
 
-        return !CSharpSyntaxTree.ParseText($"using {name};").GetDiagnostics().Any();
+        return SUsingNameValidity.GetOrAdd(name, static candidate =>
+        {
+            if (LooksLikeQualifiedIdentifier(candidate))
+                return true;
+
+            return !CSharpSyntaxTree.ParseText($"using {candidate};")
+                .GetDiagnostics()
+                .Any(d => d.Severity == DiagnosticSeverity.Error);
+        });
+    }
+
+    private static bool LooksLikeQualifiedIdentifier(string name)
+    {
+        var candidate = name.Trim();
+        if (candidate.StartsWith("global::", StringComparison.Ordinal))
+        {
+            candidate = candidate["global::".Length..];
+        }
+
+        if (candidate.Length == 0)
+            return false;
+
+        var segmentStart = 0;
+        while (segmentStart < candidate.Length)
+        {
+            var dotIndex = candidate.IndexOf('.', segmentStart);
+            var segmentLength = dotIndex < 0
+                ? candidate.Length - segmentStart
+                : dotIndex - segmentStart;
+            if (segmentLength <= 0)
+                return false;
+
+            var segment = candidate.Substring(segmentStart, segmentLength);
+            if (!SyntaxFacts.IsValidIdentifier(segment))
+                return false;
+
+            if (dotIndex < 0)
+                return true;
+
+            segmentStart = dotIndex + 1;
+        }
+
+        return false;
     }
 }

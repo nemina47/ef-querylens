@@ -1,0 +1,63 @@
+internal static class __QueryLensOfflineCapture__
+{
+    public static bool TryInstall(object dbContext, out string? skipReason)
+    {
+        skipReason = null;
+
+        try
+        {
+            var databaseProp = dbContext.GetType().GetProperty("Database", BindingFlags.Public | BindingFlags.Instance);
+            if (databaseProp is null)
+            {
+                skipReason = "Could not locate 'Database' property on DbContext.";
+                return false;
+            }
+
+            var database = databaseProp.GetValue(dbContext);
+            if (database is null)
+            {
+                skipReason = "DbContext.Database returned null.";
+                return false;
+            }
+
+            var alc = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(dbContext.GetType().Assembly);
+            var assemblies = alc is null ? Enumerable.Empty<Assembly>() : alc.Assemblies;
+            var relAsm = assemblies.FirstOrDefault(a => a.GetName().Name == "Microsoft.EntityFrameworkCore.Relational");
+            if (relAsm is null)
+            {
+                skipReason = "Microsoft.EntityFrameworkCore.Relational not loaded - provider may not be relational.";
+                return false;
+            }
+
+            var extType = relAsm.GetType("Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions");
+            if (extType is null)
+            {
+                skipReason = "RelationalDatabaseFacadeExtensions not found in Relational assembly.";
+                return false;
+            }
+
+            var setMethod = extType.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .Where(m => m.Name == "SetDbConnection")
+                .OrderByDescending(m => m.GetParameters().Length)
+                .FirstOrDefault();
+            if (setMethod is null)
+            {
+                skipReason = "SetDbConnection not found on RelationalDatabaseFacadeExtensions.";
+                return false;
+            }
+
+            var offlineConn = new __QueryLensOfflineDbConnection__();
+            var paramCount = setMethod.GetParameters().Length;
+            var args = paramCount >= 3
+                ? new object?[] { database, offlineConn, true }
+                : new object?[] { database, offlineConn };
+            setMethod.Invoke(null, args);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            skipReason = $"SetDbConnection failed: {(ex is TargetInvocationException tie ? tie.InnerException?.Message : ex.Message)}";
+            return false;
+        }
+    }
+}

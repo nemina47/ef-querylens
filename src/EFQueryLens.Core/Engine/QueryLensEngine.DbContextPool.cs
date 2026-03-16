@@ -18,8 +18,9 @@ public sealed partial class QueryLensEngine
 
         if (!_dbContextPool.TryGetValue(poolKey, out var pooled))
         {
-            var createGate = _dbContextCreateGates.GetOrAdd(poolKey, static _ => new SemaphoreSlim(1, 1));
-            await createGate.WaitAsync(cancellationToken);
+            var gateState = _dbContextCreateGates.GetOrAdd(poolKey, static _ => new CreateGateState());
+            Interlocked.Increment(ref gateState.ActiveUsers);
+            await gateState.Gate.WaitAsync(cancellationToken);
             try
             {
                 if (!_dbContextPool.TryGetValue(poolKey, out pooled))
@@ -42,7 +43,16 @@ public sealed partial class QueryLensEngine
             }
             finally
             {
-                createGate.Release();
+                gateState.Gate.Release();
+
+                // Once the pooled instance exists and no concurrent creators remain,
+                // prune the create gate entry to avoid long-lived per-key gate objects.
+                if (Interlocked.Decrement(ref gateState.ActiveUsers) == 0
+                    && _dbContextPool.ContainsKey(poolKey)
+                    && _dbContextCreateGates.TryRemove(new KeyValuePair<string, CreateGateState>(poolKey, gateState)))
+                {
+                    gateState.Gate.Dispose();
+                }
             }
         }
 
@@ -130,7 +140,7 @@ public sealed partial class QueryLensEngine
 
         foreach (var gate in _dbContextCreateGates.Values)
         {
-            gate.Dispose();
+            gate.Gate.Dispose();
         }
 
         _dbContextCreateGates.Clear();
@@ -169,7 +179,7 @@ public sealed partial class QueryLensEngine
 
             if (_dbContextCreateGates.TryRemove(key, out var createGate))
             {
-                createGate.Dispose();
+                createGate.Gate.Dispose();
             }
         }
 

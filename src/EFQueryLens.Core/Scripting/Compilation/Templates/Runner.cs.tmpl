@@ -1,0 +1,43 @@
+public static class __QueryLensRunner__
+{
+    public static object? Run(object __ctx__)
+    {
+__QL_CONTEXT_DECL__
+__QL_STUBS__
+        string? __captureSkipReason = null;
+        string? __captureError = null;
+        var __captureInstalled = __QueryLensOfflineCapture__.TryInstall(__QL_CONTEXT_VAR__, out __captureSkipReason);
+        var __query = (object?)(__QL_EXPRESSION__);
+        var __captured = Array.Empty<__QueryLensCapturedSqlCommand__>();
+        if (__captureInstalled)
+        {
+            using var __scope = __QueryLensSqlCaptureScope__.Begin();
+            try { EnumerateQueryable(__query); }
+            catch (Exception ex) { __captureError = ex.GetType().Name + ": " + ex.Message; }
+            __captured = __scope.GetCommands();
+        }
+        return new __QueryLensExecutionResult__
+        {
+            Queryable = __query,
+            CaptureSkipReason = __captureSkipReason,
+            CaptureError = __captureError,
+            Commands = __captured,
+        };
+    }
+
+    private static void EnumerateQueryable(object? queryable)
+    {
+        if (queryable is not IEnumerable enumerable) return;
+
+        var enumerator = enumerable.GetEnumerator();
+        try
+        {
+            var guard = 0;
+            while (guard++ < 32 && enumerator.MoveNext()) { }
+        }
+        finally
+        {
+            (enumerator as IDisposable)?.Dispose();
+        }
+    }
+}

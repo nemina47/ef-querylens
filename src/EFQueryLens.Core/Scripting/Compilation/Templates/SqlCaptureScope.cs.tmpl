@@ -1,0 +1,54 @@
+internal sealed class __QueryLensSqlCaptureScope__ : IDisposable
+{
+    private static readonly AsyncLocal<List<__QueryLensCapturedSqlCommand__>?> Current = new();
+    private readonly List<__QueryLensCapturedSqlCommand__>? _previous;
+    private readonly List<__QueryLensCapturedSqlCommand__> _state;
+    private bool _disposed;
+
+    private __QueryLensSqlCaptureScope__(List<__QueryLensCapturedSqlCommand__>? previous, List<__QueryLensCapturedSqlCommand__> state)
+    {
+        _previous = previous;
+        _state = state;
+    }
+
+    public static __QueryLensSqlCaptureScope__ Begin()
+    {
+        var previous = Current.Value;
+        var state = new List<__QueryLensCapturedSqlCommand__>();
+        Current.Value = state;
+        return new __QueryLensSqlCaptureScope__(previous, state);
+    }
+
+    public static void Record(string sql, IEnumerable<DbParameter> parameters)
+    {
+        if (string.IsNullOrWhiteSpace(sql)) return;
+
+        var current = Current.Value;
+        if (current is null) return;
+
+        var capturedParameters = parameters
+            .Select(p => new __QueryLensCapturedParameter__
+            {
+                Name = string.IsNullOrWhiteSpace(p.ParameterName) ? "@p" : p.ParameterName,
+                ClrType = p.DbType.ToString(),
+                InferredValue = p.Value is null || p.Value is DBNull ? null : Convert.ToString(p.Value, CultureInfo.InvariantCulture),
+            })
+            .ToArray();
+
+        current.Add(new __QueryLensCapturedSqlCommand__
+        {
+            Sql = sql,
+            Parameters = capturedParameters,
+        });
+    }
+
+    public __QueryLensCapturedSqlCommand__[] GetCommands() => _state.ToArray();
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+
+        _disposed = true;
+        Current.Value = _previous;
+    }
+}
