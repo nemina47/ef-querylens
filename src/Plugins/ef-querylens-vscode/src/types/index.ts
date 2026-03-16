@@ -31,10 +31,3 @@ export type QueryLensSettings = {
     sqlDialect: QueryLensSqlDialect;
     debugLogsEnabled: boolean;
 };
-
-export type StagedRuntime = {
-    lspDllPath: string;
-    daemonDllPath: string;
-    daemonExePath: string;
-    stagingRoot: string;
-};

@@ -38,7 +38,6 @@ internal sealed partial class QueryLensLanguageClient : ILanguageClient, ILangua
     private CancellationTokenSource? serverErrorPumpCts;
     private JsonRpc? rpc;
     private int disposeRequested;
-    private int startupPlumbingRequested;
 
     internal static QueryLensLanguageClient? Current { get; private set; }
 
@@ -148,12 +147,6 @@ internal sealed partial class QueryLensLanguageClient : ILanguageClient, ILangua
     public Task OnServerInitializedAsync()
     {
         Log("language-server-initialized");
-
-        if (Interlocked.Exchange(ref startupPlumbingRequested, 1) == 0)
-        {
-            _ = Task.Run(() => RunStartupPlumbingAsync(CancellationToken.None));
-        }
-
         return Task.CompletedTask;
     }
 

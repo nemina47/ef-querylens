@@ -21,8 +21,6 @@ import {
 } from './hover/markdown';
 import { registerQueryLensCommands } from './commands/registry';
 import { createSqlActionHandlers } from './commands/sqlActions';
-import { stageRuntimeBinaries } from './runtime/staging';
-import { createWarmupManager, type WarmupManager } from './runtime/warmup';
 import { QueryLensSettings } from './types';
 
 let client: LanguageClient | undefined;
@@ -48,25 +46,15 @@ export function activate(context: ExtensionContext) {
         return;
     }
 
-    const stagedRuntime = stageRuntimeBinaries(packagedLspDir, packagedDaemonDir);
-
-    const serverPath = stagedRuntime?.lspDllPath
-        ?? path.join(packagedLspDir, 'EFQueryLens.Lsp.dll');
+    const serverPath = path.join(packagedLspDir, 'EFQueryLens.Lsp.dll');
     const fallbackRepoRoot = path.resolve(context.extensionPath, '..', '..', '..');
     const workspaceRoot = workspace.workspaceFolders?.[0]?.uri.fsPath ?? fallbackRepoRoot;
-    const daemonDllPath = stagedRuntime?.daemonDllPath
-        ?? path.join(packagedDaemonDir, 'EFQueryLens.Daemon.dll');
-    const daemonExePath = stagedRuntime?.daemonExePath
-        ?? path.join(packagedDaemonDir, 'EFQueryLens.Daemon.exe');
+    const daemonDllPath = path.join(packagedDaemonDir, 'EFQueryLens.Daemon.dll');
+    const daemonExePath = path.join(packagedDaemonDir, 'EFQueryLens.Daemon.exe');
 
     let currentSettings = readSettings();
     logOutput(`activate workspace=${workspaceRoot}`);
     logOutput(`[EFQueryLens] runtime source=packaged lsp=${packagedLspDir} daemon=${packagedDaemonDir}`);
-    if (stagedRuntime) {
-        logOutput(`[EFQueryLens] runtime staging root=${stagedRuntime.stagingRoot}`);
-    } else {
-        logOutput('[EFQueryLens] runtime staging unavailable; using packaged runtime paths directly');
-    }
 
     const serverEnv: NodeJS.ProcessEnv = {
         ...process.env,
@@ -143,14 +131,6 @@ export function activate(context: ExtensionContext) {
     });
     context.subscriptions.push(...commandDisposables);
 
-    const warmupManager = createWarmupManager({
-        getClient: () => client,
-        getDebugLogsEnabled: () => currentSettings.debugLogsEnabled,
-        logOutput,
-    });
-    context.subscriptions.push(
-        window.onDidChangeActiveTextEditor(editor => warmupManager.scheduleWarmup(editor))
-    );
     context.subscriptions.push(
         workspace.onDidChangeConfiguration(async event => {
             if (!event.affectsConfiguration('efquerylens')) {
@@ -181,8 +161,6 @@ export function activate(context: ExtensionContext) {
 
     client.start();
     logOutput('language-client-started');
-    void warmupManager.requestDaemonRestartOnActivate().finally(() =>
-        warmupOnActivation(warmupManager, () => currentSettings, logOutput));
 }
 
 export function deactivate(): Thenable<void> | undefined {
@@ -237,41 +215,3 @@ async function pushLspRuntimeConfiguration(
     });
 }
 
-async function warmupOnActivation(
-    warmupManager: WarmupManager,
-    getSettings: () => QueryLensSettings,
-    log: (message: string) => void,
-): Promise<void> {
-    if (warmupManager.scheduleWarmup(window.activeTextEditor)) {
-        return;
-    }
-
-    for (const editor of window.visibleTextEditors) {
-        if (warmupManager.scheduleWarmup(editor)) {
-            return;
-        }
-    }
-
-    try {
-        const firstCSharpUri = (await workspace.findFiles(
-            '**/*.cs',
-            '**/{bin,obj,node_modules,.git,.vs}/**',
-            1))[0];
-
-        if (!firstCSharpUri) {
-            return;
-        }
-
-        const queued = warmupManager.scheduleWarmupForUri(firstCSharpUri.toString(), 0);
-        if (queued && getSettings().debugLogsEnabled) {
-            log(`[EFQueryLens] startup-warmup uri=${firstCSharpUri.toString()}`);
-        }
-    } catch (error) {
-        if (!getSettings().debugLogsEnabled) {
-            return;
-        }
-
-        const message = error instanceof Error ? error.message : String(error);
-        log(`[EFQueryLens] startup-warmup skipped reason=${message}`);
-    }
-}

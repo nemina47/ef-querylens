@@ -57,7 +57,7 @@ internal static partial class LinqHoverMarkdownRenderer
         var statusLabel = BuildStructuredStatusLabel(status, response.AvgTranslationMs);
         var headerText = string.IsNullOrWhiteSpace(copySql)
             ? $"**QueryLens · {response.CommandCount} {statementWord} · {statusLabel}**"
-            : $"**QueryLens · {response.CommandCount} {statementWord} · {statusLabel}** | [Copy SQL](efquerylens://copySql?{queryParams}) | [Open SQL Editor](efquerylens://openSqlEditor?{queryParams}) | [Recalculate](efquerylens://recalculate?{queryParams})";
+            : $"**QueryLens · {response.CommandCount} {statementWord} · {statusLabel}** | [Copy SQL](efquerylens://copySql?{queryParams}) | [Open SQL Preview](efquerylens://openSqlEditor?{queryParams}) | [Recalculate](efquerylens://recalculate?{queryParams})";
 
         var hostBorder = new Border
         {

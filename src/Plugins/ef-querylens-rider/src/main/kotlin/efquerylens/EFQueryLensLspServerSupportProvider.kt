@@ -1,19 +1,14 @@
 package efquerylens
 
 import com.intellij.execution.configurations.GeneralCommandLine
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.platform.lsp.api.LspServer
-import com.intellij.platform.lsp.api.LspServerManager
 import com.intellij.platform.lsp.api.LspServerSupportProvider
 import com.intellij.platform.lsp.api.ProjectWideLspServerDescriptor
-import org.eclipse.lsp4j.ExecuteCommandParams
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.security.MessageDigest
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
@@ -31,13 +26,6 @@ class EFQueryLensLspServerSupportProvider : LspServerSupportProvider {
 
         logInfo(project, "[EFQueryLens] Ensuring LSP server is started for '${file.path}'")
         serverStarter.ensureServerStarted(EFQueryLensServerDescriptor(project))
-        
-        val server = LspServerManager.getInstance(project)
-            .getServersForProvider(EFQueryLensLspServerSupportProvider::class.java)
-            .firstOrNull()
-        if (server != null) {
-            scheduleStartupPlumbing(server, file)
-        }
     }
 
     private fun isSupported(file: VirtualFile): Boolean {
@@ -55,91 +43,6 @@ class EFQueryLensLspServerSupportProvider : LspServerSupportProvider {
         }
 
         thisLogger().warn(message, error)
-    }
-
-    companion object {
-        private val warmedDocumentUrls = ConcurrentHashMap.newKeySet<String>()
-
-        @Volatile
-        private var startupRestartRequested = false
-
-        private val startupRestartLock = Any()
-
-        internal fun scheduleStartupPlumbing(server: LspServer, file: VirtualFile) {
-            ApplicationManager.getApplication().executeOnPooledThread {
-                try {
-                    // Wait a bit for the server to be fully ready if it just started.
-                    Thread.sleep(1000)
-                    requestDaemonRestartOnActivate(server)
-                    requestWarmup(server, file)
-                } catch (e: Exception) {
-                    logWarn(server.project, "[EFQueryLens] Startup plumbing failed", e)
-                }
-            }
-        }
-
-        private fun requestDaemonRestartOnActivate(server: LspServer) {
-            if (startupRestartRequested) {
-                return
-            }
-
-            synchronized(startupRestartLock) {
-                if (startupRestartRequested) {
-                    return
-                }
-
-                startupRestartRequested = true
-            }
-
-            try {
-                val response = server.sendRequestSync(10000) {
-                    it.workspaceService.executeCommand(
-                        ExecuteCommandParams("efquerylens.daemon.restart", emptyList())
-                    )
-                }
-
-                logInfo(server.project, "[EFQueryLens] Startup daemon restart response='$response'")
-            } catch (e: Exception) {
-                logWarn(server.project, "[EFQueryLens] Startup daemon restart failed", e)
-            }
-        }
-
-        private fun requestWarmup(server: LspServer, file: VirtualFile) {
-            if (!warmedDocumentUrls.add(file.url)) {
-                return
-            }
-
-            try {
-                val warmupPayload = mapOf(
-                    "textDocument" to mapOf("uri" to file.url),
-                    "position" to mapOf("line" to 0, "character" to 0)
-                )
-
-                val response = server.sendRequestSync(5000) {
-                    it.workspaceService.executeCommand(
-                        ExecuteCommandParams("efquerylens.warmup", listOf(warmupPayload))
-                    )
-                }
-
-                logInfo(server.project, "[EFQueryLens] Warmup command completed for '${file.path}' response='$response'")
-            } catch (e: Exception) {
-                warmedDocumentUrls.remove(file.url)
-                logWarn(server.project, "[EFQueryLens] Warmup command failed for '${file.path}'", e)
-            }
-        }
-
-        private fun logInfo(project: Project, message: String) {
-            thisLogger().info(message)
-        }
-
-        private fun logWarn(project: Project, message: String, error: Throwable? = null) {
-            if (error == null) {
-                thisLogger().warn(message)
-                return
-            }
-
-            thisLogger().warn(message, error)
-        }
     }
 }
 
