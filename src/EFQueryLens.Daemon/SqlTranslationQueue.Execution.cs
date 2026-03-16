@@ -45,13 +45,37 @@ internal sealed partial class SqlTranslationQueue
         var jobId = Guid.NewGuid().ToString("N");
         if (!_inflightJobs.TryAdd(semanticKey, jobId))
         {
-            var raceStatus = _metrics.IsWarming(contextName)
+            if (_inflightJobs.TryGetValue(semanticKey, out var racingJobId))
+            {
+                var raceStatus = _metrics.IsWarming(contextName)
+                    ? QueryTranslationStatus.Starting
+                    : QueryTranslationStatus.InQueue;
+                return new QueuedTranslationResult
+                {
+                    Status = raceStatus,
+                    JobId = racingJobId,
+                    AverageTranslationMs = _metrics.GetAverageMs(contextName),
+                };
+            }
+
+            if (TryGetCachedReady(semanticKey, out var racedCached))
+            {
+                return new QueuedTranslationResult
+                {
+                    Status = QueryTranslationStatus.Ready,
+                    JobId = racedCached!.JobId,
+                    AverageTranslationMs = _metrics.GetAverageMs(contextName),
+                    Result = racedCached.Result,
+                };
+            }
+
+            var finalRaceStatus = _metrics.IsWarming(contextName)
                 ? QueryTranslationStatus.Starting
                 : QueryTranslationStatus.InQueue;
             return new QueuedTranslationResult
             {
-                Status = raceStatus,
-                JobId = jobId,
+                Status = finalRaceStatus,
+                JobId = null,
                 AverageTranslationMs = _metrics.GetAverageMs(contextName),
             };
         }

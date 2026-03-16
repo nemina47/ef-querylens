@@ -29,7 +29,6 @@ internal sealed partial class QueryLensLanguageClient : ILanguageClient, ILangua
     private const int DefaultMaxCodeLensPerDocument = 50;
     private const int DefaultCodeLensDebounceMilliseconds = 250;
     private const string LspDllOverrideEnvVar = "QUERYLENS_LSP_DLL";
-    private const string RepositoryRootOverrideEnvVar = "QUERYLENS_REPOSITORY_ROOT";
     private static readonly object Sync = new();
     private static readonly string LogFilePath = Path.Combine(Path.GetTempPath(), "EFQueryLens.VisualStudio.log");
     private static string? currentLspLogPath;
@@ -82,7 +81,7 @@ internal sealed partial class QueryLensLanguageClient : ILanguageClient, ILangua
             ?? throw new InvalidOperationException("Unable to resolve extension assembly directory.");
 
         var workspaceRoot = ResolveWorkspacePath(extensionDirectory);
-        var serverPath = ResolveServerPath(extensionDirectory, workspaceRoot);
+        var serverPath = ResolveServerPath(extensionDirectory);
         Log($"lsp-server-path-resolved extensionDir={extensionDirectory} workspaceRoot={workspaceRoot} serverPath={serverPath} exists={File.Exists(serverPath)}");
         if (!File.Exists(serverPath))
         {

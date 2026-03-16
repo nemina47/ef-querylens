@@ -35,10 +35,11 @@
     </VSCTCompile>
   </ItemGroup>
 
-  <!-- Path to the built LSP server output (Debug or Release, matching this project's configuration) -->
+  <!-- Bundle runtime from publish output (Release + runtime identifier). -->
   <PropertyGroup>
-    <LspBinDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '..', '..', '..', 'EFQueryLens.Lsp', 'bin', '$(Configuration)', 'net10.0'))</LspBinDir>
-     <DaemonBinDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '..', '..', '..', 'EFQueryLens.Daemon', 'bin', '$(Configuration)', 'net10.0'))</DaemonBinDir>
+    <QueryLensRuntimeIdentifier Condition="'$(QueryLensRuntimeIdentifier)' == ''">win-x64</QueryLensRuntimeIdentifier>
+    <LspPublishDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '..', '..', '..', 'EFQueryLens.Lsp', 'bin', 'Release', 'net10.0', '$(QueryLensRuntimeIdentifier)', 'publish'))</LspPublishDir>
+    <DaemonPublishDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '..', '..', '..', 'EFQueryLens.Daemon', 'bin', 'Release', 'net10.0', '$(QueryLensRuntimeIdentifier)', 'publish'))</DaemonPublishDir>
   </PropertyGroup>
 
   <!-- Ensure EFQueryLens.Lsp is built before VSIX packaging; do not add it as an assembly reference -->
@@ -51,15 +52,23 @@
                        SkipGetTargetFrameworkProperties="true" />
   </ItemGroup>
 
+  <Target Name="PublishLspServerForVsix" BeforeTargets="BundleLspServer">
+    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\..\..\..\EFQueryLens.Lsp\EFQueryLens.Lsp.csproj&quot; -c Release -f net10.0 -r $(QueryLensRuntimeIdentifier) --self-contained false /p:UseAppHost=true" />
+  </Target>
+
+  <Target Name="PublishDaemonForVsix" BeforeTargets="BundleDaemon">
+    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\..\..\..\EFQueryLens.Daemon\EFQueryLens.Daemon.csproj&quot; -c Release -f net10.0 -r $(QueryLensRuntimeIdentifier) --self-contained false /p:UseAppHost=true" />
+  </Target>
+
   <!--
-    Copy all LSP server files into $(TargetDir)server\ and register them as VSIX content.
+    Copy all published LSP server files into $(TargetDir)server\ and register them as VSIX content.
     Runs before GetVsixSourceItems so the VSIX packager picks them up under server/.
     The recursive glob preserves Roslyn locale subdirs (de/, fr/, etc.).
   -->
-  <Target Name="BundleLspServer" BeforeTargets="GetVsixSourceItems">
+  <Target Name="BundleLspServer" BeforeTargets="GetVsixSourceItems" DependsOnTargets="PublishLspServerForVsix">
     <ItemGroup>
-      <_LspServerFiles Include="$(LspBinDir)**\*"
-                       Exclude="$(LspBinDir)**\*.pdb;$(LspBinDir)ref\**;$(LspBinDir)publish\**" />
+      <_LspServerFiles Include="$(LspPublishDir)**\*"
+                       Exclude="$(LspPublishDir)**\*.pdb;$(LspPublishDir)ref\**" />
     </ItemGroup>
     <Copy SourceFiles="@(_LspServerFiles)"
           DestinationFiles="@(_LspServerFiles->'$(TargetDir)server\%(RecursiveDir)%(Filename)%(Extension)')"
@@ -72,11 +81,11 @@
     </ItemGroup>
   </Target>
 
-  <!-- Copy EFQueryLens.Daemon output into $(TargetDir)daemon\ and include in VSIX. -->
-  <Target Name="BundleDaemon" BeforeTargets="GetVsixSourceItems">
+  <!-- Copy published EFQueryLens.Daemon output into $(TargetDir)daemon\ and include in VSIX. -->
+  <Target Name="BundleDaemon" BeforeTargets="GetVsixSourceItems" DependsOnTargets="PublishDaemonForVsix">
     <ItemGroup>
-      <_DaemonFiles Include="$(DaemonBinDir)**\*"
-                    Exclude="$(DaemonBinDir)**\*.pdb;$(DaemonBinDir)ref\**;$(DaemonBinDir)publish\**" />
+      <_DaemonFiles Include="$(DaemonPublishDir)**\*"
+                    Exclude="$(DaemonPublishDir)**\*.pdb;$(DaemonPublishDir)ref\**" />
     </ItemGroup>
     <Copy SourceFiles="@(_DaemonFiles)"
           DestinationFiles="@(_DaemonFiles->'$(TargetDir)daemon\%(RecursiveDir)%(Filename)%(Extension)')"

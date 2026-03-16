@@ -35,27 +35,22 @@ internal sealed partial class QueryLensLanguageClient
         var lspLogPath = BuildLspLogFilePath(workspaceRoot);
         processStartInfo.Environment["QUERYLENS_LSP_LOG_FILE"] = lspLogPath;
         currentLspLogPath = lspLogPath;
-        // serverPath is {extRoot}/server/EFQueryLens.Lsp.dll; parent = {extRoot}/server/, grandparent = {extRoot}
-        var extensionDirectory = Path.GetDirectoryName(serverPath) ?? string.Empty;
-        var extensionRoot = Path.GetDirectoryName(extensionDirectory) ?? extensionDirectory;
-        var repoRoot = ResolveRepositoryRoot(workspaceRoot, extensionDirectory);
+        var serverDirectory = Path.GetDirectoryName(serverPath) ?? string.Empty;
+        var extensionRoot = Path.GetDirectoryName(serverDirectory) ?? serverDirectory;
 
-        // Bundled daemon (from VSIX) takes priority; repo-root paths are the dev-time fallback
+        // Bundled daemon (from VSIX/local extension layout) only.
         var daemonExeCandidates = new List<string>
         {
             Path.Combine(extensionRoot, "daemon", "EFQueryLens.Daemon.exe"),
+            Path.Combine(serverDirectory, "daemon", "EFQueryLens.Daemon.exe"),
+            Path.Combine(serverDirectory, "EFQueryLens.Daemon.exe"),
         };
         var daemonDllCandidates = new List<string>
         {
             Path.Combine(extensionRoot, "daemon", "EFQueryLens.Daemon.dll"),
+            Path.Combine(serverDirectory, "daemon", "EFQueryLens.Daemon.dll"),
+            Path.Combine(serverDirectory, "EFQueryLens.Daemon.dll"),
         };
-        if (!string.IsNullOrWhiteSpace(repoRoot))
-        {
-            daemonExeCandidates.Add(Path.Combine(repoRoot, "src", "EFQueryLens.Daemon", "bin", "Debug", "net10.0", "EFQueryLens.Daemon.exe"));
-            daemonExeCandidates.Add(Path.Combine(repoRoot, "src", "EFQueryLens.Daemon", "bin", "Release", "net10.0", "EFQueryLens.Daemon.exe"));
-            daemonDllCandidates.Add(Path.Combine(repoRoot, "src", "EFQueryLens.Daemon", "bin", "Debug", "net10.0", "EFQueryLens.Daemon.dll"));
-            daemonDllCandidates.Add(Path.Combine(repoRoot, "src", "EFQueryLens.Daemon", "bin", "Release", "net10.0", "EFQueryLens.Daemon.dll"));
-        }
 
         foreach (var candidate in daemonExeCandidates)
         {

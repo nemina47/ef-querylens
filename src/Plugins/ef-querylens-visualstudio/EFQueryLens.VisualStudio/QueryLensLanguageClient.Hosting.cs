@@ -4,7 +4,6 @@
 namespace EFQueryLens.VisualStudio;
 
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -28,16 +27,10 @@ internal sealed partial class QueryLensLanguageClient
             return Path.GetFullPath(envWorkspace);
         }
 
-        var repoRoot = TryFindRepositoryRoot(extensionDirectory);
-        if (!string.IsNullOrWhiteSpace(repoRoot))
-        {
-            return repoRoot!;
-        }
-
         return Environment.CurrentDirectory;
     }
 
-    private static string ResolveServerPath(string extensionDirectory, string workspaceRoot)
+    private static string ResolveServerPath(string extensionDirectory)
     {
         var overridePath = Environment.GetEnvironmentVariable(LspDllOverrideEnvVar);
         if (!string.IsNullOrWhiteSpace(overridePath) && File.Exists(overridePath))
@@ -57,72 +50,7 @@ internal sealed partial class QueryLensLanguageClient
             return rootServerPath;
         }
 
-        var repoRoot = ResolveRepositoryRoot(workspaceRoot, extensionDirectory);
-        if (!string.IsNullOrWhiteSpace(repoRoot))
-        {
-            var release = Path.Combine(repoRoot, "src", "EFQueryLens.Lsp", "bin", "Release", "net10.0", "EFQueryLens.Lsp.dll");
-            if (File.Exists(release))
-            {
-                return release;
-            }
-
-            var debug = Path.Combine(repoRoot, "src", "EFQueryLens.Lsp", "bin", "Debug", "net10.0", "EFQueryLens.Lsp.dll");
-            if (File.Exists(debug))
-            {
-                return debug;
-            }
-
-            var published = Path.Combine(repoRoot, "src", "EFQueryLens.Lsp", "bin", "Debug", "net10.0", "publish", "EFQueryLens.Lsp.dll");
-            if (File.Exists(published))
-            {
-                return published;
-            }
-        }
-
         return packagedServerPath;
-    }
-
-    private static string? ResolveRepositoryRoot(string workspaceRoot, string extensionDirectory)
-    {
-        var overrideRoot = Environment.GetEnvironmentVariable(RepositoryRootOverrideEnvVar);
-        if (!string.IsNullOrWhiteSpace(overrideRoot))
-        {
-            var normalized = Path.GetFullPath(overrideRoot);
-            if (File.Exists(Path.Combine(normalized, "EFQueryLens.slnx")))
-            {
-                return normalized;
-            }
-        }
-
-        if (File.Exists(Path.Combine(workspaceRoot, "EFQueryLens.slnx")))
-        {
-            return workspaceRoot;
-        }
-
-        return TryFindRepositoryRoot(extensionDirectory);
-    }
-
-    private static string? TryFindRepositoryRoot(string startDirectory)
-    {
-        try
-        {
-            var current = new DirectoryInfo(startDirectory);
-            while (current is not null)
-            {
-                if (File.Exists(Path.Combine(current.FullName, "EFQueryLens.slnx")))
-                {
-                    return current.FullName;
-                }
-
-                current = current.Parent;
-            }
-        }
-        catch
-        {
-            // Best effort only.
-        }
-
-        return null;
     }
 
     private static string BuildLspLogFilePath(string workspaceRoot)

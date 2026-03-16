@@ -94,9 +94,7 @@
   },
   "activationEvents": [
     "onLanguage:csharp",
-    "workspaceContains:**/*.csproj",
-    "workspaceContains:**/*.sln",
-    "workspaceContains:**/*.slnx"
+    "workspaceContains:**/*.csproj"
   ],
   "scripts": {
     "vscode:prepublish": "npm run compile && npm run prepare-runtime",

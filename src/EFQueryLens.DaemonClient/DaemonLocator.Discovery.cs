@@ -59,7 +59,7 @@ public static partial class DaemonLocator
             {
                 debugLog?.Invoke(
                     $"daemon-discovery stale-runtime reason=process-path-mismatch expected='{normalizedExpectedExe}' actual='{normalizedPidProcessPath}'");
-                CleanupStaleDaemonInstance(info.ProcessId, pidFilePath, debugLog);
+                CleanupStaleDaemonInstance(info, pidFilePath, debugLog);
                 return null;
             }
 
@@ -69,7 +69,7 @@ public static partial class DaemonLocator
             {
                 debugLog?.Invoke(
                     $"daemon-discovery stale-runtime reason=assembly-path-mismatch expected='{normalizedExpectedDll}' actual='{normalizedPidAssemblyPath}'");
-                CleanupStaleDaemonInstance(info.ProcessId, pidFilePath, debugLog);
+                CleanupStaleDaemonInstance(info, pidFilePath, debugLog);
                 return null;
             }
 
@@ -82,7 +82,7 @@ public static partial class DaemonLocator
             {
                 debugLog?.Invoke(
                     $"daemon-discovery stale-runtime reason=live-process-path-mismatch expected='{normalizedExpectedExe}' actual='{processPath}'");
-                CleanupStaleDaemonInstance(info.ProcessId, pidFilePath, debugLog);
+                CleanupStaleDaemonInstance(info, pidFilePath, debugLog);
                 return null;
             }
 
@@ -92,7 +92,7 @@ public static partial class DaemonLocator
             {
                 debugLog?.Invoke(
                     $"daemon-discovery stale-runtime reason=pid-process-drift pidPath='{normalizedPidProcessPath}' processPath='{processPath}'");
-                CleanupStaleDaemonInstance(info.ProcessId, pidFilePath, debugLog);
+                CleanupStaleDaemonInstance(info, pidFilePath, debugLog);
                 return null;
             }
 
@@ -111,6 +111,7 @@ public static partial class DaemonLocator
         public string WorkspacePath { get; init; } = string.Empty;
         public string ProcessPath { get; init; } = string.Empty;
         public string AssemblyPath { get; init; } = string.Empty;
+        public DateTime StartedUtc { get; init; }
     }
 
     private static string? NormalizePathOrNull(string? value)
@@ -143,17 +144,31 @@ public static partial class DaemonLocator
         }
     }
 
-    private static void CleanupStaleDaemonInstance(int processId, string pidFilePath, Action<string>? debugLog)
+    private static void CleanupStaleDaemonInstance(DaemonPidInfo pidInfo, string pidFilePath, Action<string>? debugLog)
     {
         try
         {
-            var process = Process.GetProcessById(processId);
-            if (!process.HasExited
-                && process.ProcessName.Equals("EFQueryLens.Daemon", StringComparison.OrdinalIgnoreCase))
+            var process = Process.GetProcessById(pidInfo.ProcessId);
+            if (!process.HasExited)
             {
-                debugLog?.Invoke($"daemon-discovery stale-runtime kill pid={processId}");
-                process.Kill(entireProcessTree: true);
-                process.WaitForExit(2000);
+                var processName = process.ProcessName;
+                var processPath = TryGetProcessPath(process);
+                var isDirectDaemonProcess = processName.Equals("EFQueryLens.Daemon", StringComparison.OrdinalIgnoreCase);
+
+                var normalizedPidAssemblyPath = NormalizePathOrNull(pidInfo.AssemblyPath);
+                var pidAssemblyName = string.IsNullOrWhiteSpace(normalizedPidAssemblyPath)
+                    ? null
+                    : Path.GetFileName(normalizedPidAssemblyPath);
+                var isDotnetHostedDaemon = processName.Equals("dotnet", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(pidAssemblyName, DaemonAssemblyFileName, StringComparison.OrdinalIgnoreCase)
+                    && IsLikelySameRecordedProcess(process, processPath, pidInfo);
+
+                if (isDirectDaemonProcess || isDotnetHostedDaemon)
+                {
+                    debugLog?.Invoke($"daemon-discovery stale-runtime kill pid={pidInfo.ProcessId} process={processName}");
+                    process.Kill(entireProcessTree: true);
+                    process.WaitForExit(2000);
+                }
             }
         }
         catch
@@ -172,5 +187,34 @@ public static partial class DaemonLocator
         {
             // Best-effort cleanup.
         }
+    }
+
+    private static bool IsLikelySameRecordedProcess(Process process, string? processPath, DaemonPidInfo pidInfo)
+    {
+        var normalizedPidProcessPath = NormalizePathOrNull(pidInfo.ProcessPath);
+        if (!string.IsNullOrWhiteSpace(normalizedPidProcessPath)
+            && !string.IsNullOrWhiteSpace(processPath)
+            && !string.Equals(normalizedPidProcessPath, processPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (pidInfo.StartedUtc == default)
+        {
+            return false;
+        }
+
+        DateTime processStartedUtc;
+        try
+        {
+            processStartedUtc = process.StartTime.ToUniversalTime();
+        }
+        catch
+        {
+            return false;
+        }
+
+        var delta = (processStartedUtc - pidInfo.StartedUtc.ToUniversalTime()).Duration();
+        return delta <= TimeSpan.FromMinutes(2);
     }
 }
