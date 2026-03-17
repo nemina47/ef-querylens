@@ -3,6 +3,9 @@
   <h1>EF QueryLens</h1>
   <p><strong>See the SQL behind every LINQ expression — right in your editor.</strong></p>
   <p>
+    <a href="https://marketplace.visualstudio.com/items?itemName=EFQueryLens.ef-querylens-vscode"><img src="https://img.shields.io/visual-studio-marketplace/v/EFQueryLens.ef-querylens-vscode?label=VS%20Code&color=0098FF" alt="VS Code Marketplace Version" /></a>
+    <a href="https://marketplace.visualstudio.com/items?itemName=EFQueryLens.EFQueryLensVS"><img src="https://img.shields.io/visual-studio-marketplace/v/EFQueryLens.EFQueryLensVS?label=Visual%20Studio&color=5C2D91" alt="Visual Studio Marketplace Version" /></a>
+    <a href="https://plugins.jetbrains.com/plugin/30753-ef-querylens"><img src="https://img.shields.io/badge/Rider-Under%20Review-orange" alt="Rider Marketplace Review" /></a>
     <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License" />
   </p>
 </div>
@@ -145,9 +148,9 @@ dotnet build EFQueryLens.slnx
 
 | IDE | Install |
 |---|---|
-| VS Code | [Marketplace](#) *(coming soon)* |
-| JetBrains Rider | [JetBrains Marketplace](#) *(coming soon)* |
-| Visual Studio | [VS Marketplace](#) *(coming soon)* |
+| VS Code | [Marketplace](https://marketplace.visualstudio.com/items?itemName=EFQueryLens.ef-querylens-vscode) |
+| JetBrains Rider | [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/30753-ef-querylens) *(under review)* |
+| Visual Studio | [VS Marketplace](https://marketplace.visualstudio.com/items?itemName=EFQueryLens.EFQueryLensVS) |
 
 **4. Hover any LINQ expression**
 
