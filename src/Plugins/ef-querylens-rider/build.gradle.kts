@@ -74,6 +74,10 @@ intellijPlatform {
 }
 
 tasks {
+    publishPlugin {
+        channels = listOf(providers.gradleProperty("pluginChannel").get())
+    }
+
     val pluginRootInArchive = project.name
 
     prepareSandbox {
