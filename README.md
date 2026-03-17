@@ -3,10 +3,7 @@
   <h1>EF QueryLens</h1>
   <p><strong>See the SQL behind every LINQ expression — right in your editor.</strong></p>
   <p>
-    <a href="https://github.com/nemina47/ef-querylens/actions/workflows/ci.yml"><img src="https://github.com/nemina47/ef-querylens/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
     <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License" />
-    <img src="https://img.shields.io/badge/.NET-10.0-512BD4" alt=".NET 10" />
-    <img src="https://img.shields.io/badge/EF%20Core-9%2B-blue" alt="EF Core 9+" />
   </p>
 </div>
 
