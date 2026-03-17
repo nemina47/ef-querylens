@@ -70,9 +70,9 @@ internal static partial class LinqHoverMarkdownRenderer
             BorderThickness = new Thickness(0),
             CornerRadius = new CornerRadius(4),
             Padding = new Thickness(0),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             MinWidth = 380,
             MaxHeight = 420,
-            MaxWidth = 860,
         };
 
         var layoutGrid = new Grid();
@@ -86,10 +86,13 @@ internal static partial class LinqHoverMarkdownRenderer
         var scrollViewer = new ScrollViewer
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };
 
-        var stack = new StackPanel();
+        var stack = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
 
         if (!response.Success
             && status == 3
@@ -104,11 +107,16 @@ internal static partial class LinqHoverMarkdownRenderer
 
         foreach (var stmt in statements)
         {
-            if (!string.IsNullOrWhiteSpace(stmt.SplitLabel))
-            {
-                stack.Children.Add(RenderParagraph($"*{stmt.SplitLabel}*", copySql));
-            }
             var sqlLines = (stmt.Sql ?? string.Empty).Replace("\r\n", "\n").Split('\n').ToList();
+            var rawSplitLabel = stmt.SplitLabel;
+            if (!string.IsNullOrWhiteSpace(rawSplitLabel))
+            {
+                var label = rawSplitLabel!.Trim().Trim('*').Trim();
+                if (!string.IsNullOrWhiteSpace(label))
+                {
+                    sqlLines.Insert(0, $"-- {label}");
+                }
+            }
             stack.Children.Add(RenderCodeBlock("sql", sqlLines));
         }
 

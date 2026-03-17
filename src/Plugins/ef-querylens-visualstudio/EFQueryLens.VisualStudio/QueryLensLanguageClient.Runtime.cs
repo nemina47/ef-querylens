@@ -22,7 +22,9 @@ internal sealed partial class QueryLensLanguageClient
         // Keep daemon alive across VS language-client disposal to avoid UI teardown stalls.
         processStartInfo.Environment["QUERYLENS_DAEMON_SHUTDOWN_ON_DISPOSE"] = "0";
         // Keep rolling-window latency at 20 samples by default, but honor explicit env overrides.
-        if (string.IsNullOrWhiteSpace(processStartInfo.Environment["QUERYLENS_AVG_WINDOW_SAMPLES"]))
+        // Under .NET Framework, reading a missing key from ProcessStartInfo.Environment can throw.
+        var avgWindowSamplesOverride = Environment.GetEnvironmentVariable("QUERYLENS_AVG_WINDOW_SAMPLES");
+        if (string.IsNullOrWhiteSpace(avgWindowSamplesOverride))
         {
             processStartInfo.Environment["QUERYLENS_AVG_WINDOW_SAMPLES"] = "20";
         }

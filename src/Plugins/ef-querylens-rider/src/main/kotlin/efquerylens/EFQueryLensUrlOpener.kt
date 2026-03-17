@@ -55,17 +55,26 @@ class EFQueryLensUrlOpener : UrlOpener() {
         }
 
         val uri = runCatching { URI(url) }.getOrNull() ?: return true
-        val host = uri.host?.lowercase() ?: return true
-        if (host != "copysql" && host != "opensqleditor" && host != "recalculate") return true
+        val command = extractCommand(uri) ?: return true
 
         val params = parseQueryParams(uri.rawQuery ?: "")
-        val fileUri = params["uri"] ?: return true
+        val fileUri = params["uri"]
+        if (fileUri.isNullOrBlank()) {
+            thisLogger().warn("[EFQueryLens] URL opener missing uri parameter for command=$command")
+            return true
+        }
         val line = params["line"]?.toIntOrNull() ?: 0
         val character = params["character"]?.toIntOrNull() ?: 0
 
-        val effectiveProject = project ?: ProjectManager.getInstance().openProjects.firstOrNull() ?: return true
+        val effectiveProject = resolveProject(project, fileUri)
+        if (effectiveProject == null) {
+            thisLogger().warn("[EFQueryLens] URL opener could not resolve project for command=$command uri=$fileUri")
+            return true
+        }
 
-        if (host == "recalculate") {
+        thisLogger().info("[EFQueryLens] URL opener command=$command uri=$fileUri line=$line char=$character")
+
+        if (command == "recalculate") {
             requestPreviewRecalculate(effectiveProject, fileUri, line, character)
             return true
         }
@@ -73,7 +82,10 @@ class EFQueryLensUrlOpener : UrlOpener() {
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
                 val preview = buildStructuredPreview(effectiveProject, fileUri, line, character)
-                    ?: return@executeOnPooledThread
+                if (preview == null) {
+                    showStatusMessage(effectiveProject, 3, "EF QueryLens could not fetch SQL for this location. Try hovering once and retry.")
+                    return@executeOnPooledThread
+                }
 
                 if (preview.statusCode != 0 || preview.sqlText.isBlank()) {
                     val message = preview.statusMessage
@@ -83,16 +95,77 @@ class EFQueryLensUrlOpener : UrlOpener() {
                     return@executeOnPooledThread
                 }
 
-                when (host) {
+                when (command) {
                     "copysql" -> CopyPasteManager.getInstance().setContents(StringSelection(preview.sqlText))
                     "opensqleditor" -> openInPreviewDialog(effectiveProject, preview)
                 }
             } catch (e: Exception) {
-                thisLogger().warn("[EFQueryLens] URL opener failed for host=$host", e)
+                thisLogger().warn("[EFQueryLens] URL opener failed for command=$command", e)
             }
         }
 
         return true
+    }
+
+    private fun extractCommand(uri: URI): String? {
+        val host = uri.host?.trim()?.lowercase()?.trimEnd('/')
+        val path = uri.path
+            ?.trim()
+            ?.trim('/')
+            ?.lowercase()
+            ?.trimEnd('/')
+
+        val raw = when {
+            !host.isNullOrBlank() -> host
+            !path.isNullOrBlank() -> path
+            else -> null
+        } ?: return null
+
+        return when (raw) {
+            "copysql", "copy" -> "copysql"
+            "opensqleditor", "opensql", "open" -> "opensqleditor"
+            "recalculate", "reanalyze", "reanalyse" -> "recalculate"
+            else -> null
+        }
+    }
+
+    private fun resolveProject(project: Project?, fileUri: String): Project? {
+        if (project != null && !project.isDisposed) {
+            return project
+        }
+
+        val openProjects = ProjectManager.getInstance().openProjects.filter { !it.isDisposed }
+        if (openProjects.isEmpty()) {
+            return null
+        }
+
+        val normalizedFilePath = runCatching { URI(fileUri).path }
+            .getOrNull()
+            ?.replace('\\', '/')
+            ?.trimEnd('/')
+
+        if (!normalizedFilePath.isNullOrBlank()) {
+            val match = openProjects
+                .mapNotNull { current ->
+                    val basePath = current.basePath?.replace('\\', '/')?.trimEnd('/')
+                    if (basePath.isNullOrBlank()) {
+                        null
+                    } else {
+                        current to basePath
+                    }
+                }
+                .filter { (_, basePath) ->
+                    normalizedFilePath.startsWith(basePath, ignoreCase = true)
+                }
+                .maxByOrNull { (_, basePath) -> basePath.length }
+                ?.first
+
+            if (match != null) {
+                return match
+            }
+        }
+
+        return openProjects.firstOrNull()
     }
 
     private fun requestPreviewRecalculate(project: Project, fileUri: String, line: Int, character: Int) {

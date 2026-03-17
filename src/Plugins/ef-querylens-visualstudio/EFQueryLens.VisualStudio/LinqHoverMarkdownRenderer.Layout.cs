@@ -175,6 +175,7 @@ internal static partial class LinqHoverMarkdownRenderer
         var innerScrollViewer = new ScrollViewer
         {
             Content = codeStack,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };
@@ -186,6 +187,7 @@ internal static partial class LinqHoverMarkdownRenderer
             BorderBrush = new SolidColorBrush(Color.FromRgb(0x35, 0x35, 0x35)),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(4),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(8),
             Margin = new Thickness(0, 5, 0, 7),
             Child = innerScrollViewer,

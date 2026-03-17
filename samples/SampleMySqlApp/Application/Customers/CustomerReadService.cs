@@ -26,7 +26,7 @@ public sealed class CustomerReadService
         CancellationToken ct)
     {
         return await _dbContext
-            .Customers
+            .Customers.Include(c => c.Orders) // Include orders for potential use in the expression
             .Where(c => c.IsNotDeleted)
             .Where(c => c.CustomerId == customerId)
             .Select(expression)
