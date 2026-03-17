@@ -7,13 +7,13 @@ public class DocumentPathResolverTests
     [Fact]
     public void Resolve_EncodedWindowsFileUri_DoesNotDuplicateDrivePrefix()
     {
-        var uri = new Uri("file:///c%3A/tsp/plus-web/src/Sla.Plus.Application/Services/CaseService.cs");
+        var uri = new Uri("file:///c%3A/projects/my-app/src/My.Application/Services/UserService.cs");
 
         var path = DocumentPathResolver.Resolve(uri);
 
         Assert.DoesNotContain("c:\\c:\\", path, StringComparison.OrdinalIgnoreCase);
         Assert.EndsWith(
-            "Sla.Plus.Application" + Path.DirectorySeparatorChar + "Services" + Path.DirectorySeparatorChar + "CaseService.cs",
+            "My.Application" + Path.DirectorySeparatorChar + "Services" + Path.DirectorySeparatorChar + "UserService.cs",
             path,
             StringComparison.OrdinalIgnoreCase);
     }

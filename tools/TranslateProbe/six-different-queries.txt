@@ -1,6 +1,0 @@
-_dbContext.UserAccountGroups.AsNoTracking().Expressionify().Where(w => w.IsNotDeleted()).Select(w => new { groupId = w.UserGroupId.ToString(), userId = w.UserAccountId.ToString() })
-_dbContext.UserAccountGroups.AsNoTracking().Expressionify().Where(w => w.IsNotDeleted() && w.UserAccount.IsActive).Select(w => new { groupId = w.UserGroupId.ToString(), userName = w.UserAccount.Officer.UserName })
-_dbContext.UserAccounts.AsNoTracking().Expressionify().Where(u => u.IsNotDeleted() && u.IsActive).Select(u => new { userId = u.UserAccountId.ToString(), u.CamsUserAccountId })
-_dbContext.UserAccounts.AsNoTracking().Expressionify().Where(u => u.IsNotDeleted()).SelectMany(u => u.UserAccountGroups.Where(g => g.IsNotDeleted()), (u, g) => new { userId = u.UserAccountId.ToString(), groupId = g.UserGroupId.ToString() })
-_dbContext.UserAccountGroups.AsNoTracking().Expressionify().Where(g => g.IsNotDeleted()).OrderBy(g => g.UserAccount.Officer.UserName).Select(g => new { userName = g.UserAccount.Officer.UserName, groupId = g.UserGroupId.ToString() })
-_dbContext.UserAccountGroups.AsNoTracking().Expressionify().Where(w => w.IsNotDeleted()).Select(w => new { groupId = w.UserGroupId.ToString(), groupName = w.UserGroup.Role.RoleName, userId = w.UserAccountId.ToString(), userName = w.UserAccount.Officer.UserName })

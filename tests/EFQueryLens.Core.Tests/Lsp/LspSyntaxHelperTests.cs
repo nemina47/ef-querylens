@@ -145,9 +145,9 @@ public class LspSyntaxHelperTests
     public void TryExtractLinqExpression_UsesRootContextVariable_ForComplexChain()
     {
         var source = """
-            var query = context .MedicsAccountRoles.AsNoTracking()
+            var query = context .Orders.AsNoTracking()
                 .Where(s => s.IsNotDeleted && s.AccountId == accountId)
-                .Select(s => new { s.MedicsRole.RoleType, s.MedicsRole.WorkflowType })
+                .Select(s => new { s.OrderLine.Status, s.OrderLine.Priority })
                 .Distinct();
             """;
 
@@ -168,9 +168,9 @@ public class LspSyntaxHelperTests
     public void TryExtractLinqExpression_HoverInsideLambda_StillUsesRootContextVariable()
     {
         var source = """
-            var query = context.MedicsAccountRoles
+            var query = context.Orders
                 .Where(s => s.IsNotDeleted && s.AccountId == accountId)
-                .Select(s => s.MedicsRole.RoleType)
+                .Select(s => s.OrderLine.Status)
                 .Distinct();
             """;
 
@@ -437,7 +437,7 @@ public class LspSyntaxHelperTests
     {
         var source = """
             using System.Linq;
-            using Enums = Share.Medics.Applications.Core.Entities.Enums;
+            using Enums = My.Application.Core.Entities.Enums;
             using static System.Math;
 
             namespace Demo;
@@ -450,7 +450,7 @@ public class LspSyntaxHelperTests
         Assert.Contains("System.Linq", context.Imports);
         Assert.Contains("System.Math", context.StaticTypes);
         Assert.True(context.Aliases.TryGetValue("Enums", out var aliasTarget));
-        Assert.Equal("Share.Medics.Applications.Core.Entities.Enums", aliasTarget);
+        Assert.Equal("My.Application.Core.Entities.Enums", aliasTarget);
     }
 
     [Fact]
