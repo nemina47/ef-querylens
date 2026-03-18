@@ -50,7 +50,7 @@ private class EFQueryLensServerDescriptor(
     private val hostProject: Project
 ) : ProjectWideLspServerDescriptor(hostProject, "EF QueryLens") {
     private companion object {
-        private const val PluginIdValue = "dev.efquerylens.rider"
+        private const val PluginIdValue = "dev.efquerylens"
         private const val LspDllOverrideEnvVar = "QUERYLENS_LSP_DLL"
     }
 
