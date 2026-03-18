@@ -18,7 +18,7 @@ EF QueryLens for Rider integrates with the QueryLens LSP backend and gives you S
 
 ## Requirements
 
-- JetBrains Rider (2024.2+)
+- JetBrains Rider (2025.2+)
 - .NET 10 Runtime + ASP.NET Core Runtime (required to run the bundled QueryLens backend)
 - .NET 10 SDK (only for local development/build)
 - EF Core project

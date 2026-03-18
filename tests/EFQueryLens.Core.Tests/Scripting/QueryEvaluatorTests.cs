@@ -652,6 +652,48 @@ public class QueryEvaluatorTests : IDisposable
     }
 
     [Fact]
+    public void InferMissingExtensionStaticImports_CS7036_UsesInvocationArityAndFindsZeroArgExtension()
+    {
+        const string source = """
+using System;
+public sealed class C
+{
+    public string M(ReadOnlySpan<char> span)
+    {
+        return span.ToLower();
+    }
+}
+""";
+
+        var references = AppDomain.CurrentDomain.GetAssemblies()
+            .Where(a => !a.IsDynamic && !string.IsNullOrWhiteSpace(a.Location))
+            .Select(a => a.Location)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(path => MetadataReference.CreateFromFile(path))
+            .ToArray();
+
+        var compilation = CSharpCompilation.Create(
+            assemblyName: "ExtensionImportInferenceCs7036",
+            syntaxTrees: [CSharpSyntaxTree.ParseText(source)],
+            references: references,
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+
+        Assert.Contains(errors, e => e.Id == "CS7036");
+
+        var imports = InvokeInferMissingExtensionStaticImports(
+            errors,
+            compilation,
+            [typeof(QueryEvaluatorTests).Assembly]);
+
+        Assert.Contains(typeof(ReadOnlySpanCaseExtensions).FullName!, imports, StringComparer.Ordinal);
+        Assert.DoesNotContain("System.MemoryExtensions", imports, StringComparer.Ordinal);
+    }
+
+    [Fact]
     public async Task Evaluate_WithUnresolvableAdditionalImport_DoesNotFailCompilation()
     {
         var result = await TranslateAsync(
@@ -905,4 +947,25 @@ public class QueryEvaluatorTests : IDisposable
         var value = method!.Invoke(null, [errors]);
         return Assert.IsType<bool>(value);
     }
+
+    private static IReadOnlyList<string> InvokeInferMissingExtensionStaticImports(
+        IReadOnlyList<Diagnostic> errors,
+        CSharpCompilation compilation,
+        IReadOnlyList<Assembly> assemblies)
+    {
+        var method = typeof(QueryEvaluator).GetMethod(
+            "InferMissingExtensionStaticImports",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.NotNull(method);
+
+        var value = method!.Invoke(null, [errors, compilation, assemblies]);
+        return Assert.IsAssignableFrom<IReadOnlyList<string>>(value);
+    }
+}
+
+public static class ReadOnlySpanCaseExtensions
+{
+    public static string ToLower(this ReadOnlySpan<char> value)
+        => value.ToString().ToLowerInvariant();
 }

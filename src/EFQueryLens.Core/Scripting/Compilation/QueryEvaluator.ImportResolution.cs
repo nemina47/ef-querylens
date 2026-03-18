@@ -11,7 +11,11 @@ public sealed partial class QueryEvaluator
 {
     private sealed record MissingExtensionRequest(
         string MethodName,
-        HashSet<string> ReceiverTypeNames);
+        HashSet<string> ReceiverTypeNames,
+        int? InvocationArgumentCount);
+
+    private static bool IsExtensionImportRecoveryDiagnostic(Diagnostic diagnostic) =>
+        diagnostic.Id is "CS1061" or "CS1929" or "CS7036";
 
     private static IReadOnlyList<string> InferMissingExtensionStaticImports(
         IEnumerable<Diagnostic> errors,
@@ -21,13 +25,15 @@ public sealed partial class QueryEvaluator
         var requested = new List<MissingExtensionRequest>();
         var requestKeys = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var error in errors.Where(e => e.Id == "CS1061"))
+        foreach (var error in errors.Where(IsExtensionImportRecoveryDiagnostic))
         {
             if (!TryExtractMissingExtensionRequest(error, compilation, out var request))
                 continue;
 
             var key = request.MethodName + "|"
-                + string.Join("|", request.ReceiverTypeNames.OrderBy(static x => x, StringComparer.Ordinal));
+                + string.Join("|", request.ReceiverTypeNames.OrderBy(static x => x, StringComparer.Ordinal))
+                + "|"
+                + (request.InvocationArgumentCount?.ToString() ?? "_");
             if (!requestKeys.Add(key))
             {
                 continue;
@@ -79,6 +85,7 @@ public sealed partial class QueryEvaluator
 
                     var matchingRequests = requested
                         .Where(r => string.Equals(r.MethodName, method.Name, StringComparison.Ordinal))
+                        .Where(r => IsExtensionMethodApplicableToInvocation(method, r.InvocationArgumentCount))
                         .ToArray();
                     if (matchingRequests.Length == 0)
                         continue;
@@ -110,7 +117,9 @@ public sealed partial class QueryEvaluator
         var root = sourceTree.GetRoot();
         var node = root.FindNode(diagnostic.Location.SourceSpan, getInnermostNodeForTie: true);
 
+        var invocation = node.AncestorsAndSelf().OfType<InvocationExpressionSyntax>().FirstOrDefault();
         var memberAccess = node as MemberAccessExpressionSyntax
+            ?? invocation?.Expression as MemberAccessExpressionSyntax
             ?? node.AncestorsAndSelf().OfType<MemberAccessExpressionSyntax>().FirstOrDefault();
         if (memberAccess is null)
             return false;
@@ -130,9 +139,32 @@ public sealed partial class QueryEvaluator
         if (receiverTypeNames.Count == 0)
             return false;
 
-        request = new MissingExtensionRequest(methodName, receiverTypeNames);
+        var invocationArgumentCount = invocation?.ArgumentList.Arguments.Count;
+
+        request = new MissingExtensionRequest(methodName, receiverTypeNames, invocationArgumentCount);
         return true;
     }
+
+    private static bool IsExtensionMethodApplicableToInvocation(MethodInfo method, int? invocationArgumentCount)
+    {
+        if (invocationArgumentCount is null)
+            return true;
+
+        var parameters = method.GetParameters();
+        if (parameters.Length == 0)
+            return false;
+
+        var extensionParameters = parameters.Skip(1).ToArray();
+        var hasParamsArray = extensionParameters.Any(IsParamsArrayParameter);
+        var requiredCount = extensionParameters.Count(p => !p.IsOptional && !IsParamsArrayParameter(p));
+        var maxCount = hasParamsArray ? int.MaxValue : extensionParameters.Length;
+        var provided = invocationArgumentCount.Value;
+
+        return provided >= requiredCount && provided <= maxCount;
+    }
+
+    private static bool IsParamsArrayParameter(ParameterInfo parameter)
+        => parameter.GetCustomAttribute<ParamArrayAttribute>() is not null;
 
     private static HashSet<string> BuildReceiverTypeNameSet(ITypeSymbol typeSymbol)
     {

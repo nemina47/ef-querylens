@@ -136,7 +136,7 @@ public sealed partial class QueryEvaluator
                         .Where(d => d.Severity == DiagnosticSeverity.Error)
                         .ToList();
 
-                    var hardErrors = errors.Where(e => e.Id is not ("CS0103" or "CS1061" or "CS0019" or "CS8122" or "CS0246" or "CS0234" or "CS0400")).ToList();
+                    var hardErrors = errors.Where(e => e.Id is not ("CS0103" or "CS1061" or "CS1929" or "CS7036" or "CS0019" or "CS8122" or "CS0246" or "CS0234" or "CS0400")).ToList();
                     if (hardErrors.Count > 0)
                     {
                         return Failure(
