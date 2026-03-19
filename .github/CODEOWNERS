@@ -1,0 +1,15 @@
+# Default ownership for the whole repository.
+* @nemina47
+
+# Shared backend/runtime
+/src/EFQueryLens.Core/ @nemina47
+/src/EFQueryLens.Daemon/ @nemina47
+/src/EFQueryLens.DaemonClient/ @nemina47
+/src/EFQueryLens.Lsp/ @nemina47
+
+# IDE plugins
+/src/Plugins/ @nemina47
+
+# Docs and workflow automation
+/docs/ @nemina47
+/.github/ @nemina47

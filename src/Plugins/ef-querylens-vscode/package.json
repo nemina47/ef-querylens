@@ -119,6 +119,8 @@
     "workspaceContains:**/*.csproj"
   ],
   "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "vscode:prepublish": "npm run compile && npm run prepare-runtime",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
@@ -131,6 +133,7 @@
   "devDependencies": {
     "@types/node": "^18.0.0",
     "@types/vscode": "^1.80.0",
+    "prettier": "^3.6.2",
     "typescript": "^5.0.0"
   }
 }

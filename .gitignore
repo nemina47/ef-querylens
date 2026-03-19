@@ -86,6 +86,7 @@ local.settings.json
 
 # Local agent tooling metadata
 .agent/
+.dotnet/
 
 # Local scratch/test artifacts
 build_errors.txt

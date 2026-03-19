@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+
+echo "[husky] restoring local tools when a tool manifest is present"
+if [ -f ".config/dotnet-tools.json" ]; then
+  dotnet tool restore
+fi
+
+echo "[husky] checking csharpier formatting"
+dotnet tool run csharpier check .
+
+echo "[husky] checking prettier formatting"
+npm run format:check --prefix src/Plugins/ef-querylens-vscode
+
+echo "[husky] checking rider kotlin formatting"
+./src/Plugins/ef-querylens-rider/gradlew -p src/Plugins/ef-querylens-rider ktlintCheck --no-daemon
+
+echo "[husky] building solution"
+dotnet build EFQueryLens.slnx --nologo
+
+echo "[husky] running core tests"
+dotnet test tests/EFQueryLens.Core.Tests/EFQueryLens.Core.Tests.csproj --no-build --nologo

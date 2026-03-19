@@ -1,0 +1,15 @@
+{
+  "includes": [
+    "**/*.cs",
+    "**/*.csx"
+  ],
+  "excludes": [
+    "**/bin/**",
+    "**/obj/**",
+    "src/Plugins/ef-querylens-rider/build/**",
+    "src/Plugins/ef-querylens-rider/.intellijPlatform/**",
+    "src/Plugins/ef-querylens-vscode/out/**",
+    "src/Plugins/ef-querylens-vscode/server/**",
+    "src/Plugins/ef-querylens-vscode/daemon/**"
+  ]
+}

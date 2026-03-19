@@ -2,12 +2,49 @@
 
 Thanks for contributing to EF QueryLens.
 
+Start by reading `AGENTS.md` and `docs/repository-standards.md`. They define the repo boundary lines, contributor expectations, and the local validation baseline.
+
 ## Prerequisites
 
 - .NET SDK 10
 - Node.js 20+
 - npm 10+
 - JDK 21+ (for Rider plugin builds)
+
+## Recommended Setup
+
+Pin to the SDK in `global.json` and install local git hooks if you use Husky:
+
+```bash
+dotnet tool install --local Husky
+dotnet husky install
+```
+
+If the tool is already installed in a local manifest:
+
+```bash
+dotnet tool restore
+dotnet husky install
+```
+
+Helper scripts are available at `eng/install-hooks.ps1` and `eng/install-hooks.sh`.
+
+## Formatting
+
+```bash
+dotnet tool restore
+dotnet tool run csharpier .
+npm run format --prefix src/Plugins/ef-querylens-vscode
+cd src/Plugins/ef-querylens-rider && ./gradlew ktlintFormat
+```
+
+Check formatting without rewriting files:
+
+```bash
+dotnet tool run csharpier check .
+npm run format:check --prefix src/Plugins/ef-querylens-vscode
+cd src/Plugins/ef-querylens-rider && ./gradlew ktlintCheck
+```
 
 ## Build (root)
 
@@ -52,8 +89,9 @@ dotnet build src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/EFQu
 ```bash
 dotnet build EFQueryLens.slnx
 dotnet test EFQueryLens.slnx
+npm run format:check --prefix src/Plugins/ef-querylens-vscode
 npm run compile --prefix src/Plugins/ef-querylens-vscode
-cd src/Plugins/ef-querylens-rider && ./gradlew compileKotlin
+cd src/Plugins/ef-querylens-rider && ./gradlew ktlintCheck compileKotlin
 ```
 
 ## Pull Requests
@@ -63,3 +101,5 @@ cd src/Plugins/ef-querylens-rider && ./gradlew compileKotlin
 - Update docs/README for user-visible changes
 - Keep command and config naming under `efquerylens.*`
 - Keep plugin metadata (publisher/version/description) consistent across VS Code, Rider, and Visual Studio manifests
+- Prefer changes in shared backend projects over reimplementing logic in individual plugins
+
