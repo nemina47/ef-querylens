@@ -8,11 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\EFQueryLens.Transport.Grpc\EFQueryLens.Transport.Grpc.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Grpc.AspNetCore" Version="2.71.0" />
+    <ProjectReference Include="..\EFQueryLens.Core\EFQueryLens.Core.csproj" />
   </ItemGroup>
 
 </Project>

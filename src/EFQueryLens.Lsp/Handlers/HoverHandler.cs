@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using EFQueryLens.Core.Grpc;
 using EFQueryLens.Lsp;
 using EFQueryLens.Lsp.Services;
 using Microsoft.VisualStudio.LanguageServer.Protocol;
@@ -49,24 +48,13 @@ internal sealed partial class HoverHandler
         _debugEnabled = LspEnvironment.ReadBool("QUERYLENS_DEBUG", fallback: false);
     }
 
-    public void HandleDaemonEvent(DaemonEvent daemonEvent)
+    /// <summary>
+    /// Called when the watched assembly file changes on disk (recompile detected).
+    /// Evicts all hover caches so the next hover fetches fresh SQL.
+    /// </summary>
+    public void OnAssemblyChanged()
     {
-        switch (daemonEvent.EventCase)
-        {
-            case DaemonEvent.EventOneofCase.StateChanged:
-                InvalidateCaches(
-                    $"state-changed context={daemonEvent.StateChanged.ContextName} state={daemonEvent.StateChanged.State}");
-                break;
-
-            case DaemonEvent.EventOneofCase.ConfigReloaded:
-                InvalidateCaches("config-reloaded");
-                break;
-
-            case DaemonEvent.EventOneofCase.AssemblyChanged:
-                InvalidateCaches(
-                    $"assembly-changed context={daemonEvent.AssemblyChanged.ContextName}");
-                break;
-        }
+        InvalidateCaches("assembly-changed");
     }
 
     public void InvalidateForManualRecalculate()

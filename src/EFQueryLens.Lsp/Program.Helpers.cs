@@ -1,8 +1,7 @@
 using System.Text;
-using EFQueryLens.Core;
 using EFQueryLens.Core.Contracts;
-using EFQueryLens.DaemonClient;
 using EFQueryLens.Lsp;
+using EFQueryLens.Lsp.Engine;
 
 internal static class LspProgramHelpers
 {
@@ -43,127 +42,76 @@ internal static class LspProgramHelpers
 
     internal static async Task<IQueryLensEngine> CreateEngineAsync(bool debugEnabled)
     {
-        var daemonPort = LspEnvironment.TryReadOptionalInt("QUERYLENS_DAEMON_PORT", min: 1, max: 65535);
-        var workspacePath = DaemonLocator.ResolveWorkspacePath();
-        var daemonOwnedByCurrentLsp = false;
-        var daemonExecutablePath = DaemonLocator.ResolveDaemonExecutablePath();
-        var daemonAssemblyPath = DaemonLocator.ResolveDaemonAssemblyPath();
+        Action<string>? log = debugEnabled
+            ? message => Console.Error.WriteLine($"[QL-LSP] {message}")
+            : null;
 
-        if (debugEnabled)
-        {
-            var exeEnv = Environment.GetEnvironmentVariable("QUERYLENS_DAEMON_EXE");
-            var dllEnv = Environment.GetEnvironmentVariable("QUERYLENS_DAEMON_DLL");
-            Console.Error.WriteLine("[QL-LSP] daemon env QUERYLENS_DAEMON_EXE=" + (string.IsNullOrWhiteSpace(exeEnv) ? "(not set)" : exeEnv));
-            Console.Error.WriteLine("[QL-LSP] daemon env QUERYLENS_DAEMON_DLL=" + (string.IsNullOrWhiteSpace(dllEnv) ? "(not set)" : dllEnv));
-            Console.Error.WriteLine("[QL-LSP] daemon resolved exe=" + (daemonExecutablePath ?? "(null)") + " dll=" + (daemonAssemblyPath ?? "(null)"));
-        }
-
-        if (daemonPort is null
-            && !string.IsNullOrWhiteSpace(workspacePath))
-        {
-            daemonPort = DaemonLocator.TryGetPort(
-                workspacePath,
-                expectedDaemonExecutablePath: daemonExecutablePath,
-                expectedDaemonAssemblyPath: daemonAssemblyPath,
-                debugLog: debugEnabled ? message => Console.Error.WriteLine($"[QL-LSP] {message}") : null);
-            if (debugEnabled && daemonPort is > 0)
-            {
-                Console.Error.WriteLine($"[QL-LSP] daemon-discovery success workspace={workspacePath} port={daemonPort.Value}");
-            }
-        }
-
-        var daemonStartTimeoutMs = LspEnvironment.ReadInt(
-            variableName: "QUERYLENS_DAEMON_START_TIMEOUT_MS",
-            fallback: 5000,
-            min: 250,
-            max: 120000);
-
-        if (daemonPort is null
-            && !string.IsNullOrWhiteSpace(workspacePath)
-            && LspEnvironment.ReadBool("QUERYLENS_DAEMON_AUTOSTART", fallback: true))
-        {
-            var hadRunningDaemon = DaemonLocator.TryGetPort(
-                workspacePath,
-                expectedDaemonExecutablePath: daemonExecutablePath,
-                expectedDaemonAssemblyPath: daemonAssemblyPath,
-                debugLog: debugEnabled ? message => Console.Error.WriteLine($"[QL-LSP] {message}") : null) is > 0;
-            daemonPort = await DaemonLocator.TryGetOrStartDaemonAsync(
-                workspacePath,
-                daemonExecutablePath,
-                daemonAssemblyPath,
-                daemonStartTimeoutMs,
-                debugEnabled ? message => Console.Error.WriteLine($"[QL-LSP] {message}") : null,
-                forceFreshStart: false,
-                ct: CancellationToken.None);
-
-            daemonOwnedByCurrentLsp = !hadRunningDaemon && daemonPort is > 0;
-        }
-
+        var workspacePath = EngineDiscovery.ResolveWorkspacePath();
         if (string.IsNullOrWhiteSpace(workspacePath))
         {
             throw new InvalidOperationException(
-                "Could not resolve workspace path for daemon startup. Set QUERYLENS_WORKSPACE to the solution root.");
+                "Could not resolve workspace path for engine startup. " +
+                "Set QUERYLENS_WORKSPACE to the solution root.");
         }
 
-        if (daemonPort is null)
+        var engineAssemblyPath = EngineDiscovery.ResolveEngineAssemblyPath();
+
+        if (debugEnabled)
         {
-            throw new InvalidOperationException(
-                $"Daemon is required but no running daemon was discovered for workspace '{workspacePath}'.");
+            var dllEnv = Environment.GetEnvironmentVariable("QUERYLENS_DAEMON_DLL");
+            Console.Error.WriteLine("[QL-LSP] engine env QUERYLENS_DAEMON_DLL=" + (string.IsNullOrWhiteSpace(dllEnv) ? "(not set)" : dllEnv));
+            Console.Error.WriteLine("[QL-LSP] engine resolved dll=" + (engineAssemblyPath ?? "(null)"));
+            Console.Error.WriteLine("[QL-LSP] workspace=" + workspacePath);
         }
 
-        var contextName = Environment.GetEnvironmentVariable("QUERYLENS_DAEMON_CONTEXT");
-        if (string.IsNullOrWhiteSpace(contextName))
-        {
-            var clientName = Environment.GetEnvironmentVariable("QUERYLENS_CLIENT");
-            var normalizedClient = string.IsNullOrWhiteSpace(clientName)
-                ? "lsp"
-                : clientName.Trim().ToLowerInvariant();
-            contextName = $"{normalizedClient}-{Environment.ProcessId}";
-        }
+        var startTimeoutMs = LspEnvironment.ReadInt(
+            variableName: "QUERYLENS_DAEMON_START_TIMEOUT_MS",
+            fallback: 8000,
+            min: 250,
+            max: 120_000);
 
         var connectTimeoutMs = LspEnvironment.ReadInt(
             variableName: "QUERYLENS_DAEMON_CONNECT_TIMEOUT_MS",
             fallback: 2500,
             min: 100,
-            max: 120000);
-        var shutdownDaemonOnDispose = LspEnvironment.ReadBool(
-            "QUERYLENS_DAEMON_SHUTDOWN_ON_DISPOSE",
-            fallback: false);
+            max: 120_000);
 
-        DaemonBackedEngine? daemonEngine = null;
+        // Try to find or start the engine process.
+        int port;
+
+        if (LspEnvironment.TryReadOptionalInt("QUERYLENS_DAEMON_PORT", min: 1, max: 65535) is { } fixedPort)
+        {
+            // Port explicitly provided — trust it and skip discovery.
+            port = fixedPort;
+            log?.Invoke($"engine-port override port={port}");
+        }
+        else
+        {
+            port = await EngineDiscovery.GetOrStartEngineAsync(
+                workspacePath,
+                engineAssemblyPath ?? string.Empty,
+                startTimeoutMs,
+                debugEnabled,
+                log);
+        }
+
+        // Verify we can reach the engine.
+        var client = new EngineHttpClient(port, workspacePath, engineAssemblyPath, startTimeoutMs, debugEnabled);
         try
         {
-            daemonEngine = new DaemonBackedEngine("127.0.0.1", daemonPort.Value, contextName);
-
-            using (var timeoutCts = new CancellationTokenSource(connectTimeoutMs))
-            {
-                await daemonEngine.PingAsync(timeoutCts.Token);
-            }
+            using var cts = new CancellationTokenSource(connectTimeoutMs);
+            await client.PingAsync(cts.Token);
 
             if (debugEnabled)
-                Console.Error.WriteLine($"[QL-LSP] daemon-connection success port={daemonPort.Value} context={contextName}");
+                Console.Error.WriteLine($"[QL-LSP] engine-connection success port={port} workspace={workspacePath}");
 
-            return new ResiliencyDaemonEngine(
-                daemonEngine,
-                workspacePath,
-                daemonExecutablePath,
-                daemonAssemblyPath,
-                contextName,
-                connectTimeoutMs: connectTimeoutMs,
-                startTimeoutMs: daemonStartTimeoutMs,
-                shutdownDaemonOnDispose: shutdownDaemonOnDispose,
-                ownsDaemonLifecycle: daemonOwnedByCurrentLsp,
-                debugLog: debugEnabled ? message => Console.Error.WriteLine($"[QL-LSP] {message}") : null);
+            return client;
         }
         catch (Exception ex)
         {
-            if (daemonEngine is not null)
-            {
-                await daemonEngine.DisposeAsync();
-            }
-
+            await client.DisposeAsync();
             throw new InvalidOperationException(
-                $"Failed to connect to QueryLens daemon on port '{daemonPort.Value}'.", ex);
+                $"Failed to connect to QueryLens engine on port '{port}'.", ex);
         }
     }
 

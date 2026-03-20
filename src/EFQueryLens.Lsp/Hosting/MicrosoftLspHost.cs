@@ -1,6 +1,4 @@
-﻿using EFQueryLens.Core;
 using EFQueryLens.Core.Contracts;
-using EFQueryLens.DaemonClient;
 using EFQueryLens.Lsp;
 using EFQueryLens.Lsp.Handlers;
 using EFQueryLens.Lsp.Services;
@@ -25,22 +23,6 @@ internal static class MicrosoftLspHost
             textSync: new TextDocumentSyncHandler(documentManager),
             debugEnabled: debugEnabled);
 
-        CancellationTokenSource? daemonEventCts = null;
-        Task? daemonEventTask = null;
-
-        if (engine is ResiliencyDaemonEngine resiliencyEngine)
-        {
-            daemonEventCts = new CancellationTokenSource();
-            daemonEventTask = resiliencyEngine.RunDaemonEventSubscriptionAsync(
-                hoverHandler.HandleDaemonEvent,
-                daemonEventCts.Token);
-
-            if (debugEnabled)
-            {
-                Console.Error.WriteLine("[QL-LSP] daemon-subscribe-loop started");
-            }
-        }
-
         using var stdin = Console.OpenStandardInput();
         using var stdout = Console.OpenStandardOutput();
 
@@ -53,35 +35,6 @@ internal static class MicrosoftLspHost
         if (debugEnabled)
             Console.Error.WriteLine("[QL-LSP] listening");
 
-        try
-        {
-            await rpc.Completion;
-        }
-        finally
-        {
-            if (daemonEventCts is not null)
-            {
-                daemonEventCts.Cancel();
-                if (daemonEventTask is not null)
-                {
-                    try
-                    {
-                        await daemonEventTask;
-                    }
-                    catch (OperationCanceledException) when (daemonEventCts.IsCancellationRequested)
-                    {
-                    }
-                    catch (Exception ex)
-                    {
-                        if (debugEnabled)
-                        {
-                            Console.Error.WriteLine($"[QL-LSP] daemon-subscribe-loop failed type={ex.GetType().Name} message={ex.Message}");
-                        }
-                    }
-                }
-
-                daemonEventCts.Dispose();
-            }
-        }
+        await rpc.Completion;
     }
 }

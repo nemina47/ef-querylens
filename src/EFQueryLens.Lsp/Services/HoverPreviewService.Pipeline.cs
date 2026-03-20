@@ -2,7 +2,6 @@ using EFQueryLens.Core;
 using EFQueryLens.Lsp.Parsing;
 using System.Diagnostics;
 using EFQueryLens.Core.Contracts;
-using EFQueryLens.DaemonClient;
 
 namespace EFQueryLens.Lsp.Services;
 
@@ -165,11 +164,6 @@ internal sealed partial class HoverPreviewService
         TranslationRequest request,
         CancellationToken cancellationToken)
     {
-        if (_engine is IQueuedTranslationEngine queuedEngine)
-        {
-            return await queuedEngine.TranslateQueuedAsync(request, cancellationToken);
-        }
-
         var result = await _engine.TranslateAsync(request, cancellationToken);
         var lastTranslationMs = Math.Max(0, result.Metadata.TranslationTime.TotalMilliseconds);
         return new QueuedTranslationResult
