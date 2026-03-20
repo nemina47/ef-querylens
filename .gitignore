@@ -2,6 +2,7 @@
 bin/
 obj/
 out/
+releases/
 
 # Generated VS extension payload (copied from LSP build output)
 src/Plugins/ef-querylens-visualstudio/server/
