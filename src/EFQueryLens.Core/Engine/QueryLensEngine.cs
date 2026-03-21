@@ -148,7 +148,16 @@ public sealed partial class QueryLensEngine : IQueryLensEngine, IDbContextPoolPr
             {
                 var assemblyPath = Path.GetFullPath(request.AssemblyPath);
                 var alcCtx = GetOrRefreshContext(assemblyPath);
-                var dbContextType = alcCtx.FindDbContextType(request.DbContextTypeName);
+                Type dbContextType;
+                try
+                {
+                    dbContextType = alcCtx.FindDbContextType(request.DbContextTypeName);
+                }
+                catch (InvalidOperationException ex) when (QueryEvaluator.IsNoDbContextFoundError(ex))
+                {
+                    QueryEvaluator.TryLoadSiblingAssemblies(alcCtx);
+                    dbContextType = alcCtx.FindDbContextType(request.DbContextTypeName);
+                }
                 var dbInstance = CreateDbContextForInspection(dbContextType, alcCtx);
 
                 var snapshot = BuildModelSnapshot(dbInstance, dbContextType);

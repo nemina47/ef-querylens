@@ -8,31 +8,47 @@ using QueryEvaluator = EFQueryLens.Core.Scripting.Evaluation.QueryEvaluator;
 
 namespace EFQueryLens.Core.Tests.Scripting;
 
+public sealed class QueryEvaluatorFixture : IAsyncLifetime
+{
+    public ProjectAssemblyContext AlcCtx { get; private set; } = null!;
+    public QueryEvaluator Evaluator { get; } = new();
+
+    public Task InitializeAsync()
+    {
+        AlcCtx = new ProjectAssemblyContext(QueryEvaluatorTests.GetSampleMySqlAppDll());
+        return Task.CompletedTask;
+    }
+
+    public Task DisposeAsync()
+    {
+        AlcCtx.Dispose();
+        return Task.CompletedTask;
+    }
+}
+
 /// <summary>
 /// Integration-style unit tests for <see cref="QueryEvaluator"/>.
 ///
 /// Sample fixtures are copied into isolated subfolders under the test output dir
 /// so transitive package DLLs do not overwrite each other.
 /// </summary>
-[Collection("AssemblyLoadContextIsolation")]
-public class QueryEvaluatorTests : IDisposable
+[Collection("QueryEvaluatorIsolation")]
+public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
 {
     private const string DefaultMySqlDbContextType = "SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext";
 
     private readonly ProjectAssemblyContext _alcCtx;
     private readonly QueryEvaluator _evaluator;
 
-    public QueryEvaluatorTests()
+    public QueryEvaluatorTests(QueryEvaluatorFixture fixture)
     {
-        _alcCtx    = new ProjectAssemblyContext(GetSampleMySqlAppDll());
-        _evaluator = new QueryEvaluator();
+        _alcCtx    = fixture.AlcCtx;
+        _evaluator = fixture.Evaluator;
     }
-
-    public void Dispose() => _alcCtx.Dispose();
 
     // ─── Helper ───────────────────────────────────────────────────────────────
 
-    private static string GetSampleMySqlAppDll()
+    internal static string GetSampleMySqlAppDll()
     {
         var dir = Path.GetDirectoryName(typeof(QueryEvaluatorTests).Assembly.Location)!;
         var dll = ResolveSampleDll(dir, "SampleMySqlApp", "SampleMySqlApp.dll");

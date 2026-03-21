@@ -1,13 +1,42 @@
 using EntityFrameworkCore.Projectables;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Design;
+
+// ReSharper disable once CheckNamespace
+namespace EFQueryLens.Core
+{
+    public interface IQueryLensDbContextFactory<out TContext>
+        where TContext : DbContext
+    {
+        TContext CreateOfflineContext();
+    }
+}
 
 namespace SampleMySqlApp.Infrastructure.Persistence
 {
-    public sealed class MySqlReportingDbContextFactory :
-        IDesignTimeDbContextFactory<MySqlReportingDbContext>
+    public sealed class MySqlAppDbContextFactory :
+        EFQueryLens.Core.IQueryLensDbContextFactory<MySqlAppDbContext>
     {
-        public MySqlReportingDbContext CreateDbContext(string[] args)
+        public MySqlAppDbContext CreateOfflineContext()
+        {
+            return new MySqlAppDbContext(CreateMySqlOptions<MySqlAppDbContext>());
+        }
+
+        private static DbContextOptions<TContext> CreateMySqlOptions<TContext>()
+            where TContext : DbContext
+        {
+            var connectionString = "Server=ef_querylens_offline;Database=ef_querylens_offline;User Id=ef_querylens_offline;Password=ef_querylens_offline";
+            return new DbContextOptionsBuilder<TContext>()
+                .UseMySql(connectionString, new MySqlServerVersion(new Version(8, 0, 36)),
+                    mySql => mySql.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
+                .UseProjectables()
+                .Options;
+        }
+    }
+
+    public sealed class MySqlReportingDbContextFactory :
+        EFQueryLens.Core.IQueryLensDbContextFactory<MySqlReportingDbContext>
+    {
+        public MySqlReportingDbContext CreateOfflineContext()
         {
             return new MySqlReportingDbContext(CreateMySqlOptions<MySqlReportingDbContext>());
         }
@@ -15,46 +44,12 @@ namespace SampleMySqlApp.Infrastructure.Persistence
         private static DbContextOptions<TContext> CreateMySqlOptions<TContext>()
             where TContext : DbContext
         {
-            // Query preview only needs provider metadata/model; no live DB call is made.
             var connectionString = "Server=ef_querylens_offline;Database=ef_querylens_offline;User Id=ef_querylens_offline;Password=ef_querylens_offline";
-
-            var options = new DbContextOptionsBuilder<TContext>()
-                .UseMySql(
-                    connectionString,
-                    new MySqlServerVersion(new Version(8, 0, 36)),
+            return new DbContextOptionsBuilder<TContext>()
+                .UseMySql(connectionString, new MySqlServerVersion(new Version(8, 0, 36)),
                     mySql => mySql.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
                 .UseProjectables()
                 .Options;
-
-            return options;
         }
     }
-
-    public sealed class MySqlAppDbContextFactory :
-        IDesignTimeDbContextFactory<MySqlAppDbContext>
-    {
-        public MySqlAppDbContext CreateDbContext(string[] args)
-        {
-            return new MySqlAppDbContext(CreateMySqlOptions<MySqlAppDbContext>());
-        }
-
-
-        private static DbContextOptions<TContext> CreateMySqlOptions<TContext>()
-            where TContext : DbContext
-        {
-            // Query preview only needs provider metadata/model; no live DB call is made.
-            var connectionString = "Server=ef_querylens_offline;Database=ef_querylens_offline;User Id=ef_querylens_offline;Password=ef_querylens_offline";
-
-            var options = new DbContextOptionsBuilder<TContext>()
-                .UseMySql(
-                    connectionString,
-                    new MySqlServerVersion(new Version(8, 0, 36)),
-                    mySql => mySql.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
-                .UseProjectables()
-                .Options;
-
-            return options;
-        }
-    }
-
 }

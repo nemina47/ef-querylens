@@ -23,10 +23,9 @@ public sealed partial class ProjectAssemblyContext : IDisposable
         "testhost",
     ];
 
-    // We hold the ALC in a WeakReference so that after Dispose() + GC the ALC
-    // can actually be collected. Collectible ALCs are GC-rooted only by the
-    // types loaded into them — not by strong CLR handles.
-    private readonly WeakReference<IsolatedLoadContext> _contextRef;
+    // Strong reference keeps the ALC alive as long as this context is alive.
+    // Cleared in Dispose() to allow the collectible ALC to be GC'd after unload.
+    private IsolatedLoadContext? _ctx;
     private bool _disposed;
 
     /// <summary>Absolute path to the primary assembly that was loaded.</summary>
@@ -47,9 +46,8 @@ public sealed partial class ProjectAssemblyContext : IDisposable
         EnsureExecutableAssemblyArtifactsExist(AssemblyPath);
         AssemblyTimestamp = File.GetLastWriteTimeUtc(AssemblyPath);
 
-        var ctx = new IsolatedLoadContext(AssemblyPath);
-        _contextRef = new WeakReference<IsolatedLoadContext>(ctx);
-        ctx.LoadFromAssemblyPath(AssemblyPath);
+        _ctx = new IsolatedLoadContext(AssemblyPath);
+        _ctx.LoadFromAssemblyPath(AssemblyPath);
 
         EagerLoadBinDirAssemblies();
     }
@@ -99,7 +97,7 @@ public sealed partial class ProjectAssemblyContext : IDisposable
     {
         EnsureNotDisposed();
 
-        if (!_contextRef.TryGetTarget(out var ctx))
+        if (_ctx is not {} ctx)
             throw new ObjectDisposedException(nameof(ProjectAssemblyContext));
 
         var fullPath = Path.GetFullPath(assemblyPath);
@@ -117,7 +115,7 @@ public sealed partial class ProjectAssemblyContext : IDisposable
     {
         EnsureNotDisposed();
 
-        if (!_contextRef.TryGetTarget(out var ctx))
+        if (_ctx is not {} ctx)
             throw new ObjectDisposedException(nameof(ProjectAssemblyContext));
 
         return ctx.LoadFromStream(stream);
@@ -135,8 +133,8 @@ public sealed partial class ProjectAssemblyContext : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        if (_contextRef.TryGetTarget(out var ctx))
-            ctx.Unload();
+        _ctx?.Unload();
+        _ctx = null;
     }
 
     /// <summary>
@@ -147,7 +145,7 @@ public sealed partial class ProjectAssemblyContext : IDisposable
     public IDisposable EnterContextualReflection()
     {
         EnsureNotDisposed();
-        return _contextRef.TryGetTarget(out var ctx)
+        return _ctx is {} ctx
             ? ctx.EnterContextualReflection()
             : AssemblyLoadContext.Default.EnterContextualReflection();
     }
@@ -162,7 +160,7 @@ public sealed partial class ProjectAssemblyContext : IDisposable
         get
         {
             EnsureNotDisposed();
-            return _contextRef.TryGetTarget(out var ctx)
+            return _ctx is {} ctx
                 ? ctx.Assemblies
                 : Enumerable.Empty<Assembly>();
         }
@@ -173,11 +171,7 @@ public sealed partial class ProjectAssemblyContext : IDisposable
     /// verification in tests. Callers must null all strong refs and force GC
     /// after Dispose() to observe IsAlive → false.
     /// </summary>
-    internal WeakReference GetAlcWeakReference()
-    {
-        _contextRef.TryGetTarget(out var ctx);
-        return new WeakReference(ctx);
-    }
+    internal WeakReference GetAlcWeakReference() => new(_ctx);
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 

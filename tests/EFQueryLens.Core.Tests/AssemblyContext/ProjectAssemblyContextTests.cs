@@ -10,7 +10,7 @@ namespace EFQueryLens.Core.Tests.AssemblyContext;
 /// ReferenceOutputAssembly="false". We locate it relative to this assembly's
 /// location at runtime.
 /// </summary>
-[Collection("AssemblyLoadContextIsolation")]
+[Collection("ProjectAssemblyContextIsolation")]
 public class ProjectAssemblyContextTests
 {
     // ─── Helpers ─────────────────────────────────────────────────────────────
