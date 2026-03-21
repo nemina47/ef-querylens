@@ -103,6 +103,8 @@ public sealed partial class QueryEvaluator
             sb.Append(kv.Key).Append('=').Append(kv.Value).Append('\0');
         foreach (var s in request.UsingStaticTypes)
             sb.Append(s).Append('\0');
+        foreach (var kv in request.LocalVariableTypes.OrderBy(x => x.Key, StringComparer.Ordinal))
+            sb.Append(kv.Key).Append(':').Append(kv.Value).Append('\0');
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(sb.ToString())))[..16];
     }

@@ -70,6 +70,7 @@ internal sealed partial class HoverPreviewService
         }
 
         var usingContext = LspSyntaxHelper.ExtractUsingContext(sourceText);
+        var localVariableTypes = LspSyntaxHelper.ExtractLocalVariableTypesAtPosition(sourceText, line, character);
 
         try
         {
@@ -84,6 +85,7 @@ internal sealed partial class HoverPreviewService
                 AdditionalImports = usingContext.Imports.ToArray(),
                 UsingAliases = new Dictionary<string, string>(usingContext.Aliases, StringComparer.Ordinal),
                 UsingStaticTypes = usingContext.StaticTypes.ToArray(),
+                LocalVariableTypes = localVariableTypes,
             };
 
             var queued = await TranslateQueuedOrImmediateAsync(translationRequest, cancellationToken);
