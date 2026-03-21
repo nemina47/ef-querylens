@@ -1,26 +1,17 @@
 using EntityFrameworkCore.Projectables;
 using Microsoft.EntityFrameworkCore;
-
-// ReSharper disable once CheckNamespace
-namespace EFQueryLens.Core
-{
-    public interface IQueryLensDbContextFactory<out TContext>
-        where TContext : DbContext
-    {
-        TContext CreateOfflineContext();
-    }
-}
+using Microsoft.EntityFrameworkCore.Design;
 
 namespace SampleMySqlApp.Infrastructure.Persistence
 {
-    public sealed class MySqlReportingQueryLensFactory :
-        EFQueryLens.Core.IQueryLensDbContextFactory<MySqlReportingDbContext>
+    public sealed class MySqlReportingDbContextFactory :
+        IDesignTimeDbContextFactory<MySqlReportingDbContext>
     {
-        public MySqlReportingDbContext CreateOfflineContext()
+        public MySqlReportingDbContext CreateDbContext(string[] args)
         {
             return new MySqlReportingDbContext(CreateMySqlOptions<MySqlReportingDbContext>());
         }
-    
+
         private static DbContextOptions<TContext> CreateMySqlOptions<TContext>()
             where TContext : DbContext
         {
@@ -39,15 +30,15 @@ namespace SampleMySqlApp.Infrastructure.Persistence
         }
     }
 
-    public sealed class MySqlAppQueryLensFactory :
-        EFQueryLens.Core.IQueryLensDbContextFactory<MySqlAppDbContext>
+    public sealed class MySqlAppDbContextFactory :
+        IDesignTimeDbContextFactory<MySqlAppDbContext>
     {
-        public MySqlAppDbContext CreateOfflineContext()
+        public MySqlAppDbContext CreateDbContext(string[] args)
         {
             return new MySqlAppDbContext(CreateMySqlOptions<MySqlAppDbContext>());
         }
 
-    
+
         private static DbContextOptions<TContext> CreateMySqlOptions<TContext>()
             where TContext : DbContext
         {

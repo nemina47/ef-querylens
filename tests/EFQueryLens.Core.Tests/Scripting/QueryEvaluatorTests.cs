@@ -165,7 +165,6 @@ public class QueryEvaluatorTests : IDisposable
         Assert.True(result.Success, result.ErrorMessage);
         Assert.NotNull(result.Sql);
         Assert.Contains("Customers", result.Sql, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("querylens-factory", result.Metadata.CreationStrategy);
     }
 
     [Fact]
