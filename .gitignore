@@ -37,6 +37,7 @@ src/Plugins/ef-querylens-rider/.intellijPlatform/
 # Test results
 TestResults/
 coverage/
+coverage-output/
 *.trx
 *.coveragexml
 
