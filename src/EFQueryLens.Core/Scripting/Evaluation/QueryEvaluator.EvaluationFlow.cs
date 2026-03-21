@@ -118,7 +118,6 @@ public sealed partial class QueryEvaluator
 
                 // 5. Build known namespace/type index for import filtering (cached by assemblySetHash).
                 var (knownNamespaces, knownTypes) = GetOrBuildNamespaceTypeIndex(
-                    alcCtx.AssemblyPath,
                     asmSetHash,
                     compilationAssemblies);
 
