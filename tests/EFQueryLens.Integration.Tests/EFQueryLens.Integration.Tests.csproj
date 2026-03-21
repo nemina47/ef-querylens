@@ -26,6 +26,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\EFQueryLens.Core\EFQueryLens.Core.csproj" />
+    <ProjectReference Include="..\..\src\EFQueryLens.Lsp\EFQueryLens.Lsp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
 </Project>

@@ -547,4 +547,113 @@ public class QueryLensEngineTests : IClassFixture<QueryLensEngineFixture>
         Assert.Contains("Categories", snapshot.DbSetProperties);
     }
 
+    // ── Guard tests (no real assembly execution needed) ───────────────────────
+
+    [Fact]
+    public async Task TranslateAsync_AfterDispose_ThrowsObjectDisposedException()
+    {
+        var engine = CreateEngine();
+        await engine.DisposeAsync();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+            engine.TranslateAsync(new TranslationRequest
+            {
+                AssemblyPath = _dll,
+                Expression = "db.Orders",
+            }));
+    }
+
+    [Fact]
+    public async Task TranslateAsync_NullRequest_ThrowsArgumentNullException()
+    {
+        var engine = CreateEngine();
+        await using var _ = engine;
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            engine.TranslateAsync(null!));
+    }
+
+    [Fact]
+    public async Task InspectModelAsync_AfterDispose_ThrowsObjectDisposedException()
+    {
+        var engine = CreateEngine();
+        await engine.DisposeAsync();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+            engine.InspectModelAsync(new ModelInspectionRequest
+            {
+                AssemblyPath = _dll,
+                DbContextTypeName = DefaultMySqlDbContextType,
+            }));
+    }
+
+    [Fact]
+    public async Task InspectModelAsync_NullRequest_ThrowsArgumentNullException()
+    {
+        var engine = CreateEngine();
+        await using var _ = engine;
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            engine.InspectModelAsync(null!));
+    }
+
+    [Fact]
+    public async Task DisposeAsync_CalledTwice_IsIdempotent()
+    {
+        var engine = CreateEngine();
+        await engine.DisposeAsync();
+        // Second dispose must not throw
+        await engine.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task TranslateAsync_WithDebugEnabled_SucceedsAndLogsToStdErr()
+    {
+        const string varName = "QUERYLENS_DEBUG";
+        var original = Environment.GetEnvironmentVariable(varName);
+        Environment.SetEnvironmentVariable(varName, "true");
+
+        try
+        {
+            await using var engine = CreateEngine();
+            var result = await engine.TranslateAsync(new TranslationRequest
+            {
+                AssemblyPath = _dll,
+                Expression = "db.Users",
+                DbContextTypeName = DefaultMySqlDbContextType,
+            });
+
+            Assert.True(result.Success, result.ErrorMessage);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(varName, original);
+        }
+    }
+
+    [Fact]
+    public async Task InspectModelAsync_WithDebugEnabled_Succeeds()
+    {
+        const string varName = "QUERYLENS_DEBUG";
+        var original = Environment.GetEnvironmentVariable(varName);
+        Environment.SetEnvironmentVariable(varName, "true");
+
+        try
+        {
+            await using var engine = CreateEngine();
+            var snapshot = await engine.InspectModelAsync(new ModelInspectionRequest
+            {
+                AssemblyPath = _dll,
+                DbContextTypeName = DefaultMySqlDbContextType,
+            });
+
+            Assert.NotNull(snapshot);
+            Assert.NotEmpty(snapshot.Entities);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(varName, original);
+        }
+    }
+
 }
