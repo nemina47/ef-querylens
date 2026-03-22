@@ -13,8 +13,59 @@ public static partial class AssemblyResolver
         bool LooksLikeRefOrObj);
 
     /// <summary>
+    /// Scans the host project's source files for an <c>IQueryLensDbContextFactory&lt;T&gt;</c>
+    /// declaration and returns the concrete DbContext type name <c>T</c>.
+    ///
+    /// This is the authoritative way to resolve the DbContext type: the type parameter is set
+    /// explicitly by the user and is always the concrete <see cref="DbContext"/> subclass —
+    /// regardless of how the context is injected elsewhere (e.g. via an interface).
+    ///
+    /// Returns <c>null</c> when no factory declaration is found, the project directory cannot
+    /// be derived from <paramref name="assemblyDllPath"/>, or any I/O error occurs.
+    /// </summary>
+    internal static string? TryExtractDbContextTypeFromFactory(string assemblyDllPath)
+    {
+        // Derive the project source root from the DLL path by walking up until we find a .csproj.
+        // Standard layout: {projectDir}/bin/{config}/{tfm}/Assembly.dll
+        var dir = Path.GetDirectoryName(assemblyDllPath);
+        while (!string.IsNullOrEmpty(dir))
+        {
+            try
+            {
+                if (Directory.GetFiles(dir, "*.csproj", SearchOption.TopDirectoryOnly).Length > 0)
+                    break;
+            }
+            catch { /* continue */ }
+
+            dir = Path.GetDirectoryName(dir);
+        }
+
+        if (string.IsNullOrEmpty(dir))
+            return null;
+
+        foreach (var file in EnumerateProjectSourceFiles(dir))
+        {
+            try
+            {
+                var text = File.ReadAllText(file);
+                var match = Regex.Match(
+                    text,
+                    @"IQueryLensDbContextFactory\s*<\s*([\w.]+)\s*>",
+                    RegexOptions.None,
+                    TimeSpan.FromSeconds(1));
+
+                if (match.Success)
+                    return match.Groups[1].Value.Trim();
+            }
+            catch { /* ignore unreadable files */ }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Returns true if the project directory contains a source file with an
-    /// IDesignTimeDbContextFactory implementation — i.e. the user explicitly set
+    /// IQueryLensDbContextFactory implementation — i.e. the user explicitly set
     /// this project up as the QueryLens host.
     /// </summary>
     private static bool HasQueryLensFactory(string projectDir)
@@ -24,7 +75,7 @@ public static partial class AssemblyResolver
             try
             {
                 var text = File.ReadAllText(file);
-                if (text.Contains("IDesignTimeDbContextFactory<", StringComparison.Ordinal))
+                if (text.Contains("IQueryLensDbContextFactory<", StringComparison.Ordinal))
                     return true;
             }
             catch

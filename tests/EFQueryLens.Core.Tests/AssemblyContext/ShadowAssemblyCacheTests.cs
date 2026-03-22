@@ -312,25 +312,29 @@ public class ShadowAssemblyCacheTests : IDisposable
         // Set max age to 1 hour so a bundle backdated to 2 hours ago falls outside the window.
         Environment.SetEnvironmentVariable("QUERYLENS_SHADOW_CACHE_MAX_AGE_HOURS", "1");
 
-        var (sourceDir, assemblyPath) = CreateFakeSourceDir();
         try
         {
             var cache = new ShadowAssemblyCache(debugEnabled: false);
-            var shadowPath = cache.ResolveOrCreateBundle(assemblyPath);
-            var bundlePath = Path.GetDirectoryName(shadowPath)!;
 
-            // Backdate the bundle so it looks older than the max-age cutoff.
-            Directory.SetLastWriteTimeUtc(bundlePath, DateTime.UtcNow.AddHours(-2));
+            // Create a fake stale bundle directory directly inside the bundle root, without
+            // going through ResolveOrCreateBundle, to avoid the background TouchDirectory/Task.Run
+            // interactions that can mask the backdated timestamp on Windows.
+            var bundleRoot = Path.Combine(_shadowRoot, "bundles");
+            var fakeBundlePath = Path.Combine(bundleRoot, "stale-bundle-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(fakeBundlePath);
+            File.WriteAllBytes(Path.Combine(fakeBundlePath, "FakeApp.dll"), [0x4D, 0x5A]);
+
+            // Backdate to 2 hours ago — outside the 1-hour cutoff window.
+            Directory.SetLastWriteTimeUtc(fakeBundlePath, DateTime.UtcNow.AddHours(-2));
 
             cache.RunStartupCleanup();
 
-            Assert.False(Directory.Exists(bundlePath),
+            Assert.False(Directory.Exists(fakeBundlePath),
                 "Bundle older than max-age cutoff should have been deleted by cleanup.");
         }
         finally
         {
             Environment.SetEnvironmentVariable("QUERYLENS_SHADOW_CACHE_MAX_AGE_HOURS", prevMaxAge);
-            try { Directory.Delete(sourceDir, recursive: true); } catch { }
         }
     }
 

@@ -196,6 +196,56 @@ public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
         }
     }
 
+    // ─── Expression<Func<...>> as LocalVariableType ───────────────────────────
+
+    [Fact]
+    public async Task Evaluate_WhereClauseReceivesExpressionPredicateVariable_ReturnsSql()
+    {
+        // Pattern: Expression<Func<T, bool>> filter declared as a local variable, then
+        // passed to .Where(filter). The type ends up in LocalVariableTypes.
+        // BuildStubFromTypeName must generate "_ => true" (a valid predicate), not
+        // GetUninitializedObject (which produces an expression tree with null internal nodes
+        // that EF Core cannot traverse to generate SQL).
+        var result = await _evaluator.EvaluateAsync(_alcCtx, new TranslationRequest
+        {
+            AssemblyPath      = _alcCtx.AssemblyPath,
+            DbContextTypeName = DefaultMySqlDbContextType,
+            Expression        = "db.Orders.Where(filter).ToListAsync(ct)",
+            LocalVariableTypes = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                // Fully-qualified type as it arrives from CollectParametersFromScope / LSP.
+                ["filter"] = "System.Linq.Expressions.Expression<System.Func<SampleMySqlApp.Domain.Entities.Order, bool>>",
+            },
+        });
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.Contains("Orders", result.Sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Evaluate_WhereClauseReceivesShortExpressionPredicateVariable_ReturnsSql()
+    {
+        // Same as above but with the short-form type name (no namespace prefix) as produced
+        // when the source file has a "using System.Linq.Expressions;" directive.
+        // AdditionalImports mirrors what ExtractUsingContext would collect from the source file.
+        var result = await _evaluator.EvaluateAsync(_alcCtx, new TranslationRequest
+        {
+            AssemblyPath      = _alcCtx.AssemblyPath,
+            DbContextTypeName = DefaultMySqlDbContextType,
+            Expression        = "db.Orders.Where(filter).ToListAsync(ct)",
+            AdditionalImports = ["System.Linq.Expressions"],
+            LocalVariableTypes = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["filter"] = "Expression<Func<SampleMySqlApp.Domain.Entities.Order, bool>>",
+            },
+        });
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.Contains("Orders", result.Sql, StringComparison.OrdinalIgnoreCase);
+    }
+
     // ─── Result shape ─────────────────────────────────────────────────────────
 
     [Fact]

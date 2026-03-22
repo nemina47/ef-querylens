@@ -468,6 +468,64 @@ public class LspSyntaxHelperTests
     }
 
     [Fact]
+    public void TryExtractLinqExpression_HoverInsideLambdaArgOfNonLinqMethod_ReturnsNull()
+    {
+        // Hovering inside "x => new Dto { ... }" that is an argument to a wrapper method
+        // (not a LINQ chain) previously caused CS0149 by extracting the entire call site
+        // as a "LINQ expression" with the method name as the DbContext variable name.
+        var source = """
+            var result = await service.GetOrdersAsync(
+                customerId,
+                x => new OrderSummaryDto
+                {
+                    Id = x.Id,
+                    Total = x.Total
+                },
+                ct);
+            """;
+
+        var (line, character) = FindPosition(source, "Total = x.Total");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName);
+
+        Assert.Null(expression);
+        Assert.Null(contextVariableName);
+    }
+
+    [Fact]
+    public void TryExtractLinqExpression_WhereClauseReceivesExpressionVariable_ExtractsChainAndIncludesVariable()
+    {
+        // Where(filter) / Select(selector) with a pre-built Expression<Func<...>> variable
+        // is a common EF Core pattern. The extractor must pass the variable name through
+        // so the engine can synthesize a proper lambda stub for it.
+        var source = """
+            Expression<Func<Order, bool>> filter = o => o.IsNotDeleted;
+
+            var result = await dbContext.Orders
+                .Where(filter)
+                .ToListAsync(ct);
+            """;
+
+        var (line, character) = FindPosition(source, "ToListAsync");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName);
+
+        Assert.NotNull(expression);
+        Assert.Equal("dbContext", contextVariableName);
+        Assert.Contains("dbContext.Orders", expression, StringComparison.Ordinal);
+        Assert.Contains("filter", expression, StringComparison.Ordinal);
+        Assert.Contains("ToListAsync", expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ExtractUsingContext_CollectsImportsAliasesAndStaticUsings()
     {
         var source = """

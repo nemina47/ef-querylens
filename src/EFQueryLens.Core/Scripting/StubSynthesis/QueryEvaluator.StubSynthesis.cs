@@ -107,7 +107,22 @@ public sealed partial class QueryEvaluator
                 => $"{tn[..^2]}[] {varName} = System.Array.Empty<{tn[..^2]}>();",
             var tn when TryExtractCollectionElementType(tn, out var elem)
                 => $"System.Collections.Generic.List<{elem}> {varName} = new() {{ default({elem}) }};",
-            var tn => $"{tn} {varName} = default!;",
+            // Expression<Func<...>> — generate a typed lambda rather than GetUninitializedObject.
+            // An uninitialized Expression has null internal nodes (Body, Parameters, etc.);
+            // EF Core walks the expression tree to produce SQL and will throw on any null node.
+            // A proper lambda compiles to a valid expression tree that EF Core can translate:
+            //   predicate (bool return)  → _ => true   (matches all rows — safe for WHERE)
+            //   projection (other return) → _ => default! (typed null — best-effort for SELECT)
+            var tn when IsExpressionFuncTypeName(tn)
+                => IsBoolPredicateExpression(tn)
+                    ? $"{tn} {varName} = _ => true;"
+                    : $"{tn} {varName} = _ => default!;",
+            // Unknown complex type (user-defined DTO, entity, etc.).
+            // Use GetUninitializedObject so the instance is non-null: EF Core must be able to
+            // evaluate captured parameter expressions (e.g. model.PlanningCaseId) at runtime,
+            // and a null reference throws before SQL is ever produced.
+            // Strip nullable-reference-type annotation ('?') — typeof() has no CLR distinction for ref types.
+            var tn => $"var {varName} = ({tn.TrimEnd('?')})global::System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof({tn.TrimEnd('?')}));",
         };
     }
 
@@ -130,6 +145,28 @@ public sealed partial class QueryEvaluator
 
         elementType = inner;
         return true;
+    }
+
+    /// <summary>
+    /// Returns true when <paramref name="typeName"/> is an <c>Expression&lt;Func&lt;...&gt;&gt;</c>
+    /// type, either with or without the full <c>System.Linq.Expressions</c> namespace prefix.
+    /// </summary>
+    private static bool IsExpressionFuncTypeName(string typeName) =>
+        typeName.Contains("Expression<", StringComparison.Ordinal)
+        && typeName.Contains("Func<", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Returns true when the <c>Func&lt;&gt;</c>'s return type is <c>bool</c> — i.e. the
+    /// expression is a predicate suitable for <c>Where</c> / <c>Any</c> / <c>Count</c>.
+    /// Detects by checking that the full type name ends with <c>, bool&gt;&gt;</c>
+    /// (the inner <c>&gt;</c> closes <c>Func&lt;</c>, the outer closes <c>Expression&lt;</c>).
+    /// </summary>
+    private static bool IsBoolPredicateExpression(string typeName)
+    {
+        var t = typeName.TrimEnd('?');
+        return t.EndsWith(", bool>>", StringComparison.Ordinal)
+            || t.EndsWith(",bool>>", StringComparison.Ordinal)
+            || t.EndsWith(", bool?>>", StringComparison.Ordinal);
     }
 
 }

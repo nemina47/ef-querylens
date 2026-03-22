@@ -46,6 +46,21 @@ public static partial class LspSyntaxHelper
             targetExpression = (ExpressionSyntax)targetExpression.Parent;
         }
 
+        // Guard: reject expressions that are not LINQ query chains.
+        // Without this, hovering inside a lambda argument of a non-LINQ method call
+        // (e.g. "x => new Dto{...}" passed to GetFooAsync(id, x => new Dto{...}, ct))
+        // causes the entire call site to be extracted as the LINQ expression, with the
+        // method name mis-identified as the DbContext variable name. The engine then
+        // declares a variable using that name and later tries to invoke it as a method,
+        // producing CS0149: Method name expected.
+        // GetInvocationChainMethodNames only yields for member-access chains (a.b.c()),
+        // so a bare call like GetFooAsync(...) yields nothing → IsLikelyQueryChain = false.
+        if (targetExpression is InvocationExpressionSyntax finalInvocation
+            && !IsLikelyQueryChain(finalInvocation))
+        {
+            return null;
+        }
+
         // Inline local IQueryable variables for non-terminal chains too, so
         // expressions like auditTrailQuery.ApplyPaging(...).ToListAsync(...) are
         // rooted back to dbContext.* and keep DbContext discovery deterministic.

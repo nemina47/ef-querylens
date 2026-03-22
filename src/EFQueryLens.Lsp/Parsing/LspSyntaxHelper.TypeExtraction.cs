@@ -93,14 +93,35 @@ public static partial class LspSyntaxHelper
 
         if (paramList is null) return;
 
+        // Collect open generic type parameter names so we can skip method parameters whose
+        // declared types reference them. For example, in GetResults<TResult>(...,
+        // Expression<Func<Entity, TResult>> selector), the string "TResult" cannot be
+        // resolved inside the eval script and causes a compile error. Excluding the parameter
+        // from LocalVariableTypes lets the existing Expression<Func<...>> heuristic in
+        // BuildStubDeclaration generate a correct "_ => default!" stub instead.
+        var openTypeParams = scope switch
+        {
+            MethodDeclarationSyntax { TypeParameterList: { } tpl } =>
+                tpl.Parameters.Select(p => p.Identifier.ValueText).ToHashSet(StringComparer.Ordinal),
+            LocalFunctionStatementSyntax { TypeParameterList: { } tpl } =>
+                tpl.Parameters.Select(p => p.Identifier.ValueText).ToHashSet(StringComparer.Ordinal),
+            _ => null,
+        };
+
         foreach (var param in paramList.Parameters)
         {
             var paramName = param.Identifier.ValueText;
             if (result.ContainsKey(paramName) || param.Type is null) continue;
 
             var typeName = param.Type.ToString();
-            if (!string.IsNullOrWhiteSpace(typeName))
-                result[paramName] = typeName;
+            if (string.IsNullOrWhiteSpace(typeName)) continue;
+
+            // Skip parameters whose declared type contains an open generic type parameter name.
+            if (openTypeParams is not null &&
+                openTypeParams.Any(tp => typeName.Contains(tp, StringComparison.Ordinal)))
+                continue;
+
+            result[paramName] = typeName;
         }
     }
 

@@ -71,6 +71,10 @@ internal sealed partial class HoverPreviewService
 
         var usingContext = LspSyntaxHelper.ExtractUsingContext(sourceText);
         var localVariableTypes = LspSyntaxHelper.ExtractLocalVariableTypesAtPosition(sourceText, line, character);
+        // Factory declaration is authoritative (T in IQueryLensDbContextFactory<T> is always concrete).
+        // Fall back to the declared type of the context variable for projects without a factory.
+        var dbContextTypeName = AssemblyResolver.TryExtractDbContextTypeFromFactory(targetAssembly)
+            ?? LspSyntaxHelper.TryResolveDbContextTypeName(sourceText, contextVariableName);
 
         try
         {
@@ -82,6 +86,7 @@ internal sealed partial class HoverPreviewService
                 AssemblyPath = targetAssembly,
                 Expression = expression,
                 ContextVariableName = contextVariableName,
+                DbContextTypeName = dbContextTypeName,
                 AdditionalImports = usingContext.Imports.ToArray(),
                 UsingAliases = new Dictionary<string, string>(usingContext.Aliases, StringComparer.Ordinal),
                 UsingStaticTypes = usingContext.StaticTypes.ToArray(),
