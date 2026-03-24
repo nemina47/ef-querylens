@@ -45,7 +45,8 @@ internal sealed partial class HoverPreviewService
         int line,
         int character,
         TranslationMetadata? metadata,
-        double avgTranslationMs = 0)
+        double avgTranslationMs = 0,
+        bool useBrowserSafeActionLinks = false)
     {
         var providerName = metadata?.ProviderName;
         var statements = BuildFormattedStatements(commands, providerName);
@@ -55,9 +56,22 @@ internal sealed partial class HoverPreviewService
         var warningLines = BuildWarningLines(warnings);
 
         var queryParams = $"uri={Uri.EscapeDataString(uri)}&line={line}&character={character}";
-        var copyLink = $"[Copy SQL](efquerylens://copySql?{queryParams})";
-        var openLink = $"[Open SQL](efquerylens://openSqlEditor?{queryParams})";
-        var recalculateLink = $"[Reanalyze](efquerylens://recalculate?{queryParams})";
+        string copyUrl, openUrl, recalculateUrl;
+        if (useBrowserSafeActionLinks)
+        {
+            copyUrl = $"efquerylens://copysql?{queryParams}";
+            openUrl = $"efquerylens://opensqleditor?{queryParams}";
+            recalculateUrl = $"efquerylens://recalculate?{queryParams}";
+        }
+        else
+        {
+            copyUrl = $"efquerylens://copySql?{queryParams}";
+            openUrl = $"efquerylens://openSqlEditor?{queryParams}";
+            recalculateUrl = $"efquerylens://recalculate?{queryParams}";
+        }
+        var copyLink = $"[Copy SQL]({copyUrl})";
+        var openLink = $"[Open SQL]({openUrl})";
+        var recalculateLink = $"[Reanalyze]({recalculateUrl})";
 
         // Plain Markdown only (no HTML entities) so VS Code, VS, and Rider all render the same.
         var header = $"**EF QueryLens** · {commands.Count} {statementWord}";

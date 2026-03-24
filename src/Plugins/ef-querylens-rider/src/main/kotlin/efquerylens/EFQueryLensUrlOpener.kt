@@ -26,6 +26,9 @@ import javax.swing.JScrollPane
 import javax.swing.JTextArea
 
 class EFQueryLensUrlOpener : UrlOpener() {
+    private companion object {
+        private const val BrowserSafeHost = "efquerylens.local"
+    }
 
     private data class StructuredStatement(
         val sql: String,
@@ -50,7 +53,15 @@ class EFQueryLensUrlOpener : UrlOpener() {
     )
 
     override fun openUrl(browser: WebBrowser, url: String, project: Project?): Boolean {
-        if (!url.startsWith("efquerylens://", ignoreCase = true)) {
+        if (!isQueryLensActionUrl(url)) {
+            return false
+        }
+
+        return handleQueryLensActionUrl(url, project)
+    }
+
+    internal fun handleQueryLensActionUrl(url: String, project: Project?): Boolean {
+        if (!isQueryLensActionUrl(url)) {
             return false
         }
 
@@ -115,9 +126,11 @@ class EFQueryLensUrlOpener : UrlOpener() {
             ?.lowercase()
             ?.trimEnd('/')
 
+        val isLegacyScheme = uri.scheme.equals("efquerylens", ignoreCase = true)
         val raw = when {
-            !host.isNullOrBlank() -> host
+            isLegacyScheme && !host.isNullOrBlank() -> host
             !path.isNullOrBlank() -> path
+            !host.isNullOrBlank() -> host
             else -> null
         } ?: return null
 
@@ -127,6 +140,16 @@ class EFQueryLensUrlOpener : UrlOpener() {
             "recalculate", "reanalyze", "reanalyse" -> "recalculate"
             else -> null
         }
+    }
+
+    private fun isQueryLensActionUrl(url: String): Boolean {
+        if (url.startsWith("efquerylens://", ignoreCase = true)) {
+            return true
+        }
+
+        val uri = runCatching { URI(url) }.getOrNull() ?: return false
+        val isHttp = uri.scheme.equals("http", ignoreCase = true) || uri.scheme.equals("https", ignoreCase = true)
+        return isHttp && uri.host.equals(BrowserSafeHost, ignoreCase = true)
     }
 
     private fun resolveProject(project: Project?, fileUri: String): Project? {

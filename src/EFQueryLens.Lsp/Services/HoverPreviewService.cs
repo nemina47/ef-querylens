@@ -37,11 +37,16 @@ internal sealed record QueryLensStructuredHoverResult(
 internal sealed partial class HoverPreviewService
 {
     private readonly IQueryLensEngine _engine;
+    private readonly bool _useBrowserSafeHoverActionLinks;
     private bool _debugEnabled;
 
     public HoverPreviewService(IQueryLensEngine engine, bool debugEnabled = false)
     {
         _engine = engine;
+        _useBrowserSafeHoverActionLinks = string.Equals(
+            Environment.GetEnvironmentVariable("QUERYLENS_CLIENT"),
+            "rider",
+            StringComparison.OrdinalIgnoreCase);
         _debugEnabled = debugEnabled;
     }
 

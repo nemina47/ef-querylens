@@ -58,6 +58,17 @@ public static partial class LspSyntaxHelper
         if (targetExpression is InvocationExpressionSyntax finalInvocation
             && !IsLikelyQueryChain(finalInvocation))
         {
+            if (TryExtractFromExpressionParameterHelperCall(
+                    root,
+                    finalInvocation,
+                    position,
+                    out var synthesizedExpression,
+                    out var synthesizedContextVariableName))
+            {
+                contextVariableName = synthesizedContextVariableName;
+                return synthesizedExpression;
+            }
+
             return null;
         }
 

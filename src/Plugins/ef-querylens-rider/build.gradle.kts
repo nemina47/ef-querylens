@@ -66,6 +66,8 @@ val bundleQueryLensRuntime by tasks.registering(Sync::class) {
 }
 
 intellijPlatform {
+    buildSearchableOptions = false
+
     pluginConfiguration {
         ideaVersion {
             sinceBuild = providers.gradleProperty("pluginSinceBuild")

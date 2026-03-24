@@ -86,6 +86,17 @@ internal sealed partial class HoverHandler
                     return semEntryAfterCancel.Structured;
                 }
 
+                var fallbackStructured = await TryBuildCanceledStatusFallbackStructuredAsync(
+                    filePath,
+                    sourceText,
+                    effectiveLine,
+                    effectiveCharacter);
+                if (fallbackStructured is not null)
+                {
+                    LogHoverDebug($"structured-hover-cancel-fallback-hit line={effectiveLine} char={effectiveCharacter}");
+                    return fallbackStructured;
+                }
+
                 return null;
             }
         }
@@ -104,6 +115,18 @@ internal sealed partial class HoverHandler
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             LogHoverDebug($"structured-hover-canceled line={effectiveLine} char={effectiveCharacter}");
+
+            var fallbackStructured = await TryBuildCanceledStatusFallbackStructuredAsync(
+                filePath,
+                sourceText,
+                effectiveLine,
+                effectiveCharacter);
+            if (fallbackStructured is not null)
+            {
+                LogHoverDebug($"structured-hover-cancel-fallback-hit line={effectiveLine} char={effectiveCharacter}");
+                return fallbackStructured;
+            }
+
             return null;
         }
 
@@ -111,5 +134,45 @@ internal sealed partial class HoverHandler
         LogHoverDebug($"structured-hover-compute-finished line={effectiveLine} char={effectiveCharacter} elapsedMs={sw.ElapsedMilliseconds} hasResult={computed.Structured is not null}");
         CacheEntry(cacheKey, computed, semanticContext);
         return computed.Structured;
+    }
+
+    private async Task<QueryLensStructuredHoverResult?> TryBuildCanceledStatusFallbackStructuredAsync(
+        string filePath,
+        string sourceText,
+        int line,
+        int character)
+    {
+        using var fallbackCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        try
+        {
+            var fallback = await _hoverPreviewService.BuildStructuredAsync(
+                filePath,
+                sourceText,
+                line,
+                character,
+                fallbackCts.Token);
+
+            if (fallback.Success)
+            {
+                return fallback;
+            }
+
+            if (fallback.Status is QueryTranslationStatus.Starting
+                or QueryTranslationStatus.InQueue
+                or QueryTranslationStatus.DaemonUnavailable)
+            {
+                return fallback;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Ignore fallback timeout and keep the primary cancellation behavior.
+        }
+        catch (Exception ex)
+        {
+            LogHoverDebug($"structured-hover-cancel-fallback-failed line={line} char={character} type={ex.GetType().Name} message={ex.Message}");
+        }
+
+        return null;
     }
 }

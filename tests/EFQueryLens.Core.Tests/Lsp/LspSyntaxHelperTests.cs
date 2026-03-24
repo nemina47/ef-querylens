@@ -497,6 +497,94 @@ public class LspSyntaxHelperTests
     }
 
     [Fact]
+    public void TryExtractLinqExpression_HelperMethodWithSelectorExpression_SynthesizesQueryableChain()
+    {
+        var source = """
+            public class DemoService
+            {
+                private async Task<List<TResult>> GetOrdersAsync<TResult>(
+                    Guid customerId,
+                    Expression<Func<Order, TResult>> selector,
+                    CancellationToken ct)
+                {
+                    return await dbContext.Orders
+                        .Where(o => o.CustomerId == customerId)
+                        .Select(selector)
+                        .ToListAsync(ct);
+                }
+
+                private async Task Run(Guid customerId, CancellationToken ct)
+                {
+                    var result = await GetOrdersAsync(
+                        customerId,
+                        o => new { o.Id, o.Total },
+                        ct);
+                }
+            }
+            """;
+
+        var (line, character) = FindPosition(source, "o.Total");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName);
+
+        Assert.NotNull(expression);
+        Assert.Equal("dbContext", contextVariableName);
+        Assert.Contains("dbContext.Orders", expression, StringComparison.Ordinal);
+        Assert.Contains("o => new { o.Id, o.Total }", expression, StringComparison.Ordinal);
+        Assert.Contains("ToListAsync", expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryExtractLinqExpression_HelperMethodWithWhereAndSelectorExpressions_SynthesizesQueryableChain()
+    {
+        var source = """
+            public class DemoService
+            {
+                private async Task<List<TResult>> GetOrdersAsync<TResult>(
+                    Guid customerId,
+                    Expression<Func<Order, bool>> whereExpression,
+                    Expression<Func<Order, TResult>> selector,
+                    CancellationToken ct)
+                {
+                    return await dbContext.Orders
+                        .Where(o => o.CustomerId == customerId)
+                        .Where(whereExpression)
+                        .Select(selector)
+                        .ToListAsync(ct);
+                }
+
+                private async Task Run(Guid customerId, CancellationToken ct)
+                {
+                    var result = await GetOrdersAsync(
+                        customerId,
+                        o => o.IsNotDeleted,
+                        o => new { o.Id, o.Total },
+                        ct);
+                }
+            }
+            """;
+
+        var (line, character) = FindPosition(source, "o.IsNotDeleted");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName);
+
+        Assert.NotNull(expression);
+        Assert.Equal("dbContext", contextVariableName);
+        Assert.Contains("dbContext.Orders", expression, StringComparison.Ordinal);
+        Assert.Contains("o => o.IsNotDeleted", expression, StringComparison.Ordinal);
+        Assert.Contains("o => new { o.Id, o.Total }", expression, StringComparison.Ordinal);
+        Assert.Contains("ToListAsync", expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TryExtractLinqExpression_WhereClauseReceivesExpressionVariable_ExtractsChainAndIncludesVariable()
     {
         // Where(filter) / Select(selector) with a pre-built Expression<Func<...>> variable
