@@ -34,7 +34,7 @@ class EFQueryLensLogToolWindowFactory :
     ToolWindowFactory,
     DumbAware {
     companion object {
-        const val ToolWindowId = "EF QueryLens"
+        const val TOOL_WINDOW_ID = "EF QueryLens"
     }
 
     override fun shouldBeAvailable(project: Project): Boolean = true
@@ -233,7 +233,8 @@ class EFQueryLensLogToolWindowFactory :
                 }
             }
         } catch (ex: Exception) {
-            return "Failed to read EF QueryLens log file.\n${ex.message ?: ex::class.java.simpleName}\n\nPath:\n${logFile.absolutePathString()}"
+            val detail = ex.message ?: ex::class.java.simpleName
+            return "Failed to read EF QueryLens log file.\n$detail\n\nPath:\n${logFile.absolutePathString()}"
         }
 
         return ring.joinToString("\n")

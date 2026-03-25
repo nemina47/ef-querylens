@@ -5,7 +5,6 @@ import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.ide.CopyPasteManager
-import java.awt.datatransfer.StringSelection
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.platform.lsp.api.Lsp4jClient
@@ -13,6 +12,7 @@ import com.intellij.platform.lsp.api.LspServerNotificationsHandler
 import com.intellij.platform.lsp.api.LspServerSupportProvider
 import com.intellij.platform.lsp.api.ProjectWideLspServerDescriptor
 import org.eclipse.lsp4j.jsonrpc.services.JsonNotification
+import java.awt.datatransfer.StringSelection
 import java.nio.file.Path
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.exists
@@ -22,7 +22,6 @@ import kotlin.io.path.name
 import kotlin.io.path.pathString
 
 class EFQueryLensLspServerSupportProvider : LspServerSupportProvider {
-
     companion object {
         /**
          * Singleton action server shared across all projects in this IDE session.
@@ -33,7 +32,11 @@ class EFQueryLensLspServerSupportProvider : LspServerSupportProvider {
         }
     }
 
-    override fun fileOpened(project: Project, file: VirtualFile, serverStarter: LspServerSupportProvider.LspServerStarter) {
+    override fun fileOpened(
+        project: Project,
+        file: VirtualFile,
+        serverStarter: LspServerSupportProvider.LspServerStarter,
+    ) {
         logInfo(project, "[EFQueryLens] fileOpened path='${file.path}' extension='${file.extension}'")
         if (!isSupported(file)) {
             logInfo(project, "[EFQueryLens] fileOpened skipped unsupported file '${file.path}'")
@@ -51,11 +54,18 @@ class EFQueryLensLspServerSupportProvider : LspServerSupportProvider {
 
     private fun isSupported(file: VirtualFile): Boolean = file.extension.equals("cs", ignoreCase = true)
 
-    private fun logInfo(project: Project, message: String) {
+    private fun logInfo(
+        project: Project,
+        message: String,
+    ) {
         thisLogger().info(message)
     }
 
-    private fun logWarn(project: Project, message: String, error: Throwable? = null) {
+    private fun logWarn(
+        project: Project,
+        message: String,
+        error: Throwable? = null,
+    ) {
         if (error == null) {
             thisLogger().warn(message)
             return
@@ -69,8 +79,8 @@ private class EFQueryLensServerDescriptor(
     private val actionPort: Int = 0,
 ) : ProjectWideLspServerDescriptor(hostProject, "EF QueryLens") {
     private companion object {
-        private const val PluginIdValue = "dev.efquerylens"
-        private const val LspDllOverrideEnvVar = "QUERYLENS_LSP_DLL"
+        private const val PLUGIN_ID_VALUE = "dev.efquerylens"
+        private const val LSP_DLL_OVERRIDE_ENV_VAR = "QUERYLENS_LSP_DLL"
     }
 
     override fun isSupportedFile(file: VirtualFile): Boolean = file.extension.equals("cs", ignoreCase = true)
@@ -78,14 +88,17 @@ private class EFQueryLensServerDescriptor(
     override fun createLsp4jClient(handler: LspServerNotificationsHandler): Lsp4jClient = EFQueryLensClient(handler, hostProject)
 
     override fun createCommandLine(): GeneralCommandLine {
-        val projectBasePath = hostProject.basePath
-            ?: error("Cannot start EF QueryLens language server: project has no base path.")
+        val projectBasePath =
+            hostProject.basePath
+                ?: error("Cannot start EF QueryLens language server: project has no base path.")
 
         val logIdentity = WorkspaceLogIdentityResolver.fromProjectBasePath(projectBasePath)
         val workspaceRoot = Path.of(projectBasePath).toAbsolutePath().normalize()
         val lspLogFilePath = logIdentity.logFilePath
 
-        logInfo("[EFQueryLens] log identity workspace='${logIdentity.workspacePath.absolutePathString()}' hash='${logIdentity.hash}' file='${logIdentity.logFilePath.absolutePathString()}'")
+        logInfo(
+            "[EFQueryLens] log identity workspace='${logIdentity.workspacePath.absolutePathString()}' hash='${logIdentity.hash}' file='${logIdentity.logFilePath.absolutePathString()}'",
+        )
 
         val lspDllOverride = resolveLspDllOverride()
         if (lspDllOverride != null) {
@@ -97,7 +110,7 @@ private class EFQueryLensServerDescriptor(
 
         val lspDll = resolvePackagedLspDll()
         if (lspDll == null) {
-            error("Cannot locate EFQueryLens packaged runtime (server/EFQueryLens.Lsp.dll). Set $LspDllOverrideEnvVar to override.")
+            error("Cannot locate EFQueryLens packaged runtime (server/EFQueryLens.Lsp.dll). Set $LSP_DLL_OVERRIDE_ENV_VAR to override.")
         }
 
         logInfo("[EFQueryLens] Starting EF QueryLens LSP from packaged runtime '${lspDll.pathString}'")
@@ -108,7 +121,7 @@ private class EFQueryLensServerDescriptor(
     }
 
     private fun resolveLspDllOverride(): Path? {
-        val raw = System.getenv(LspDllOverrideEnvVar)
+        val raw = System.getenv(LSP_DLL_OVERRIDE_ENV_VAR)
         if (raw.isNullOrBlank()) return null
         val candidate = Path.of(raw).toAbsolutePath().normalize()
         return if (candidate.isRegularFile()) candidate else null
@@ -117,23 +130,26 @@ private class EFQueryLensServerDescriptor(
     private fun resolvePackagedLspDll(): Path? {
         val pluginRoot = resolvePluginRoot() ?: return null
         val serverDirs = listOfNotNull(pluginRoot.resolve("server"), pluginRoot.parent?.resolve("server")).distinct()
-        val candidates = serverDirs.flatMap { serverDir ->
-            listOf(
-                serverDir.resolve("EFQueryLens.Lsp.dll"),
-                serverDir.resolve("win-x64").resolve("EFQueryLens.Lsp.dll"),
-                serverDir.resolve("win-x64").resolve("publish").resolve("EFQueryLens.Lsp.dll"),
-                serverDir.resolve("publish").resolve("EFQueryLens.Lsp.dll")
-            )
-        }
+        val candidates =
+            serverDirs.flatMap { serverDir ->
+                listOf(
+                    serverDir.resolve("EFQueryLens.Lsp.dll"),
+                    serverDir.resolve("win-x64").resolve("EFQueryLens.Lsp.dll"),
+                    serverDir.resolve("win-x64").resolve("publish").resolve("EFQueryLens.Lsp.dll"),
+                    serverDir.resolve("publish").resolve("EFQueryLens.Lsp.dll"),
+                )
+            }
         return candidates.firstOrNull { it.exists() && it.isRegularFile() }
     }
 
     private fun resolvePluginRoot(): Path? {
-        val pluginPathFromManager = PluginManagerCore.getPlugin(PluginId.getId(PluginIdValue))?.pluginPath
+        val pluginPathFromManager = PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID_VALUE))?.pluginPath
         if (pluginPathFromManager != null) return pluginPathFromManager.toAbsolutePath().normalize()
 
         return try {
-            val location = EFQueryLensLspServerSupportProvider::class.java.protectionDomain.codeSource?.location ?: return null
+            val location =
+                EFQueryLensLspServerSupportProvider::class.java.protectionDomain.codeSource
+                    ?.location ?: return null
             val codeSourcePath = Path.of(location.toURI()).toAbsolutePath().normalize()
             if (codeSourcePath.isRegularFile()) {
                 val parent = codeSourcePath.parent ?: return null
@@ -151,7 +167,10 @@ private class EFQueryLensServerDescriptor(
         }
     }
 
-    private fun GeneralCommandLine.applyQueryLensEnvironment(workspaceRoot: Path, lspLogFilePath: Path): GeneralCommandLine {
+    private fun GeneralCommandLine.applyQueryLensEnvironment(
+        workspaceRoot: Path,
+        lspLogFilePath: Path,
+    ): GeneralCommandLine {
         withEnvironment("QUERYLENS_CLIENT", "rider")
         withEnvironment("QUERYLENS_DEBUG", "1")
         withEnvironment("QUERYLENS_HOVER_CANCEL_GRACE_MS", "1200")
@@ -181,38 +200,44 @@ private class EFQueryLensServerDescriptor(
     private fun resolvePackagedDaemonExecutable(): Path? {
         val pluginRoot = resolvePluginRoot() ?: return null
         val daemonDirs = listOfNotNull(pluginRoot.resolve("daemon"), pluginRoot.parent?.resolve("daemon")).distinct()
-        val candidates = daemonDirs.flatMap { daemonDir ->
-            listOf(
-                daemonDir.resolve("EFQueryLens.Daemon.exe"),
-                daemonDir.resolve("win-x64").resolve("EFQueryLens.Daemon.exe"),
-                daemonDir.resolve("win-x64").resolve("publish").resolve("EFQueryLens.Daemon.exe")
-            )
-        }
+        val candidates =
+            daemonDirs.flatMap { daemonDir ->
+                listOf(
+                    daemonDir.resolve("EFQueryLens.Daemon.exe"),
+                    daemonDir.resolve("win-x64").resolve("EFQueryLens.Daemon.exe"),
+                    daemonDir.resolve("win-x64").resolve("publish").resolve("EFQueryLens.Daemon.exe"),
+                )
+            }
         return candidates.firstOrNull { it.exists() && it.isRegularFile() }
     }
 
     private fun resolvePackagedDaemonAssembly(): Path? {
         val pluginRoot = resolvePluginRoot() ?: return null
         val daemonDirs = listOfNotNull(pluginRoot.resolve("daemon"), pluginRoot.parent?.resolve("daemon")).distinct()
-        val candidates = daemonDirs.flatMap { daemonDir ->
-            listOf(
-                daemonDir.resolve("EFQueryLens.Daemon.dll"),
-                daemonDir.resolve("win-x64").resolve("EFQueryLens.Daemon.dll"),
-                daemonDir.resolve("win-x64").resolve("publish").resolve("EFQueryLens.Daemon.dll")
-            )
-        }
+        val candidates =
+            daemonDirs.flatMap { daemonDir ->
+                listOf(
+                    daemonDir.resolve("EFQueryLens.Daemon.dll"),
+                    daemonDir.resolve("win-x64").resolve("EFQueryLens.Daemon.dll"),
+                    daemonDir.resolve("win-x64").resolve("publish").resolve("EFQueryLens.Daemon.dll"),
+                )
+            }
         return candidates.firstOrNull { it.exists() && it.isRegularFile() }
     }
 
     private fun logInfo(message: String) = thisLogger().info(message)
-    private fun logWarn(message: String, error: Throwable? = null) {
+
+    private fun logWarn(
+        message: String,
+        error: Throwable? = null,
+    ) {
         if (error == null) thisLogger().warn(message) else thisLogger().warn(message, error)
     }
 }
 
 private class EFQueryLensClient(
     handler: LspServerNotificationsHandler,
-    private val project: Project
+    private val project: Project,
 ) : Lsp4jClient(handler) {
     @JsonNotification("efquerylens/showSqlPreview")
     fun showSqlPreview(payload: Any?) {

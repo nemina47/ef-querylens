@@ -29,7 +29,6 @@ import java.util.concurrent.Executors
  * [EFQueryLensLspServerSupportProvider] before the server process starts.
  */
 internal class EFQueryLensActionServer {
-
     private var httpServer: HttpServer? = null
 
     /** The port the server is listening on, or 0 if not yet started. */
@@ -41,7 +40,8 @@ internal class EFQueryLensActionServer {
     fun start() {
         if (httpServer != null) return
         try {
-            val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), /* backlog */ 10)
+            // backlog=10: more than enough for sequential IDE action clicks
+            val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 10)
             server.createContext("/efquerylens/action") { exchange ->
                 try {
                     val query = exchange.requestURI.rawQuery ?: ""
@@ -58,7 +58,7 @@ internal class EFQueryLensActionServer {
 
                     thisLogger().info(
                         "[EFQueryLens] ActionServer request: type=$type line=$line char=$character " +
-                        "uri=${fileUri.takeLast(60)}"
+                            "uri=${fileUri.takeLast(60)}",
                     )
 
                     // Dispatch the action on a pooled thread so we never block
@@ -74,9 +74,10 @@ internal class EFQueryLensActionServer {
             }
             // Single daemon thread — actions are dispatched to the IntelliJ
             // thread pool anyway; we only need this to accept connections.
-            server.executor = Executors.newSingleThreadExecutor { r ->
-                Thread(r, "EFQueryLens-ActionServer").also { it.isDaemon = true }
-            }
+            server.executor =
+                Executors.newSingleThreadExecutor { r ->
+                    Thread(r, "EFQueryLens-ActionServer").also { it.isDaemon = true }
+                }
             server.start()
             httpServer = server
             port = server.address.port
@@ -99,35 +100,46 @@ internal class EFQueryLensActionServer {
     // Action dispatch
     // ------------------------------------------------------------------
 
-    private fun handleAction(type: String, fileUri: String, line: Int, character: Int) {
-        val project = ProjectManager.getInstance().openProjects.firstOrNull() ?: run {
-            thisLogger().warn("[EFQueryLens] ActionServer: no open project to handle type=$type")
-            return
-        }
+    private fun handleAction(
+        type: String,
+        fileUri: String,
+        line: Int,
+        character: Int,
+    ) {
+        val project =
+            ProjectManager.getInstance().openProjects.firstOrNull() ?: run {
+                thisLogger().warn("[EFQueryLens] ActionServer: no open project to handle type=$type")
+                return
+            }
         val opener = EFQueryLensUrlOpener()
 
         when (type) {
             "copysql", "opensqleditor" -> {
                 thisLogger().info("[EFQueryLens] ActionServer: fetching structured preview for type=$type")
-                val preview = runCatching {
-                    opener.buildStructuredPreview(project, fileUri, line, character)
-                }.getOrElse { e ->
-                    thisLogger().warn("[EFQueryLens] ActionServer: buildStructuredPreview failed", e)
-                    null
-                } ?: run {
-                    thisLogger().warn("[EFQueryLens] ActionServer: buildStructuredPreview returned null for type=$type")
-                    return
-                }
+                val preview =
+                    runCatching {
+                        opener.buildStructuredPreview(project, fileUri, line, character)
+                    }.getOrElse { e ->
+                        thisLogger().warn("[EFQueryLens] ActionServer: buildStructuredPreview failed", e)
+                        null
+                    } ?: run {
+                        thisLogger().warn("[EFQueryLens] ActionServer: buildStructuredPreview returned null for type=$type")
+                        return
+                    }
 
                 thisLogger().info(
                     "[EFQueryLens] ActionServer: preview ready statusCode=${preview.statusCode} " +
-                    "sqlLen=${preview.sqlText.length} hasText=${preview.sqlText.isNotBlank()}"
+                        "sqlLen=${preview.sqlText.length} hasText=${preview.sqlText.isNotBlank()}",
                 )
 
                 if (preview.statusCode != 0 || preview.sqlText.isBlank()) {
-                    val message = preview.statusMessage
-                        ?: if (preview.statusCode != 0) fallbackMessage(preview.statusCode)
-                        else "No SQL preview available at this location."
+                    val message =
+                        preview.statusMessage
+                            ?: if (preview.statusCode != 0) {
+                                fallbackMessage(preview.statusCode)
+                            } else {
+                                "No SQL preview available at this location."
+                            }
                     opener.showStatusMessage(project, preview.statusCode, message)
                     return
                 }
@@ -153,11 +165,12 @@ internal class EFQueryLensActionServer {
         }
     }
 
-    private fun fallbackMessage(statusCode: Int): String = when (statusCode) {
-        3 -> "EF QueryLens services are unavailable and cannot communicate right now."
-        2 -> "EF QueryLens is starting up and warming translation services."
-        else -> "EF QueryLens queued this query and is still processing it."
-    }
+    private fun fallbackMessage(statusCode: Int): String =
+        when (statusCode) {
+            3 -> "EF QueryLens services are unavailable and cannot communicate right now."
+            2 -> "EF QueryLens is starting up and warming translation services."
+            else -> "EF QueryLens queued this query and is still processing it."
+        }
 
     // ------------------------------------------------------------------
     // Utilities
@@ -165,11 +178,16 @@ internal class EFQueryLensActionServer {
 
     private fun parseQuery(query: String): Map<String, String> {
         if (query.isBlank()) return emptyMap()
-        return query.split("&").mapNotNull { pair ->
-            val idx = pair.indexOf('=')
-            if (idx < 0) null
-            else URLDecoder.decode(pair.substring(0, idx), "UTF-8") to
-                URLDecoder.decode(pair.substring(idx + 1), "UTF-8")
-        }.toMap()
+        return query
+            .split("&")
+            .mapNotNull { pair ->
+                val idx = pair.indexOf('=')
+                if (idx < 0) {
+                    null
+                } else {
+                    URLDecoder.decode(pair.substring(0, idx), "UTF-8") to
+                        URLDecoder.decode(pair.substring(idx + 1), "UTF-8")
+                }
+            }.toMap()
     }
 }
