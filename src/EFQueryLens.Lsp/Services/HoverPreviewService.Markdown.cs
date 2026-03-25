@@ -65,7 +65,7 @@ internal sealed partial class HoverPreviewService
 
         Console.Error.WriteLine(
             $"[QL-Hover] hover-links: actionPort={_actionPort} " +
-            $"copyLink={(markdown.Contains("efquerylens://") ? "efquerylens-scheme" : "http-localhost")}");
+            $"copyLink={(markdown.Contains("http://127.0.0.1") ? "http-localhost" : "efquerylens-scheme")}");
 
         return new HoverPreviewComputationResult(
             true,
