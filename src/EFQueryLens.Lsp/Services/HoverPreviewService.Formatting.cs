@@ -41,13 +41,8 @@ internal sealed partial class HoverPreviewService
     private static string BuildHoverMarkdown(
         IReadOnlyList<QuerySqlCommand> commands,
         IReadOnlyList<QueryWarning> warnings,
-        string uri,
-        int line,
-        int character,
         TranslationMetadata? metadata,
-        double avgTranslationMs = 0,
-        bool useBrowserSafeActionLinks = false,
-        int actionPort = 0)
+        double avgTranslationMs = 0)
     {
         var providerName = metadata?.ProviderName;
         var statements = BuildFormattedStatements(commands, providerName);
@@ -56,40 +51,14 @@ internal sealed partial class HoverPreviewService
         var statementWord = commands.Count == 1 ? "query" : "queries";
         var warningLines = BuildWarningLines(warnings);
 
-        var queryParams = $"uri={Uri.EscapeDataString(uri)}&line={line}&character={character}";
-        string copyUrl, openUrl, recalculateUrl;
-        if (actionPort > 0)
-        {
-            // Rider: use localhost HTTP links.  JCEF in Rider's LSP hover popup calls
-            // the OS shell for ALL URI schemes (including efquerylens://) which shows
-            // a "Get an app" dialog.  http://127.0.0.1 is routed to the system browser
-            // instead, which hits our local action server and performs the IDE action.
-            var base_ = $"http://127.0.0.1:{actionPort}/efquerylens/action";
-            copyUrl = $"{base_}?type=copysql&{queryParams}";
-            openUrl = $"{base_}?type=opensqleditor&{queryParams}";
-            recalculateUrl = $"{base_}?type=recalculate&{queryParams}";
-        }
-        else
-        {
-            // VS Code and others: efquerylens:// custom scheme handled by the extension.
-            copyUrl = $"efquerylens://copysql?{queryParams}";
-            openUrl = $"efquerylens://opensqleditor?{queryParams}";
-            recalculateUrl = $"efquerylens://recalculate?{queryParams}";
-        }
-
-        var copyLink = $"[Copy SQL]({copyUrl})";
-        var openLink = $"[Open SQL]({openUrl})";
-        var recalculateLink = $"[Reanalyze]({recalculateUrl})";
-
         var header = $"**EF QueryLens** · {commands.Count} {statementWord}";
-        var actionsRow = $"{copyLink} | {openLink} | {recalculateLink}";
         var timingLine = avgTranslationMs > 0
             ? $"\n\n*SQL generation time {avgTranslationMs:0} ms*"
             : string.Empty;
 
         var body = warningLines.Count == 0
-            ? $"{header}  \n{actionsRow}\n\n```sql\n{sql}\n```{timingLine}"
-            : $"{header}  \n{actionsRow}\n\n```sql\n{sql}\n```\n\n**Notes**\n{string.Join("\n", warningLines.Select(line => $"- {line}"))}{timingLine}";
+            ? $"{header}\n\n```sql\n{sql}\n```{timingLine}"
+            : $"{header}\n\n```sql\n{sql}\n```\n\n**Notes**\n{string.Join("\n", warningLines.Select(w => $"- {w}"))}{timingLine}";
 
         return body;
     }

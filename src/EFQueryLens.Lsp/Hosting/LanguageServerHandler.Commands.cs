@@ -136,6 +136,29 @@ internal sealed partial class LanguageServerHandler
             };
         }
 
+        if (command.Equals("efquerylens.showsqlpopup", StringComparison.OrdinalIgnoreCase))
+        {
+            var arguments = request["arguments"] as JArray;
+            var req = arguments?.Count > 0
+                ? arguments[0].ToObject<TextDocumentPositionParams>()
+                : null;
+
+            if (req is null) return new JObject { ["success"] = false };
+
+            var hover = await _hover.HandleStructuredAsync(req, ct);
+            if (hover is not null)
+            {
+                _ = JsonRpc?.NotifyAsync("efquerylens/showSqlPopup", new JObject
+                {
+                    ["hover"] = JObject.FromObject(hover),
+                    ["fallbackFileUri"] = req.TextDocument.Uri.ToString(),
+                    ["fallbackLine"] = req.Position.Line
+                });
+            }
+
+            return new JObject { ["success"] = true };
+        }
+
         if (command.Equals("efquerylens.opensqleditor", StringComparison.OrdinalIgnoreCase))
         {
             var arguments = request["arguments"] as JArray;

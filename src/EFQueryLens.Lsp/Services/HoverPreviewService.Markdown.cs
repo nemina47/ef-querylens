@@ -21,7 +21,7 @@ internal sealed partial class HoverPreviewService
             cancellationToken,
             log);
 
-        var result = FormatMarkdown(canonical, filePath, line, character);
+        var result = FormatMarkdown(canonical);
         if (result.Success && result.Status is QueryTranslationStatus.Ready)
         {
             Console.Error.WriteLine($"[QL-Hover] hover-markdown-ready line={line} char={character} markdownLen={result.Output.Length}");
@@ -30,11 +30,7 @@ internal sealed partial class HoverPreviewService
         return result;
     }
 
-    private HoverPreviewComputationResult FormatMarkdown(
-        HoverCanonicalComputationResult canonical,
-        string filePath,
-        int line,
-        int character)
+    private HoverPreviewComputationResult FormatMarkdown(HoverCanonicalComputationResult canonical)
     {
         if (canonical.Status is not QueryTranslationStatus.Ready && canonical.Success)
         {
@@ -51,21 +47,11 @@ internal sealed partial class HoverPreviewService
             return new HoverPreviewComputationResult(false, canonical.Message, canonical.Status);
         }
 
-        var documentUri = DocumentPathResolver.ToUri(filePath);
         var markdown = BuildHoverMarkdown(
             canonical.Commands,
             canonical.Warnings,
-            documentUri,
-            line,
-            character,
             canonical.Metadata,
-            canonical.LastTranslationMs > 0 ? canonical.LastTranslationMs : canonical.AvgTranslationMs,
-            _useBrowserSafeHoverActionLinks,
-            _actionPort);
-
-        Console.Error.WriteLine(
-            $"[QL-Hover] hover-links: actionPort={_actionPort} " +
-            $"copyLink={(markdown.Contains("http://127.0.0.1") ? "http-localhost" : "efquerylens-scheme")}");
+            canonical.LastTranslationMs > 0 ? canonical.LastTranslationMs : canonical.AvgTranslationMs);
 
         return new HoverPreviewComputationResult(
             true,

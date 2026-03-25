@@ -145,7 +145,11 @@ internal sealed partial class LanguageServerHandler
                         "efquerylens.warmup",
                         "efquerylens.daemon.restart",
                         "efquerylens.preview.recalculate",
-                        "efquerylens.preview.structuredHover")
+                        "efquerylens.preview.structuredHover",
+                        "efquerylens.showsqlpopup",
+                        "efquerylens.opensqleditor",
+                        "efquerylens.copysql",
+                        "efquerylens.reanalyze")
                 },
             },
         };

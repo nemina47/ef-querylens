@@ -2,6 +2,9 @@ package efquerylens
 
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.ide.CopyPasteManager
@@ -252,10 +255,27 @@ private class EFQueryLensClient(
         }
     }
 
+    @JsonNotification("efquerylens/showSqlPopup")
+    fun showSqlPopup(payload: Any?) {
+        val root = payload as? Map<String, Any?> ?: return
+        val fallbackFileUri = root["fallbackFileUri"] as? String ?: ""
+        val fallbackLine = (root["fallbackLine"] as? Number)?.toInt() ?: 0
+        val opener = EFQueryLensUrlOpener()
+        val preview = opener.extractStructuredPreview(root, fallbackFileUri, fallbackLine) ?: return
+        opener.showSqlPopup(project, preview)
+    }
+
     @JsonNotification("efquerylens/copySqlToClipboard")
     fun copySqlToClipboard(payload: Any?) {
         val root = payload as? Map<String, Any?> ?: return
         val sql = root["sql"] as? String ?: return
         CopyPasteManager.getInstance().setContents(StringSelection(sql))
+        ApplicationManager.getApplication().invokeLater {
+            NotificationGroupManager
+                .getInstance()
+                .getNotificationGroup("EF QueryLens")
+                .createNotification("SQL copied to clipboard", NotificationType.INFORMATION)
+                .notify(project)
+        }
     }
 }

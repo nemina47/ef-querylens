@@ -6,13 +6,21 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.thisLogger
+import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.editor.ex.EditorEx
+import com.intellij.openapi.editor.highlighter.EditorHighlighterFactory
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
+import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.openapi.ui.popup.JBPopupListener
+import com.intellij.openapi.ui.popup.LightweightWindowEvent
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.platform.lsp.api.LspServerManager
 import org.eclipse.lsp4j.ExecuteCommandParams
+import java.awt.Dimension
 import java.awt.datatransfer.StringSelection
 import java.io.File
 import java.net.URI
@@ -402,6 +410,64 @@ class EFQueryLensUrlOpener : UrlOpener() {
                 thisLogger().info("[EFQueryLens] Opened SQL in editor: ${tempFile.name}")
             } catch (e: Exception) {
                 thisLogger().warn("[EFQueryLens] openSqlInEditor failed", e)
+            }
+        }
+    }
+
+    /**
+     * Shows the SQL for [preview] in a floating popup near the current editor cursor,
+     * triggered by clicking the "SQL Preview" code lens.
+     */
+    internal fun showSqlPopup(
+        project: Project,
+        preview: StructuredSqlPreview,
+    ) {
+        ApplicationManager.getApplication().invokeLater {
+            try {
+                val document = EditorFactory.getInstance().createDocument(preview.sqlText)
+                val sqlViewer = EditorFactory.getInstance().createViewer(document, project)
+
+                // Apply SQL syntax highlighting using the .sql file type
+                val sqlFileType = FileTypeManager.getInstance().getFileTypeByExtension("sql")
+                (sqlViewer as? EditorEx)?.highlighter =
+                    EditorHighlighterFactory.getInstance().createEditorHighlighter(project, sqlFileType)
+
+                // Minimal editor chrome — no gutter, no folding
+                sqlViewer.settings.apply {
+                    isLineNumbersShown = false
+                    isFoldingOutlineShown = false
+                    isLineMarkerAreaShown = false
+                    additionalColumnsCount = 0
+                    additionalLinesCount = 0
+                }
+
+                val editorComponent = sqlViewer.component
+                editorComponent.preferredSize = Dimension(640, 380)
+
+                val popup =
+                    JBPopupFactory
+                        .getInstance()
+                        .createComponentPopupBuilder(editorComponent, sqlViewer.contentComponent)
+                        .setTitle(preview.title)
+                        .setResizable(true)
+                        .setMovable(true)
+                        .setRequestFocus(true)
+                        .addListener(
+                            object : JBPopupListener {
+                                override fun onClosed(event: LightweightWindowEvent) {
+                                    EditorFactory.getInstance().releaseEditor(sqlViewer)
+                                }
+                            },
+                        ).createPopup()
+
+                val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                if (activeEditor != null) {
+                    popup.showInBestPositionFor(activeEditor)
+                } else {
+                    popup.showInFocusCenter()
+                }
+            } catch (e: Exception) {
+                thisLogger().warn("[EFQueryLens] showSqlPopup failed", e)
             }
         }
     }

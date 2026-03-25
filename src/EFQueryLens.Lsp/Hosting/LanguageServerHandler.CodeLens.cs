@@ -13,11 +13,6 @@ internal sealed partial class LanguageServerHandler
     [JsonRpcMethod(Methods.TextDocumentCodeLensName, UseSingleObjectParameterDeserialization = true)]
     public CodeLens[] GetCodeLens(CodeLensParams request)
     {
-        if (!_enableLspHover)
-        {
-            return Array.Empty<CodeLens>();
-        }
-
         var sourceText = _textSync.DocumentManager.GetDocumentText(request.TextDocument.Uri.ToString());
         if (sourceText is null)
         {
@@ -44,19 +39,31 @@ internal sealed partial class LanguageServerHandler
                 }
             };
 
-            // 1. SQL Preview
+            // 1. SQL Preview — shows popup inline
             result.Add(new CodeLens
             {
                 Range = range,
                 Command = new Command
                 {
                     Title = "SQL Preview",
+                    CommandIdentifier = "efquerylens.showsqlpopup",
+                    Arguments = arg
+                }
+            });
+
+            // 2. Open SQL — opens in editor tab
+            result.Add(new CodeLens
+            {
+                Range = range,
+                Command = new Command
+                {
+                    Title = "Open SQL",
                     CommandIdentifier = "efquerylens.opensqleditor",
                     Arguments = arg
                 }
             });
 
-            // 2. Copy SQL
+            // 3. Copy SQL
             result.Add(new CodeLens
             {
                 Range = range,
@@ -68,7 +75,7 @@ internal sealed partial class LanguageServerHandler
                 }
             });
 
-            // 3. Reanalyze
+            // 4. Analyze
             result.Add(new CodeLens
             {
                 Range = range,

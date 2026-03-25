@@ -183,7 +183,7 @@ internal sealed partial class HoverPreviewService
             cancellationToken,
             log);
 
-        var markdown = FormatMarkdown(canonical, filePath, line, character);
+        var markdown = FormatMarkdown(canonical);
         var structured = FormatStructured(canonical, filePath);
 
         if (markdown.Success && markdown.Status is QueryTranslationStatus.Ready)
