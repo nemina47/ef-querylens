@@ -69,7 +69,7 @@ class EFQueryLensUrlOpener : UrlOpener() {
 
         val uri = runCatching { URI(url) }.getOrNull() ?: return true
         val host = uri.host?.lowercase() ?: return true
-        if (host != "copysql" && host != "opensqleditor" && host != "recalculate") return true
+        if (host != "copysql" && host != "opensql" && host != "opensqleditor" && host != "recalculate") return true
 
         val params = parseQueryParams(uri.rawQuery ?: "")
         val fileUri = params["uri"] ?: return true
@@ -85,7 +85,9 @@ class EFQueryLensUrlOpener : UrlOpener() {
             return true
         }
 
-        dispatchSqlAction(host, effectiveProject, fileUri, line, character)
+        // Normalise "opensql" (hover link scheme) → "opensqleditor" (action dispatch key)
+        val actionType = if (host == "opensql") "opensqleditor" else host
+        dispatchSqlAction(actionType, effectiveProject, fileUri, line, character)
         return true
     }
 

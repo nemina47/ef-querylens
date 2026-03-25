@@ -38,11 +38,14 @@ internal sealed partial class HoverPreviewService
             .ToArray();
     }
 
-    private static string BuildHoverMarkdown(
+    private string BuildHoverMarkdown(
         IReadOnlyList<QuerySqlCommand> commands,
         IReadOnlyList<QueryWarning> warnings,
         TranslationMetadata? metadata,
-        double avgTranslationMs = 0)
+        double avgTranslationMs = 0,
+        string? filePath = null,
+        int line = 0,
+        int character = 0)
     {
         var providerName = metadata?.ProviderName;
         var statements = BuildFormattedStatements(commands, providerName);
@@ -51,7 +54,23 @@ internal sealed partial class HoverPreviewService
         var statementWord = commands.Count == 1 ? "query" : "queries";
         var warningLines = BuildWarningLines(warnings);
 
-        var header = $"**EF QueryLens** · {commands.Count} {statementWord}";
+        string? actionLinks = null;
+        if (_useBrowserSafeHoverActionLinks && !string.IsNullOrWhiteSpace(filePath))
+        {
+            try
+            {
+                var fileUri = Uri.EscapeDataString(new Uri(filePath).AbsoluteUri);
+                actionLinks =
+                    $"[Copy SQL](efquerylens://copysql?uri={fileUri}&line={line}&character={character})" +
+                    $" | [Open SQL](efquerylens://opensql?uri={fileUri}&line={line}&character={character})";
+            }
+            catch { /* skip links if path is unparseable */ }
+        }
+
+        var header = actionLinks is null
+            ? $"**EF QueryLens** · {commands.Count} {statementWord}"
+            : $"**EF QueryLens** · {commands.Count} {statementWord} {actionLinks}";
+
         var timingLine = avgTranslationMs > 0
             ? $"\n\n*SQL generation time {avgTranslationMs:0} ms*"
             : string.Empty;
@@ -62,6 +81,7 @@ internal sealed partial class HoverPreviewService
 
         return body;
     }
+
 
     private static string? BuildStructuredEnrichedSql(
         string? rawSql,

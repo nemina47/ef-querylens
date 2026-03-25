@@ -21,7 +21,7 @@ internal sealed partial class HoverPreviewService
             cancellationToken,
             log);
 
-        var result = FormatMarkdown(canonical);
+        var result = FormatMarkdown(canonical, filePath, line, character);
         if (result.Success && result.Status is QueryTranslationStatus.Ready)
         {
             Console.Error.WriteLine($"[QL-Hover] hover-markdown-ready line={line} char={character} markdownLen={result.Output.Length}");
@@ -30,7 +30,11 @@ internal sealed partial class HoverPreviewService
         return result;
     }
 
-    private HoverPreviewComputationResult FormatMarkdown(HoverCanonicalComputationResult canonical)
+    private HoverPreviewComputationResult FormatMarkdown(
+        HoverCanonicalComputationResult canonical,
+        string? filePath = null,
+        int line = 0,
+        int character = 0)
     {
         if (canonical.Status is not QueryTranslationStatus.Ready && canonical.Success)
         {
@@ -51,7 +55,10 @@ internal sealed partial class HoverPreviewService
             canonical.Commands,
             canonical.Warnings,
             canonical.Metadata,
-            canonical.LastTranslationMs > 0 ? canonical.LastTranslationMs : canonical.AvgTranslationMs);
+            canonical.LastTranslationMs > 0 ? canonical.LastTranslationMs : canonical.AvgTranslationMs,
+            filePath,
+            line,
+            character);
 
         return new HoverPreviewComputationResult(
             true,
