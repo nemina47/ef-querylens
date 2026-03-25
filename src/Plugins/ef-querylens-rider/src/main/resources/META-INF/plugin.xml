@@ -9,6 +9,7 @@
     <extensions defaultExtensionNs="com.intellij">
         <platform.lsp.serverSupportProvider implementation="efquerylens.EFQueryLensLspServerSupportProvider" />
         <toolWindow id="EF QueryLens" factoryClass="efquerylens.EFQueryLensLogToolWindowFactory" anchor="bottom" />
+        <notificationGroup id="EF QueryLens" displayType="BALLOON" isLogByDefault="false" />
     </extensions>
 
     <extensions defaultExtensionNs="org.jetbrains">
