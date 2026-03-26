@@ -22,7 +22,7 @@ jobs:
           - darwin-x64
           - darwin-arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -86,7 +86,7 @@ jobs:
   build-rider-plugin:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -124,7 +124,7 @@ jobs:
   build-visual-studio-extension:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -146,7 +146,7 @@ jobs:
       - build-rider-plugin
       - build-visual-studio-extension
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download artifacts
         uses: actions/download-artifact@v8
