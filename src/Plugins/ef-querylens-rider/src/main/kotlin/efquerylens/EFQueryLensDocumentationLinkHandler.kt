@@ -18,8 +18,8 @@ import java.net.URI
 import java.net.URLDecoder
 
 /**
- * Intercepts `efquerylens://copysql` and `efquerylens://opensql` link clicks
- * inside Rider's documentation/hover popup.
+ * Intercepts `efquerylens://copysql`, `efquerylens://opensql`, and
+ * `efquerylens://recalculate` link clicks inside Rider's documentation/hover popup.
  *
  * IntelliJ's documentation popup registers a JBCefJSQuery that captures all
  * anchor clicks from JS before Chromium sees them, routing them through
@@ -38,7 +38,7 @@ class EFQueryLensDocumentationLinkHandler : DocumentationLinkHandler {
 
         val uri = runCatching { URI(url) }.getOrNull() ?: return null
         val host = uri.host?.lowercase() ?: return null
-        if (host != "copysql" && host != "opensql") return null
+        if (host != "copysql" && host != "opensql" && host != "recalculate") return null
 
         val params = parseQueryParams(uri.rawQuery ?: "")
         val fileUri = params["uri"] ?: return null
@@ -69,6 +69,13 @@ class EFQueryLensDocumentationLinkHandler : DocumentationLinkHandler {
 
                 try {
                     val opener = EFQueryLensUrlOpener()
+
+                    if (action == "recalculate") {
+                        opener.requestPreviewRecalculate(project, fileUri, line, character)
+                        thisLogger().info("[EFQueryLens] DocLinkHandler: recalculate dispatched line=$line char=$character")
+                        return@withContext
+                    }
+
                     val preview = opener.buildStructuredPreview(project, fileUri, line, character)
 
                     if (preview == null || preview.sqlText.isBlank()) {

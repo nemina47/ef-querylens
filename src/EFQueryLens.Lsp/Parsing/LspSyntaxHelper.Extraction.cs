@@ -69,7 +69,23 @@ public static partial class LspSyntaxHelper
                 return synthesizedExpression;
             }
 
-            return null;
+            // The cursor is inside a nested call (e.g. a predicate method inside a lambda
+            // argument: "w.IsNotDeleted()" inside ".Where(w => w.IsNotDeleted())").
+            // Walk up through ancestors to find a containing LINQ query chain — this
+            // handles hovering on any token within a .Where(…) or .Select(…) lambda
+            // in Visual Studio / Rider, where the QuickInfo trigger fires on the exact
+            // token under the cursor rather than the method name.
+            var outerChain = node?.AncestorsAndSelf()
+                .OfType<InvocationExpressionSyntax>()
+                .Select(GetOutermostInvocationChain)
+                .FirstOrDefault(IsLikelyQueryChain);
+
+            if (outerChain is null)
+            {
+                return null;
+            }
+
+            targetExpression = outerChain;
         }
 
         // Inline local IQueryable variables for non-terminal chains too, so

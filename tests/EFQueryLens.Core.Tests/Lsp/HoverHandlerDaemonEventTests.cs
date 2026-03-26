@@ -53,6 +53,7 @@ public class HoverHandlerDaemonEventTests
             Statements: [],
             CommandCount: 0,
             SourceExpression: null,
+            ExecutedExpression: null,
             DbContextType: null,
             ProviderName: null,
             SourceFile: null,

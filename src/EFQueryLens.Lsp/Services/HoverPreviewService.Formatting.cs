@@ -62,7 +62,8 @@ internal sealed partial class HoverPreviewService
                 var fileUri = Uri.EscapeDataString(new Uri(filePath).AbsoluteUri);
                 actionLinks =
                     $"[Copy SQL](efquerylens://copysql?uri={fileUri}&line={line}&character={character})" +
-                    $" | [Open SQL](efquerylens://opensql?uri={fileUri}&line={line}&character={character})";
+                    $" | [Open SQL](efquerylens://opensql?uri={fileUri}&line={line}&character={character})" +
+                    $" | [Reanalyze](efquerylens://recalculate?uri={fileUri}&line={line}&character={character})";
             }
             catch { /* skip links if path is unparseable */ }
         }
