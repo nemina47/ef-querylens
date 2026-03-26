@@ -6,6 +6,20 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-03-26
+
+### Fixed
+- VS extension hover returning null when cursor lands inside a lambda body (e.g. `w` in `.Where(w => w.IsNotDeleted())`)
+
+### Added
+- Reanalyze action link in hover popups for VS Code and Rider
+- Cross-platform Rider plugin: daemon AppHost launchers bundled for win-x64/arm64, linux-x64/arm64, osx-x64/arm64
+- `<RollForward>LatestMajor</RollForward>` on LSP and Daemon — users on .NET 8/9 no longer get a hard startup failure
+
+### Changed
+- Release pipeline publishes to stable channels across all three marketplaces
+- VS extension now versioned and published to Visual Studio Marketplace via CI
+
 ## [1.0.0] - 2026-03-25
 
 ### Added
