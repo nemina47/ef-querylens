@@ -47,33 +47,45 @@ val bundleQueryLensRuntime by tasks.registering {
     doLast {
         val out = outputDir.get().asFile
 
+        // Project.exec {} was removed in Gradle 9; use ProcessBuilder directly.
+        fun dotnetPublish(vararg args: String) {
+            val cmd = listOf("dotnet", "publish") + args.toList()
+            val process =
+                ProcessBuilder(cmd)
+                    .inheritIO()
+                    .start()
+            val exit = process.waitFor()
+            if (exit != 0) throw GradleException("dotnet publish failed (exit $exit): ${args.joinToString(" ")}")
+        }
+
         // LSP: portable framework-dependent DLL, no AppHost.
         // Always launched as `dotnet EFQueryLens.Lsp.dll` by Rider's GeneralCommandLine — no AppHost needed.
-        exec {
-            commandLine(
-                "dotnet", "publish", lspProjectPath,
-                "-c", "Release",
-                "--no-self-contained",
-                "/p:UseAppHost=false",
-                "--output", out.resolve("server").absolutePath,
-            )
-        }
+        dotnetPublish(
+            lspProjectPath,
+            "-c",
+            "Release",
+            "--no-self-contained",
+            "/p:UseAppHost=false",
+            "--output",
+            out.resolve("server").absolutePath,
+        )
 
         // Daemon: framework-dependent AppHost per RID.
         // --no-self-contained: DLL requires .NET (supplied by Rider).
         // /p:UseAppHost=true -r <rid>: adds the tiny native launcher (.exe / bare) for that platform.
         // EngineDiscovery.cs finds the AppHost adjacent to the DLL and uses it directly.
         for (rid in daemonRids) {
-            exec {
-                commandLine(
-                    "dotnet", "publish", daemonProjectPath,
-                    "-c", "Release",
-                    "--no-self-contained",
-                    "-r", rid,
-                    "/p:UseAppHost=true",
-                    "--output", out.resolve("daemon/$rid").absolutePath,
-                )
-            }
+            dotnetPublish(
+                daemonProjectPath,
+                "-c",
+                "Release",
+                "--no-self-contained",
+                "-r",
+                rid,
+                "/p:UseAppHost=true",
+                "--output",
+                out.resolve("daemon/$rid").absolutePath,
+            )
         }
     }
 }
@@ -96,7 +108,7 @@ fun extractLatestChangelogAsHtml(changelogFile: File): String {
     for (line in lines) {
         if (line.startsWith("## [")) {
             if (line.contains("[Unreleased]", ignoreCase = true)) continue
-            if (inVersionSection) break   // reached the next released version — stop
+            if (inVersionSection) break // reached the next released version — stop
             inVersionSection = true
             continue
         }
@@ -129,9 +141,10 @@ intellijPlatform {
             untilBuild = providers.gradleProperty("pluginUntilBuild")
         }
 
-        changeNotes = providers.provider {
-            extractLatestChangelogAsHtml(projectDir.resolve("../../../CHANGELOG.md"))
-        }
+        changeNotes =
+            providers.provider {
+                extractLatestChangelogAsHtml(projectDir.resolve("../../../CHANGELOG.md"))
+            }
     }
 }
 
@@ -165,11 +178,12 @@ tasks {
         val os = System.getProperty("os.name").lowercase()
         val arch = System.getProperty("os.arch").lowercase()
         val isArm = arch == "aarch64"
-        val currentRid = when {
-            os.contains("win") -> if (isArm) "win-arm64" else "win-x64"
-            os.contains("mac") -> if (isArm) "osx-arm64" else "osx-x64"
-            else -> if (isArm) "linux-arm64" else "linux-x64"
-        }
+        val currentRid =
+            when {
+                os.contains("win") -> if (isArm) "win-arm64" else "win-x64"
+                os.contains("mac") -> if (isArm) "osx-arm64" else "osx-x64"
+                else -> if (isArm) "linux-arm64" else "linux-x64"
+            }
 
         environment("QUERYLENS_LSP_DLL", runtimeDir.resolve("server/EFQueryLens.Lsp.dll").absolutePath)
         // QUERYLENS_DAEMON_DLL points at the RID-specific directory so EngineDiscovery also
