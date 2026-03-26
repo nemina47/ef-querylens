@@ -156,10 +156,10 @@ internal class EFQueryLensActionServer {
 
                 thisLogger().info(
                     "[EFQueryLens] ActionServer: preview ready statusCode=${preview.statusCode} " +
-                        "sqlLen=${preview.sqlText.length} hasText=${preview.sqlText.isNotBlank()}",
+                        "sqlLen=${preview.actionSqlText.length} hasText=${preview.actionSqlText.isNotBlank()}",
                 )
 
-                if (preview.statusCode != 0 || preview.sqlText.isBlank()) {
+                if (preview.statusCode != 0 || preview.actionSqlText.isBlank()) {
                     val message =
                         preview.statusMessage
                             ?: if (preview.statusCode != 0) {
@@ -173,8 +173,8 @@ internal class EFQueryLensActionServer {
 
                 when (type) {
                     "copysql" -> {
-                        CopyPasteManager.getInstance().setContents(StringSelection(preview.sqlText))
-                        thisLogger().info("[EFQueryLens] ActionServer: copied ${preview.sqlText.length} chars to clipboard")
+                        CopyPasteManager.getInstance().setContents(StringSelection(preview.actionSqlText))
+                        thisLogger().info("[EFQueryLens] ActionServer: copied ${preview.actionSqlText.length} chars to clipboard")
                         ApplicationManager.getApplication().invokeLater {
                             val notification =
                                 NotificationGroupManager

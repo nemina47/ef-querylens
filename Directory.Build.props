@@ -5,8 +5,8 @@
     <Company>EF QueryLens Contributors</Company>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryType>git</RepositoryType>
-    <RepositoryUrl>https://github.com/nemina47/ef-querylens</RepositoryUrl>
-    <PackageProjectUrl>https://github.com/nemina47/ef-querylens</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/querylenshq/ef-querylens</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/querylenshq/ef-querylens</PackageProjectUrl>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>

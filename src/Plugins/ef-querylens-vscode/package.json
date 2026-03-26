@@ -9,11 +9,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/nemina47/ef-querylens.git"
+    "url": "https://github.com/querylenshq/ef-querylens.git"
   },
-  "homepage": "https://github.com/nemina47/ef-querylens",
+  "homepage": "https://github.com/querylenshq/ef-querylens",
   "bugs": {
-    "url": "https://github.com/nemina47/ef-querylens/issues"
+    "url": "https://github.com/querylenshq/ef-querylens/issues"
   },
   "keywords": [
     "ef-core",

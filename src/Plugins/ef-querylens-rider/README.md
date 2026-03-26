@@ -14,7 +14,7 @@ EF QueryLens for Rider integrates with the QueryLens LSP backend and gives you S
 
 ## Screenshot
 
-![EF QueryLens Rider](https://raw.githubusercontent.com/nemina47/ef-querylens/main/docs/assets/rider_plugin_single_query.png)
+![EF QueryLens Rider](https://raw.githubusercontent.com/querylenshq/ef-querylens/main/docs/assets/rider_plugin_single_query.png)
 
 ## Requirements
 

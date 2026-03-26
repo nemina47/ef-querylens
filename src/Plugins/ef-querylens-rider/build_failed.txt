@@ -1,0 +1,295 @@
+Reusing configuration cache.
+> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :initializeIntellijPlatformPlugin
+> Task :loadKtlintReporters UP-TO-DATE
+> Task :patchPluginXml UP-TO-DATE
+> Task :runKtlintCheckOverTestSourceSet NO-SOURCE
+> Task :ktlintTestSourceSetCheck SKIPPED
+> Task :processTestResources UP-TO-DATE
+> Task :processResources UP-TO-DATE
+> Task :generateManifest UP-TO-DATE
+> Task :runKtlintCheckOverMainSourceSet UP-TO-DATE
+> Task :runKtlintCheckOverKotlinScripts UP-TO-DATE
+
+> Task :ktlintMainSourceSetCheck FAILED
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:3:1 Imports must be ordered in lexicographic order without any empty lines in-between with "java", "javax", "kotlin" and aliases in the end
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:21:1 Unused import
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:24:29 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:24:47 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:24:66 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:24:122 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:35:57 Function body should be replaced with body expression
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:39:25 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:39:43 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:39:58 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:43:25 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:43:43 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:43:60 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:43:84 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:54:37 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:57:27 Property name should use the screaming snake case notation when the value can not be changed (cannot be auto-corrected)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:58:27 Property name should use the screaming snake case notation when the value can not be changed (cannot be auto-corrected)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:61:62 Function body should be replaced with body expression
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:65:89 Function body should be replaced with body expression
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:70:31 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:80:100 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:96:109 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:100:61 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:129:21 Argument should be on a separate line (unless all arguments can fit a single line)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:129:141 Exceeded max line length (140) (cannot be auto-corrected)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:129:154 Missing newline before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:134:26 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:136:49 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:138:26 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:143:76 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:153:61 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:168:28 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:168:103 Expected newline before '?.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:177:28 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:198:21 Argument should be on a separate line (unless all arguments can fit a single line)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:198:140 Exceeded max line length (140) (cannot be auto-corrected)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:198:146 Missing newline before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:208:29 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:239:53 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:248:21 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:254:53 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:263:21 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:280:50 Function body should be replaced with body expression
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:284:48 Function body should be replaced with body expression
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:290:26 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:292:49 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:294:26 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:298:98 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:306:26 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:308:49 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:310:26 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:314:98 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:324:25 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:324:42 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:324:66 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:336:33 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:338:1 Class body should not start with blank line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLspServerSupportProvider.kt:344:1 Trailing space(s)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:32:1 Unused import
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:34:41 Super type should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:34:60 Super type should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:35:1 Class body should not start with blank line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:37:19 Property name should use the screaming snake case notation when the value can not be changed (cannot be auto-corrected)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:42:42 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:42:60 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:42:82 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:46:24 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:89:26 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:136:27 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:152:43 Line is exceeding max line length. Break line after '=' in binary expression
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:152:141 Exceeded max line length (140) (cannot be auto-corrected)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:160:31 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:207:29 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:207:44 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:207:57 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:225:141 Exceeded max line length (140) (cannot be auto-corrected)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:244:17 Unexpected newline before '.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensLogToolWindowFactory.kt:248:1 File must end with a newline (\n)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensShowToolWindowAction.kt:12:41 Super type should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensShowToolWindowAction.kt:12:53 Super type should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensShowToolWindowAction.kt:13:1 Class body should not start with blank line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensShowToolWindowAction.kt:19:26 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:3:1 Imports must be ordered in lexicographic order without any empty lines in-between with "java", "javax", "kotlin" and aliases in the end
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:30:27 Property name should use the screaming snake case notation when the value can not be changed (cannot be auto-corrected)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:55:26 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:55:47 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:55:60 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:55:77 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:63:43 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:63:56 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:63:73 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:97:39 Argument should be on a separate line (unless all arguments can fit a single line)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:97:57 Argument should be on a separate line (unless all arguments can fit a single line)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:97:60 Argument should be on a separate line (unless all arguments can fit a single line)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:97:141 Exceeded max line length (140) (cannot be auto-corrected)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:97:142 Missing newline before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:102:35 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:103:57 Expected a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:103:57 Missing { ... }
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:104:30 Expected a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:104:30 Missing { ... }
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:122:28 Expected newline before '?.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:122:36 Expected newline before '?.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:122:49 Expected newline before '?.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:123:20 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:130:19 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:155:32 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:155:51 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:155:66 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:165:34 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:171:25 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:180:17 Unexpected newline before '.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:183:17 Unexpected newline before '.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:194:43 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:194:61 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:194:78 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:194:89 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:194:103 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:195:22 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:195:38 Expected newline before '.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:201:31 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:203:82 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:206:32 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:210:44 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:211:26 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:222:40 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:222:58 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:222:75 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:222:86 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:222:100 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:223:22 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:223:38 Expected newline before '.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:227:23 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:229:74 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:232:24 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:237:40 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:238:22 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:247:43 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:247:59 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:247:84 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:247:101 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:254:29 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:257:26 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:269:24 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:294:26 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:297:26 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:301:24 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:331:1 Unexpected indentation (8) (should be 4)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:332:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:333:1 Unexpected indentation (16) (should be 12)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:334:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:336:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:337:1 Unexpected indentation (16) (should be 12)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:338:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:340:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:340:30 Expected newline before '.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:341:1 Unexpected indentation (16) (should be 12)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:342:1 Unexpected indentation (16) (should be 12)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:343:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:344:1 Unexpected indentation (8) (should be 4)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:346:1 Unexpected indentation (8) (should be 4)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:346:61 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:346:61 Newline expected before expression body
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:347:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:348:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:349:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:350:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:351:1 Unexpected indentation (8) (should be 4)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:353:1 Unexpected indentation (8) (should be 4)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:353:70 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:353:70 Newline expected before expression body
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:354:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:355:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:356:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:357:1 Unexpected indentation (8) (should be 4)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:359:1 Unexpected indentation (8) (should be 4)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:359:40 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:359:58 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:359:75 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:359:90 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:360:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:361:1 Unexpected indentation (16) (should be 12)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:362:1 Unexpected indentation (20) (should be 16)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:362:53 Expected newline before '.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:363:1 Unexpected indentation (16) (should be 12)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:364:1 Unexpected indentation (20) (should be 16)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:364:53 Expected newline before '.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:365:1 Unexpected indentation (16) (should be 12)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:366:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:367:1 Unexpected indentation (8) (should be 4)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:369:1 Unexpected indentation (8) (should be 4)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:369:42 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:369:60 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:369:89 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:370:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:371:1 Unexpected indentation (16) (should be 12)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:372:1 Unexpected indentation (12) (should be 8)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:373:1 Unexpected indentation (8) (should be 4)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:377:21 Expected newline before '.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:377:32 Expected newline before '.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:379:26 Expected a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:379:26 Missing { ... }
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:380:18 Expected a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:380:18 Missing { ... }
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:381:1 Unexpected indentation (20) (should be 16)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:385:36 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:385:54 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:385:95 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:405:31 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:407:26 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:409:64 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:416:27 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:438:27 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:456:33 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:475:67 Function body should be replaced with body expression
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:477:22 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:480:75 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:483:22 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:486:75 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:489:22 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:492:75 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:495:25 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensUrlOpener.kt:498:75 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\WorkspaceLogIdentity.kt:48:29 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\WorkspaceLogIdentity.kt:57:32 First line of body expression fits on same line as function signature
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\WorkspaceLogIdentity.kt:64:1 File must end with a newline (\n)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensTooltipLinkHandler.kt:10:29 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensTooltipLinkHandler.kt:10:48 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensTooltipLinkHandler.kt:10:62 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\src\main\kotlin\efquerylens\EFQueryLensTooltipLinkHandler.kt:11:26 A multiline expression should start on a new line
+
+> Task :ktlintKotlinScriptCheck FAILED
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\build.gradle.kts:37:28 Newline expected after opening parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\build.gradle.kts:37:49 Parameter should start on a newline
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\build.gradle.kts:37:73 Newline expected before closing parenthesis
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\build.gradle.kts:41:22 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\build.gradle.kts:46:22 A multiline expression should start on a new line
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\build.gradle.kts:52:115 Missing trailing comma before ")"
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\build.gradle.kts:100:47 Expected newline before '.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\build.gradle.kts:100:82 Expected newline before '.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\build.gradle.kts:100:88 Expected newline before '.'
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\settings.gradle.kts:2:1 Unexpected tab character(s)
+C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\settings.gradle.kts:2:1 Unexpected indentation (1) (should be 4)
+
+> Task :compileKotlin UP-TO-DATE
+
+FAILURE: Build completed with 2 failures.
+
+1: Task failed with an exception.
+-----------
+* What went wrong:
+Execution failed for task ':ktlintMainSourceSetCheck'.
+> A failure occurred while executing org.jlleitschuh.gradle.ktlint.worker.ConsoleReportWorkAction
+   > KtLint found code style violations. Please see the following reports:
+     - C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\build\reports\ktlint\ktlintMainSourceSetCheck\ktlintMainSourceSetCheck.txt
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+==============================================================================
+
+2: Task failed with an exception.
+-----------
+* What went wrong:
+Execution failed for task ':ktlintKotlinScriptCheck'.
+> A failure occurred while executing org.jlleitschuh.gradle.ktlint.worker.ConsoleReportWorkAction
+   > KtLint found code style violations. Please see the following reports:
+     - C:\nemina\QueryLens\src\Plugins\ef-querylens-rider\build\reports\ktlint\ktlintKotlinScriptCheck\ktlintKotlinScriptCheck.txt
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+==============================================================================
+
+BUILD FAILED in 2s
+11 actionable tasks: 3 executed, 8 up-to-date
+Configuration cache entry reused.

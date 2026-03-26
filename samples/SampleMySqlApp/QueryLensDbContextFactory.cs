@@ -1,4 +1,3 @@
-using EntityFrameworkCore.Projectables;
 using Microsoft.EntityFrameworkCore;
 
 // ReSharper disable once CheckNamespace

@@ -117,4 +117,4 @@ Tell the user:
 >
 > - Commit pushed to origin
 > - Tag v$VERSION pushed — CI is now building and publishing all three plugins
-> - Check https://github.com/nemina47/ef-querylens/actions for pipeline status
+> - Check https://github.com/querylenshq/ef-querylens for pipeline status

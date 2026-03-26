@@ -42,6 +42,7 @@ class EFQueryLensUrlOpener : UrlOpener() {
         val statusMessage: String?,
         val avgTranslationMs: Double,
         val sqlText: String,
+        val actionSqlText: String,
         val warnings: List<String>,
     )
 
@@ -140,7 +141,7 @@ class EFQueryLensUrlOpener : UrlOpener() {
                     buildStructuredPreview(project, fileUri, line, character)
                         ?: return@executeOnPooledThread
 
-                if (preview.statusCode != 0 || preview.sqlText.isBlank()) {
+                if (preview.statusCode != 0 || preview.actionSqlText.isBlank()) {
                     val message =
                         preview.statusMessage
                             ?: if (preview.statusCode != 0) {
@@ -154,8 +155,8 @@ class EFQueryLensUrlOpener : UrlOpener() {
 
                 when (type) {
                     "copysql" -> {
-                        CopyPasteManager.getInstance().setContents(StringSelection(preview.sqlText))
-                        thisLogger().info("[EFQueryLens] SQL copied to clipboard (${preview.sqlText.length} chars)")
+                        CopyPasteManager.getInstance().setContents(StringSelection(preview.actionSqlText))
+                        thisLogger().info("[EFQueryLens] SQL copied to clipboard (${preview.actionSqlText.length} chars)")
                         showCopiedNotification(project)
                     }
                     "opensqleditor" -> openSqlInEditor(project, preview)
@@ -274,6 +275,7 @@ class EFQueryLensUrlOpener : UrlOpener() {
         val renderedStatements = renderStatements(statements)
         val enrichedSql = (hover["EnrichedSql"] as? String)?.trim()?.takeIf { it.isNotBlank() }
         val sqlText = renderedStatements.takeIf { it.isNotBlank() } ?: enrichedSql
+        val actionSqlText = enrichedSql ?: renderedStatements.takeIf { it.isNotBlank() }
 
         val warnings =
             ((hover["Warnings"] as? List<*>) ?: emptyList<Any?>())
@@ -288,6 +290,7 @@ class EFQueryLensUrlOpener : UrlOpener() {
                 statusMessage = statusMessage ?: "No SQL preview available at this location.",
                 avgTranslationMs = 0.0,
                 sqlText = "",
+                actionSqlText = "",
                 warnings = warnings,
             )
         }
@@ -335,6 +338,7 @@ class EFQueryLensUrlOpener : UrlOpener() {
             statusMessage = statusMessage,
             avgTranslationMs = avgTranslationMs,
             sqlText = sqlText ?: "",
+            actionSqlText = actionSqlText ?: "",
             warnings = warnings,
         )
     }
@@ -399,7 +403,7 @@ class EFQueryLensUrlOpener : UrlOpener() {
             try {
                 val timestamp =
                     LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HHmmss"))
-                val content = buildSqlFileContent(preview)
+                val content = preview.actionSqlText
                 val tempFile = File(System.getProperty("java.io.tmpdir"), "efquery_$timestamp.sql")
                 tempFile.writeText(content, Charsets.UTF_8)
                 val virtualFile =
@@ -473,24 +477,6 @@ class EFQueryLensUrlOpener : UrlOpener() {
             }
         }
     }
-
-    private fun buildSqlFileContent(preview: StructuredSqlPreview): String =
-        buildString {
-            appendLine("-- EF QueryLens")
-            if (preview.subtitle.isNotBlank()) {
-                // subtitle: "filepath:line · ProviderName · DbContextType"
-                val parts = preview.subtitle.split(" · ")
-                appendLine("-- Source:    ${parts.getOrElse(0) { "" }}")
-                if (parts.size > 1) appendLine("-- Provider:  ${parts[1]}")
-                if (parts.size > 2) appendLine("-- DbContext: ${parts[2]}")
-            }
-            if (preview.warnings.isNotEmpty()) {
-                appendLine("--")
-                preview.warnings.forEach { appendLine("-- Warning: $it") }
-            }
-            appendLine()
-            append(preview.sqlText)
-        }
 
     private fun parseQueryParams(query: String): Map<String, String> {
         if (query.isBlank()) return emptyMap()

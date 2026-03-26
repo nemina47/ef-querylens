@@ -1,0 +1,31 @@
+Reusing configuration cache.
+> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+
+> Task :compileKotlin FAILED
+e: file:///C:/nemina/QueryLens/src/Plugins/ef-querylens-rider/src/main/kotlin/efquerylens/EFQueryLensLspServerSupportProvider.kt:18:52 Unresolved reference 'LspServerNotificationsHandler'.
+e: file:///C:/nemina/QueryLens/src/Plugins/ef-querylens-rider/src/main/kotlin/efquerylens/EFQueryLensLspServerSupportProvider.kt:19:52 Unresolved reference 'Lsp4jClient'.
+e: file:///C:/nemina/QueryLens/src/Plugins/ef-querylens-rider/src/main/kotlin/efquerylens/EFQueryLensLspServerSupportProvider.kt:65:5 'createLsp4jClient' overrides nothing. Potential signatures for overriding:
+fun createLsp4jClient(handler: LspServerNotificationsHandler): Lsp4jClient
+e: file:///C:/nemina/QueryLens/src/Plugins/ef-querylens-rider/src/main/kotlin/efquerylens/EFQueryLensLspServerSupportProvider.kt:65:45 Unresolved reference 'LspServerNotificationsHandler'.
+e: file:///C:/nemina/QueryLens/src/Plugins/ef-querylens-rider/src/main/kotlin/efquerylens/EFQueryLensLspServerSupportProvider.kt:66:16 Return type mismatch: expected 'LanguageClient', actual 'EFQueryLensClient'.
+e: file:///C:/nemina/QueryLens/src/Plugins/ef-querylens-rider/src/main/kotlin/efquerylens/EFQueryLensLspServerSupportProvider.kt:335:14 Unresolved reference 'LspServerNotificationsHandler'.
+e: file:///C:/nemina/QueryLens/src/Plugins/ef-querylens-rider/src/main/kotlin/efquerylens/EFQueryLensLspServerSupportProvider.kt:337:5 Unresolved reference 'Lsp4jClient'.
+e: file:///C:/nemina/QueryLens/src/Plugins/ef-querylens-rider/src/main/kotlin/efquerylens/EFQueryLensLspServerSupportProvider.kt:345:44 Unresolved reference 'extractStructuredPreview'.
+e: file:///C:/nemina/QueryLens/src/Plugins/ef-querylens-rider/src/main/kotlin/efquerylens/EFQueryLensLspServerSupportProvider.kt:347:34 Unresolved reference 'openInPreviewDialog'.
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':compileKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 4s
+1 actionable task: 1 executed
+Configuration cache entry reused.

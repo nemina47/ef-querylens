@@ -14,9 +14,9 @@ EF QueryLens for Visual Studio provides hover-based SQL preview and quick SQL ac
 
 ## Screenshots
 
-![EF QueryLens Visual Studio Single Query](https://raw.githubusercontent.com/nemina47/ef-querylens/main/docs/assets/vs_extension_single_query.png)
+![EF QueryLens Visual Studio Single Query](https://raw.githubusercontent.com/querylenshq/ef-querylens/main/docs/assets/vs_extension_single_query.png)
 
-![EF QueryLens Visual Studio Multi Query](https://raw.githubusercontent.com/nemina47/ef-querylens/main/docs/assets/vs_extension_multi_query.png)
+![EF QueryLens Visual Studio Multi Query](https://raw.githubusercontent.com/querylenshq/ef-querylens/main/docs/assets/vs_extension_multi_query.png)
 
 ## Requirements
 

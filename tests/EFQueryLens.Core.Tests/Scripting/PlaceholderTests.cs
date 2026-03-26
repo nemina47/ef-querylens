@@ -31,7 +31,7 @@ public class PlaceholderTests
 
     // ─── Scalar — built-in primitives ─────────────────────────────────────────
 
-    [Fact] public void Scalar_String_ReturnsStubLiteral()   => Assert.Equal("\"__ql_stub_0\"", Scalar(typeof(string)));
+    [Fact] public void Scalar_String_ReturnsStubLiteral()   => Assert.Equal("\"qlstub0\"", Scalar(typeof(string)));
     [Fact] public void Scalar_Int_ReturnsOne()               => Assert.Equal("1",              Scalar(typeof(int)));
     [Fact] public void Scalar_UInt_ReturnsOneU()             => Assert.Equal("1U",             Scalar(typeof(uint)));
     [Fact] public void Scalar_Long_ReturnsOneL()             => Assert.Equal("1L",             Scalar(typeof(long)));
@@ -93,8 +93,8 @@ public class PlaceholderTests
     public void Contains_String_ReturnsTwoDistinctStubLiterals()
     {
         var result = Contains(typeof(string));
-        Assert.Contains("__ql_stub_0", result, StringComparison.Ordinal);
-        Assert.Contains("__ql_stub_1", result, StringComparison.Ordinal);
+        Assert.Contains("qlstub0", result, StringComparison.Ordinal);
+        Assert.Contains("qlstub1", result, StringComparison.Ordinal);
     }
 
     [Fact]

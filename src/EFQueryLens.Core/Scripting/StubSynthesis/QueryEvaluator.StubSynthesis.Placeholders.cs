@@ -62,7 +62,7 @@ public sealed partial class QueryEvaluator
         if (t == typeof(Guid))
             return "System.Guid.Empty, new System.Guid(\"00000000-0000-0000-0000-000000000001\")";
         if (t == typeof(string))
-            return "\"__ql_stub_0\", \"__ql_stub_1\"";
+            return "\"qlstub0\", \"qlstub1\"";
         if (t == typeof(bool))
             return "false, true";
         if (t == typeof(char))
@@ -110,7 +110,7 @@ public sealed partial class QueryEvaluator
         var t = Nullable.GetUnderlyingType(variableType) ?? variableType;
 
         if (t == typeof(string))
-            return "\"__ql_stub_0\"";
+            return "\"qlstub0\"";
         if (t == typeof(Guid))
             return "new System.Guid(\"00000000-0000-0000-0000-000000000001\")";
         if (t == typeof(bool))

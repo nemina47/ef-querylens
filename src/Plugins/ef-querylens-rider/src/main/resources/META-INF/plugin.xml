@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>dev.efquerylens</id>
     <name>EF QueryLens</name>
-    <vendor email="nemina47@users.noreply.github.com" url="https://github.com/nemina47/ef-querylens">nemina47</vendor>
+    <vendor email="nemina47@users.noreply.github.com" url="https://github.com/querylenshq/ef-querylens">nemina47</vendor>
     <description>EF QueryLens translates EF Core LINQ into SQL directly in JetBrains Rider and provides quick previews, logs, and copy actions.</description>
 
     <depends>com.intellij.modules.rider</depends>

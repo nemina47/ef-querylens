@@ -1,90 +1,117 @@
 ---
 name: release
-description: "Use when: creating a release, publishing a version, cutting a release, tagging a release, releasing plugin, release workflow, prepare release, create git tag, create GitHub release, push release branch, update version, bump version, update changelog, run release script, package plugin, publish to marketplace. Covers: version validation across manifests, git branch + tag creation, running scripts/release.ps1, changelog extraction, and communicating version numbers to user."
+description: "Use when: creating a release, publishing a version, cutting a release, tagging a release, releasing plugin, release workflow, prepare release, create git tag, create GitHub release, update version, bump version, and update changelog. Covers: changelog extraction/review, semantic version validation, version bumping in VS Code + Rider manifests, guarded git commit/tag flow, and release status messaging."
 ---
 
 # Release Skill
 
 Use this skill whenever the user asks to cut a release, tag a version, publish plugins, or create a GitHub release for QueryLens.
 
-## Version Manifest Locations
-
-Always verify and bump **all three** before building:
-
-| Plugin | File | Field |
-|---|---|---|
-| VS Code | `src/Plugins/ef-querylens-vscode/package.json` | `"version"` |
-| Rider | `src/Plugins/ef-querylens-rider/gradle.properties` | `pluginVersion` |
-| Visual Studio | `src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/source.extension.vsixmanifest` | `<Identity ... Version="...">` |
-
-Cross-check all three before proceeding. If any are inconsistent, resolve with the user before continuing.
-
 ## Release Workflow
 
-### Step 1 — Confirm version
+### Step 1 — Verify git working tree is clean
 
-Ask for (or confirm from context) the target version string (e.g. `0.0.3`). Identify whether it is a preview or stable release. Use `v<version>-preview` for previews, `v<version>` for stable.
+Run:
 
-### Step 2 — CHANGELOG
-
-Update `CHANGELOG.md`:
-- Rename `## [Unreleased]` to `## [<version>] - <date>` (ISO 8601, e.g. `2026-03-19`)
-- Add a fresh `## [Unreleased]` section above it
-
-Commit this change together with the version bump in Step 4.
-
-### Step 3 — Bump version manifests
-
-Edit all three manifest files listed above to the new version. Keep the changes in a single commit.
-
-### Step 4 — Branch and commit
-
-```powershell
-git checkout -b release/v<version>
-git add CHANGELOG.md src/Plugins/ef-querylens-vscode/package.json src/Plugins/ef-querylens-rider/gradle.properties "src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/source.extension.vsixmanifest"
-git commit -m "chore(release): bump version to <version>"
-git push -u origin release/v<version>
+```bash
+git status --short
 ```
 
-### Step 5 — Run the release script
+If any modified, staged, or untracked files are listed, stop immediately and tell the user:
 
-```powershell
-./scripts/release.ps1 -Version <version>
+> Working tree is not clean. Please commit or stash all changes before releasing.
+
+### Step 2 — Read the current changelog
+
+Read `CHANGELOG.md` from the repo root. Extract everything under the `## [Unreleased]` heading and stop at the next `## [` heading. Display that section to the user so they can review what is going into the release.
+
+If the section is empty, ask:
+
+> The [Unreleased] section is empty. Are you sure you want to release with no recorded changes? (yes/no)
+
+If the user answers no, stop.
+
+### Step 3 — Confirm the release version
+
+If a version is supplied by the caller, use it. Otherwise ask for one (for example `0.0.3`).
+
+Validate that it matches `MAJOR.MINOR.PATCH` (three numeric segments separated by dots). If invalid, ask again until valid. Store it as `VERSION`.
+
+### Step 4 — Check the version does not already exist
+
+Run:
+
+```bash
+git tag --list "v$VERSION"
 ```
 
-Output lands in `releases/<version>/`:
-- `vscode/ef-querylens-vscode-<version>.vsix`
-- `rider/ef-querylens-rider-<version>.zip`
-- `visualstudio/EFQueryLens.VisualStudio.vsix`
-- `release-notes.md` (extracted from CHANGELOG)
+If output is non-empty, stop and tell the user:
 
-Use `-SkipBuild` to reuse existing artifacts if already built. Use `-Clean` to wipe and rebuild from scratch.
+> Tag v$VERSION already exists. Choose a different version.
 
-#### Known Gradle quirk
+### Step 5 — Update CHANGELOG.md
 
-`buildSearchableOptions` requires a live Rider headless session — the script already skips it with `-x buildSearchableOptions`. This is expected. The plugin is fully functional without it.
+Edit `CHANGELOG.md` at repo root:
 
-### Step 6 — Tag
+1. Replace the `## [Unreleased]` line with:
 
-```powershell
-git tag v<version>-preview   # preview
-# or
-git tag v<version>           # stable
-git push origin v<version>-preview
+   ```
+   ## [Unreleased]
+
+   ## [VERSION] - YYYY-MM-DD
+   ```
+
+   where `YYYY-MM-DD` is today's ISO date.
+
+2. Keep the previously unreleased content under the new `[VERSION]` heading.
+3. Leave the new `[Unreleased]` section intentionally empty as the next-cycle placeholder.
+
+### Step 6 — Bump version references
+
+Update exactly these files:
+
+- `src/Plugins/ef-querylens-vscode/package.json` set `"version"` to `VERSION`
+- `src/Plugins/ef-querylens-rider/gradle.properties` set `pluginVersion` to `VERSION`
+
+### Step 7 — Commit the version bump
+
+Stage exactly these files and commit:
+
+```bash
+git add CHANGELOG.md \
+	src/Plugins/ef-querylens-vscode/package.json \
+	src/Plugins/ef-querylens-rider/gradle.properties
+git commit -m "chore: release v$VERSION"
 ```
 
-If moving an existing tag: `git tag -f`, then `git push --force origin <tagname>`.
+Do not add any other files.
 
-### Step 7 — GitHub Release
+### Step 8 — Create and push the tag
 
-Create a GitHub release pointing at the tag:
-- Title: `v<version>` (or `v<version> Preview`)
-- Body: contents of `releases/<version>/release-notes.md`
-- Attach all three artifacts from `releases/<version>/`
-- Mark as pre-release if using a `-preview` tag
+Run:
+
+```bash
+git tag v$VERSION
+git push origin HEAD
+git push origin v$VERSION
+```
+
+The tag push triggers the GitHub Actions release workflow, which:
+- Builds 6 platform-specific VS Code VSIXes and publishes them to the VS Code Marketplace
+- Builds the Rider plugin ZIP (with daemon binaries for all 6 RIDs) and publishes it to JetBrains Marketplace
+- Creates a GitHub Release with all artifacts attached
+
+### Step 9 — Confirm success
+
+Tell the user:
+
+> ✅ Released v$VERSION
+>
+> - Commit pushed to origin
+> - Tag v$VERSION pushed — CI is now building and publishing all three plugins
+> - Check https://github.com/querylenshq/ef-querylens for pipeline status
 
 ## Notes
 
-- `releases/` is gitignored — artifacts are never committed.
-- The VS extension manifest (`source.extension.vsixmanifest`) also contains a `<ReleaseNotes>` URL — update it to point at the new tag URL when bumping the VS extension version.
-- The release script's `Get-ChangelogSection` extracts markdown from the first `## [...]` heading it finds. If CHANGELOG parsing fails, the script falls back to a placeholder — check `release-notes.md` before uploading.
+- This skill is intentionally aligned with `.claude/commands/release.md`.
+- If release workflow changes, update both files in the same commit.

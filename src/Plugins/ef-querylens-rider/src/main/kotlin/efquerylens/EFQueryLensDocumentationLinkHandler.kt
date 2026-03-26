@@ -78,15 +78,15 @@ class EFQueryLensDocumentationLinkHandler : DocumentationLinkHandler {
 
                     val preview = opener.buildStructuredPreview(project, fileUri, line, character)
 
-                    if (preview == null || preview.sqlText.isBlank()) {
+                    if (preview == null || preview.actionSqlText.isBlank()) {
                         thisLogger().warn("[EFQueryLens] DocLinkHandler: no SQL available for $action")
                         return@withContext
                     }
 
                     when (action) {
                         "copysql" -> {
-                            CopyPasteManager.getInstance().setContents(StringSelection(preview.sqlText))
-                            thisLogger().info("[EFQueryLens] DocLinkHandler: SQL copied (${preview.sqlText.length} chars)")
+                            CopyPasteManager.getInstance().setContents(StringSelection(preview.actionSqlText))
+                            thisLogger().info("[EFQueryLens] DocLinkHandler: SQL copied (${preview.actionSqlText.length} chars)")
                             ApplicationManager.getApplication().invokeLater {
                                 NotificationGroupManager
                                     .getInstance()

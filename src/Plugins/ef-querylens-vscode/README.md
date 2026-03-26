@@ -14,7 +14,7 @@ EF QueryLens for VS Code connects to the QueryLens language server and shows gen
 
 ## Screenshot
 
-![EF QueryLens VS Code](https://raw.githubusercontent.com/nemina47/ef-querylens/main/docs/assets/vs_code_plugin_single_query.png)
+![EF QueryLens VS Code](https://raw.githubusercontent.com/querylenshq/ef-querylens/main/docs/assets/vs_code_plugin_single_query.png)
 
 ## Requirements
 
@@ -52,5 +52,5 @@ npm run compile
 
 ## More
 
-- Repository: https://github.com/nemina47/ef-querylens
-- Docs: https://github.com/nemina47/ef-querylens/tree/main/docs
+- Repository: https://github.com/querylenshq/ef-querylens
+- Docs: https://github.com/querylenshq/ef-querylens/tree/main/docs

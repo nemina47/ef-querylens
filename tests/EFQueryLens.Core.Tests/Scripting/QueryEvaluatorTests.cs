@@ -493,7 +493,7 @@ public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
             missingName: "term",
             expression: "db.Customers.Where(c => c.Name.ToLower().Contains(term) || c.Email.ToLower().StartsWith(term))");
 
-        Assert.Equal("string term = \"__ql_stub_0\";", stub);
+        Assert.Equal("string term = \"qlstub0\";", stub);
     }
 
     [Fact]
