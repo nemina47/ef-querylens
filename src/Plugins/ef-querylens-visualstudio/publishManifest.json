@@ -1,6 +1,9 @@
 {
   "$schema": "http://json.schemastore.org/vsix-publish",
   "categories": [ "Coding", "Other" ],
+  "identity": {
+    "internalName": "EFQueryLensVS"
+  },
   "priceCategory": "free",
   "publisher": "EFQueryLens",
   "private": false,
