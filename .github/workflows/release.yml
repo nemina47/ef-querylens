@@ -23,19 +23,60 @@ jobs:
           - darwin-arm64
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Build and package VS Code extension
+
+      - name: Extract version from tag
+        id: version
+        # GITHUB_REF_NAME = "v1.2.3" → strip leading "v" → "1.2.3"
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
         working-directory: src/Plugins/ef-querylens-vscode
+        run: npm ci
+
+      - name: Set extension version
+        working-directory: src/Plugins/ef-querylens-vscode
+        # Updates package.json version without creating a git commit or tag.
+        # vsce package reads the version from package.json, so this is how we
+        # keep the published version in sync with the git tag.
+        run: npm version ${{ steps.version.outputs.VERSION }} --no-git-tag-version
+
+      - name: Copy changelog into extension directory
+        # vsce reads CHANGELOG.md from the extension root and surfaces it on the
+        # VS Code Marketplace listing. The canonical file lives at the repo root.
+        run: cp CHANGELOG.md src/Plugins/ef-querylens-vscode/CHANGELOG.md
+
+      - name: Package VS Code extension
+        working-directory: src/Plugins/ef-querylens-vscode
+        env:
+          QUERYLENS_RUNTIME_IDENTIFIER: ${{ matrix.target }}
+        # vsce package automatically invokes the vscode:prepublish hook, which
+        # runs "compile && prepare-runtime". QUERYLENS_RUNTIME_IDENTIFIER is
+        # inherited by the hook so prepare-runtime publishes the correct RID.
         run: |
-          npm ci
-          npm run compile
-          npm run prepare-runtime
-          npx --yes @vscode/vsce package --pre-release --target ${{ matrix.target }} -o ef-querylens-vscode-${{ matrix.target }}.vsix
+          npx --yes @vscode/vsce package \
+            --pre-release \
+            --target ${{ matrix.target }} \
+            -o ef-querylens-vscode-${{ matrix.target }}.vsix
+
+      - name: Publish to VS Code Marketplace
+        working-directory: src/Plugins/ef-querylens-vscode
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          npx --yes @vscode/vsce publish \
+            --pre-release \
+            --target ${{ matrix.target }} \
+            -i ef-querylens-vscode-${{ matrix.target }}.vsix \
+            --pat "$VSCE_PAT"
+
       - name: Upload VS Code artifact
         uses: actions/upload-artifact@v4
         with:
@@ -46,22 +87,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
-      - name: Build runtime dependencies
-        run: |
-          dotnet build src/EFQueryLens.Lsp/EFQueryLens.Lsp.csproj -c Debug
-          dotnet build src/EFQueryLens.Daemon/EFQueryLens.Daemon.csproj -c Debug
-      - name: Build Rider plugin
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Build and publish Rider plugin
         working-directory: src/Plugins/ef-querylens-rider
+        env:
+          JETBRAINS_PUBLISH_TOKEN: ${{ secrets.JETBRAINS_PUBLISH_TOKEN }}
+        # -PpluginVersion overrides the value in gradle.properties so the
+        # published ZIP version matches the git tag without editing any file.
+        # bundleQueryLensRuntime (called by prepareSandbox → publishPlugin)
+        # runs "dotnet publish" for all 6 RIDs and the portable LSP DLL.
         run: |
           chmod +x ./gradlew
-          ./gradlew buildPlugin --no-daemon
+          ./gradlew publishPlugin \
+            -PpluginVersion=${{ steps.version.outputs.VERSION }} \
+            --no-daemon
+
       - name: Upload Rider artifact
         uses: actions/upload-artifact@v4
         with:
@@ -72,11 +125,14 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+
       - name: Build Visual Studio extension
         run: dotnet build src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/EFQueryLens.VisualStudio.csproj -c Debug
+
       - name: Upload Visual Studio artifact
         uses: actions/upload-artifact@v4
         with:
@@ -91,10 +147,12 @@ jobs:
       - build-visual-studio-extension
     steps:
       - uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-assets
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
