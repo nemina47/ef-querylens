@@ -161,7 +161,7 @@ jobs:
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vsixPublisher = & $vswhere -latest -find "VSSDK\VisualStudioIntegration\Tools\Bin\VsixPublisher.exe"
-          $vsix = Get-Item "src\Plugins\ef-querylens-visualstudio\EFQueryLens.VisualStudio\bin\Release\*.vsix" | Select-Object -First 1
+          $vsix = Get-Item "src\Plugins\ef-querylens-visualstudio\EFQueryLens.VisualStudio\bin\Release\net472\*.vsix" | Select-Object -First 1
           $manifest = Resolve-Path "src\Plugins\ef-querylens-visualstudio\publishManifest.json"
           Write-Host "Publishing $($vsix.FullName)"
           & $vsixPublisher publish `
@@ -173,7 +173,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ef-querylens-visualstudio
-          path: src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/bin/Release/*.vsix
+          path: src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/bin/Release/net472/*.vsix
 
   release:
     runs-on: ubuntu-latest
