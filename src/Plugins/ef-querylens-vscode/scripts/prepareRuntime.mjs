@@ -114,13 +114,32 @@ function getPublishDirectory(repositoryRoot, projectName, configuration, framewo
   return path.join(base, 'publish');
 }
 
+/**
+ * VS Code Marketplace target names differ from .NET RIDs.
+ * Normalise the incoming value so dotnet publish always receives a valid RID.
+ *
+ * VS Code target  →  .NET RID
+ *   win32-x64    →  win-x64
+ *   win32-arm64  →  win-arm64
+ *   darwin-x64   →  osx-x64
+ *   darwin-arm64 →  osx-arm64
+ *   linux-*      →  linux-* (unchanged)
+ */
+const VSCODE_TARGET_TO_DOTNET_RID = {
+  'win32-x64': 'win-x64',
+  'win32-arm64': 'win-arm64',
+  'darwin-x64': 'osx-x64',
+  'darwin-arm64': 'osx-arm64',
+};
+
 function normalizeRuntimeIdentifier(value) {
   if (typeof value !== 'string') {
     return null;
   }
 
   const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  if (trimmed.length === 0) return null;
+  return VSCODE_TARGET_TO_DOTNET_RID[trimmed] ?? trimmed;
 }
 
 function copyDirectory(sourceDir, destinationDir) {
