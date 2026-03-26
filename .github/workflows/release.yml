@@ -46,7 +46,7 @@ jobs:
         # Updates package.json version without creating a git commit or tag.
         # vsce package reads the version from package.json, so this is how we
         # keep the published version in sync with the git tag.
-        run: npm version ${{ steps.version.outputs.VERSION }} --no-git-tag-version
+        run: npm version ${{ steps.version.outputs.VERSION }} --no-git-tag-version --allow-same-version
 
       - name: Copy changelog into extension directory
         # vsce reads CHANGELOG.md from the extension root and surfaces it on the
@@ -62,7 +62,6 @@ jobs:
         # inherited by the hook so prepare-runtime publishes the correct RID.
         run: |
           npx --yes @vscode/vsce package \
-            --pre-release \
             --target ${{ matrix.target }} \
             -o ef-querylens-vscode-${{ matrix.target }}.vsix
 
@@ -70,10 +69,10 @@ jobs:
         working-directory: src/Plugins/ef-querylens-vscode
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        # --target is already embedded in the VSIX manifest from the package step;
+        # passing it again alongside --packagePath (-i) is an error in vsce.
         run: |
           npx --yes @vscode/vsce publish \
-            --pre-release \
-            --target ${{ matrix.target }} \
             -i ef-querylens-vscode-${{ matrix.target }}.vsix \
             --pat "$VSCE_PAT"
 
