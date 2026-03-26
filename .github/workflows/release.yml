@@ -138,14 +138,20 @@ jobs:
 
       - name: Inject version into vsixmanifest
         shell: pwsh
-        # Updates the <Identity Version="..."> attribute in the VSIX manifest so the
-        # published extension version matches the git tag.
+        # Updates Identity.Version and d:ReleaseNotes in the VSIX manifest so both
+        # the published version and the release notes link match the git tag.
         run: |
+          $version = "${{ steps.version.outputs.VERSION }}"
           $manifestPath = Resolve-Path "src\Plugins\ef-querylens-visualstudio\EFQueryLens.VisualStudio\source.extension.vsixmanifest"
           $xml = [xml](Get-Content $manifestPath)
-          $xml.PackageManifest.Metadata.Identity.Version = "${{ steps.version.outputs.VERSION }}"
+          $xml.PackageManifest.Metadata.Identity.Version = $version
+          $ns = @{ d = "http://schemas.microsoft.com/developer/vsx-schema-design/2011" }
+          $releaseNotes = Select-Xml -Xml $xml -XPath "//d:ReleaseNotes" -Namespace $ns
+          if ($releaseNotes) {
+            $releaseNotes.Node.InnerText = "https://github.com/querylenshq/ef-querylens/releases/tag/v$version"
+          }
           $xml.Save($manifestPath)
-          Write-Host "Set VSIX version to ${{ steps.version.outputs.VERSION }}"
+          Write-Host "Set VSIX version to $version"
 
       - name: Build Visual Studio extension
         run: dotnet build src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/EFQueryLens.VisualStudio.csproj -c Release

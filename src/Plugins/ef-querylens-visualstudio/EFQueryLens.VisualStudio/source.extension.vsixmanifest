@@ -4,10 +4,10 @@
         <Identity Id="EFQueryLens.VisualStudio.9f5a9a8e-f220-4ef0-be7c-a3cff5c767a5" Version="0.0.2" Language="en-US" Publisher="EF QueryLens" />
         <DisplayName>EF QueryLens</DisplayName>
         <Description>Preview your EF Core SQL in real time, without leaving your IDE.</Description>
-        <MoreInfo>https://github.com/nemina47/ef-querylens</MoreInfo>
+        <MoreInfo>https://github.com/querylenshq/ef-querylens</MoreInfo>
         <License>LICENSE.txt</License>
-        <d:ReleaseNotes>https://github.com/nemina47/ef-querylens/releases/tag/v0.0.2-preview</d:ReleaseNotes>
-        <d:GettingStartedGuide>https://github.com/nemina47/ef-querylens/blob/main/docs/getting-started.md</d:GettingStartedGuide>
+        <d:ReleaseNotes>https://github.com/querylenshq/ef-querylens/releases/latest</d:ReleaseNotes>
+        <d:GettingStartedGuide>https://github.com/querylenshq/ef-querylens/blob/main/docs/getting-started.md</d:GettingStartedGuide>
         <Icon>icon.png</Icon>
         <PreviewImage>preview.png</PreviewImage>
         <Tags>EF Core, Entity Framework, SQL, LINQ, C#, Productivity</Tags>
