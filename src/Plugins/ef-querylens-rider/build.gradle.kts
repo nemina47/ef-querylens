@@ -31,26 +31,18 @@ dependencies {
 
 val bundledRuntimeOutputDir = layout.buildDirectory.dir("generated/querylens-runtime")
 
+// .NET RIDs to bundle inside the plugin ZIP.
+// dotnet publish produces a native AppHost launcher per RID (framework-dependent, not self-contained),
+// so the daemon runs natively on each platform without needing `dotnet` in PATH explicitly —
+// Rider's own embedded .NET runtime is used via the AppHost.
+val daemonRids = listOf("win-x64", "win-arm64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64")
+
+val lspProjectPath = projectDir.resolve("../../../src/EFQueryLens.Lsp/EFQueryLens.Lsp.csproj").canonicalPath
+val daemonProjectPath = projectDir.resolve("../../../src/EFQueryLens.Daemon/EFQueryLens.Daemon.csproj").canonicalPath
+
 val bundleQueryLensRuntime by tasks.registering {
     val outputDir = bundledRuntimeOutputDir
     outputs.dir(outputDir)
-
-    // Compute paths here (configuration block, not inside doLast).
-    // doLast is a task *action* that Gradle's configuration cache serializes.
-    // If projectDir were accessed inside doLast, the compiled lambda would capture
-    // Build_gradle as $$implicitReceiver_Project — a script object reference that
-    // Gradle cannot serialize and that is null at action execution time.
-    // By resolving to plain Strings here, doLast only closes over String/List<String>
-    // values, which the configuration cache can serialize correctly.
-    val lspCsprojPath =
-        projectDir.resolve("../../../src/EFQueryLens.Lsp/EFQueryLens.Lsp.csproj").canonicalPath
-    val daemonCsprojPath =
-        projectDir.resolve("../../../src/EFQueryLens.Daemon/EFQueryLens.Daemon.csproj").canonicalPath
-    // .NET RIDs to bundle inside the plugin ZIP.
-    // dotnet publish produces a native AppHost launcher per RID (framework-dependent, not self-contained),
-    // so the daemon runs natively on each platform without needing `dotnet` in PATH explicitly —
-    // Rider's own embedded .NET runtime is used via the AppHost.
-    val daemonRids = listOf("win-x64", "win-arm64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64")
 
     doLast {
         val out = outputDir.get().asFile
@@ -69,7 +61,7 @@ val bundleQueryLensRuntime by tasks.registering {
         // LSP: portable framework-dependent DLL, no AppHost.
         // Always launched as `dotnet EFQueryLens.Lsp.dll` by Rider's GeneralCommandLine — no AppHost needed.
         dotnetPublish(
-            lspCsprojPath,
+            lspProjectPath,
             "-c",
             "Release",
             "--no-self-contained",
@@ -84,7 +76,7 @@ val bundleQueryLensRuntime by tasks.registering {
         // EngineDiscovery.cs finds the AppHost adjacent to the DLL and uses it directly.
         for (rid in daemonRids) {
             dotnetPublish(
-                daemonCsprojPath,
+                daemonProjectPath,
                 "-c",
                 "Release",
                 "--no-self-contained",
