@@ -76,8 +76,12 @@ val bundleQueryLensRuntime by tasks.registering {
         // Always launched as `dotnet EFQueryLens.Lsp.dll` by Rider's GeneralCommandLine — no AppHost needed.
         dotnetPublish(
             lspCsprojPath,
-            "-c", "Release", "--no-self-contained", "/p:UseAppHost=false",
-            "--output", out.resolve("server").absolutePath,
+            "-c",
+            "Release",
+            "--no-self-contained",
+            "/p:UseAppHost=false",
+            "--output",
+            out.resolve("server").absolutePath,
         )
 
         // Daemon: framework-dependent AppHost per RID.
@@ -87,9 +91,14 @@ val bundleQueryLensRuntime by tasks.registering {
         for (rid in rids) {
             dotnetPublish(
                 daemonCsprojPath,
-                "-c", "Release", "--no-self-contained",
-                "-r", rid, "/p:UseAppHost=true",
-                "--output", out.resolve("daemon/$rid").absolutePath,
+                "-c",
+                "Release",
+                "--no-self-contained",
+                "-r",
+                rid,
+                "/p:UseAppHost=true",
+                "--output",
+                out.resolve("daemon/$rid").absolutePath,
             )
         }
     }
