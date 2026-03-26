@@ -78,7 +78,7 @@ jobs:
             --pat "$VSCE_PAT"
 
       - name: Upload VS Code artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ef-querylens-vscode-${{ matrix.target }}
           path: src/Plugins/ef-querylens-vscode/ef-querylens-vscode-${{ matrix.target }}.vsix
@@ -116,7 +116,7 @@ jobs:
             --no-daemon
 
       - name: Upload Rider artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ef-querylens-rider
           path: src/Plugins/ef-querylens-rider/build/distributions/*.zip
@@ -134,7 +134,7 @@ jobs:
         run: dotnet build src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/EFQueryLens.VisualStudio.csproj -c Debug
 
       - name: Upload Visual Studio artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ef-querylens-visualstudio
           path: src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/bin/Debug/net472/*.vsix
