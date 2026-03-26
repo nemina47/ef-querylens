@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using EFQueryLens.Core.AssemblyContext;
 using EFQueryLens.Core.Common;
 using EFQueryLens.Core.Contracts;
-using EFQueryLens.Core.Contracts.Explain;
 using EFQueryLens.Core.Scripting;
 using QueryEvaluator = EFQueryLens.Core.Scripting.Evaluation.QueryEvaluator;
 
@@ -104,7 +103,7 @@ public sealed partial class QueryLensEngine : IQueryLensEngine, IDbContextPoolPr
             min: 1,
             max: 16);
         _shadowCache = new ShadowAssemblyCache(_debugEnabled);
-        _shadowCache.ScheduleCleanupIfDue(force: true);
+        _shadowCache.RunStartupCleanup();
     }
 
     // ── IQueryLensEngine ──────────────────────────────────────────────────────
@@ -135,12 +134,6 @@ public sealed partial class QueryLensEngine : IQueryLensEngine, IDbContextPoolPr
         return retryResult;
     }
 
-    public Task<ExplainResult> ExplainAsync(
-        ExplainRequest request, CancellationToken ct = default) =>
-        throw new NotSupportedException(
-            "ExplainAsync requires a live database connection and is deferred to Phase 2. " +
-            "Use TranslateAsync for offline SQL generation.");
-
     public Task<ModelSnapshot> InspectModelAsync(
         ModelInspectionRequest request, CancellationToken ct = default)
     {
@@ -155,7 +148,16 @@ public sealed partial class QueryLensEngine : IQueryLensEngine, IDbContextPoolPr
             {
                 var assemblyPath = Path.GetFullPath(request.AssemblyPath);
                 var alcCtx = GetOrRefreshContext(assemblyPath);
-                var dbContextType = alcCtx.FindDbContextType(request.DbContextTypeName);
+                Type dbContextType;
+                try
+                {
+                    dbContextType = alcCtx.FindDbContextType(request.DbContextTypeName);
+                }
+                catch (InvalidOperationException ex) when (QueryEvaluator.IsNoDbContextFoundError(ex))
+                {
+                    QueryEvaluator.TryLoadSiblingAssemblies(alcCtx);
+                    dbContextType = alcCtx.FindDbContextType(request.DbContextTypeName);
+                }
                 var dbInstance = CreateDbContextForInspection(dbContextType, alcCtx);
 
                 var snapshot = BuildModelSnapshot(dbInstance, dbContextType);
@@ -183,6 +185,5 @@ public sealed partial class QueryLensEngine : IQueryLensEngine, IDbContextPoolPr
         _alcCache.Clear();
         _alcContextGates.Clear();
         await DisposeDbContextPoolAsync();
-        _shadowCache.CleanupIfDue(force: true);
     }
 }

@@ -21,6 +21,8 @@ internal sealed partial class QueryLensLanguageClient
                 hoverCancelGraceMs = 1200,
                 markdownQueueAdaptiveWaitMs = 200,
                 structuredQueueAdaptiveWaitMs = 200,
+                warmupSuccessTtlMs = 60_000,
+                warmupFailureCooldownMs = 5_000,
             }
         };
     }

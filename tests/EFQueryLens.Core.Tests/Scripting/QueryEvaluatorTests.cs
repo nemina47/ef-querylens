@@ -8,31 +8,47 @@ using QueryEvaluator = EFQueryLens.Core.Scripting.Evaluation.QueryEvaluator;
 
 namespace EFQueryLens.Core.Tests.Scripting;
 
+public sealed class QueryEvaluatorFixture : IAsyncLifetime
+{
+    public ProjectAssemblyContext AlcCtx { get; private set; } = null!;
+    public QueryEvaluator Evaluator { get; } = new();
+
+    public Task InitializeAsync()
+    {
+        AlcCtx = new ProjectAssemblyContext(QueryEvaluatorTests.GetSampleMySqlAppDll());
+        return Task.CompletedTask;
+    }
+
+    public Task DisposeAsync()
+    {
+        AlcCtx.Dispose();
+        return Task.CompletedTask;
+    }
+}
+
 /// <summary>
 /// Integration-style unit tests for <see cref="QueryEvaluator"/>.
 ///
 /// Sample fixtures are copied into isolated subfolders under the test output dir
 /// so transitive package DLLs do not overwrite each other.
 /// </summary>
-[Collection("AssemblyLoadContextIsolation")]
-public class QueryEvaluatorTests : IDisposable
+[Collection("QueryEvaluatorIsolation")]
+public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
 {
     private const string DefaultMySqlDbContextType = "SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext";
 
     private readonly ProjectAssemblyContext _alcCtx;
     private readonly QueryEvaluator _evaluator;
 
-    public QueryEvaluatorTests()
+    public QueryEvaluatorTests(QueryEvaluatorFixture fixture)
     {
-        _alcCtx    = new ProjectAssemblyContext(GetSampleMySqlAppDll());
-        _evaluator = new QueryEvaluator();
+        _alcCtx    = fixture.AlcCtx;
+        _evaluator = fixture.Evaluator;
     }
-
-    public void Dispose() => _alcCtx.Dispose();
 
     // ─── Helper ───────────────────────────────────────────────────────────────
 
-    private static string GetSampleMySqlAppDll()
+    internal static string GetSampleMySqlAppDll()
     {
         var dir = Path.GetDirectoryName(typeof(QueryEvaluatorTests).Assembly.Location)!;
         var dll = ResolveSampleDll(dir, "SampleMySqlApp", "SampleMySqlApp.dll");
@@ -165,7 +181,6 @@ public class QueryEvaluatorTests : IDisposable
         Assert.True(result.Success, result.ErrorMessage);
         Assert.NotNull(result.Sql);
         Assert.Contains("Customers", result.Sql, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("querylens-factory", result.Metadata.CreationStrategy);
     }
 
     [Fact]
@@ -179,6 +194,56 @@ public class QueryEvaluatorTests : IDisposable
             Assert.True(result.Success, $"Failed for '{expr}': {result.ErrorMessage}");
             Assert.NotNull(result.Sql);
         }
+    }
+
+    // ─── Expression<Func<...>> as LocalVariableType ───────────────────────────
+
+    [Fact]
+    public async Task Evaluate_WhereClauseReceivesExpressionPredicateVariable_ReturnsSql()
+    {
+        // Pattern: Expression<Func<T, bool>> filter declared as a local variable, then
+        // passed to .Where(filter). The type ends up in LocalVariableTypes.
+        // BuildStubFromTypeName must generate "_ => true" (a valid predicate), not
+        // GetUninitializedObject (which produces an expression tree with null internal nodes
+        // that EF Core cannot traverse to generate SQL).
+        var result = await _evaluator.EvaluateAsync(_alcCtx, new TranslationRequest
+        {
+            AssemblyPath      = _alcCtx.AssemblyPath,
+            DbContextTypeName = DefaultMySqlDbContextType,
+            Expression        = "db.Orders.Where(filter).ToListAsync(ct)",
+            LocalVariableTypes = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                // Fully-qualified type as it arrives from CollectParametersFromScope / LSP.
+                ["filter"] = "System.Linq.Expressions.Expression<System.Func<SampleMySqlApp.Domain.Entities.Order, bool>>",
+            },
+        });
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.Contains("Orders", result.Sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Evaluate_WhereClauseReceivesShortExpressionPredicateVariable_ReturnsSql()
+    {
+        // Same as above but with the short-form type name (no namespace prefix) as produced
+        // when the source file has a "using System.Linq.Expressions;" directive.
+        // AdditionalImports mirrors what ExtractUsingContext would collect from the source file.
+        var result = await _evaluator.EvaluateAsync(_alcCtx, new TranslationRequest
+        {
+            AssemblyPath      = _alcCtx.AssemblyPath,
+            DbContextTypeName = DefaultMySqlDbContextType,
+            Expression        = "db.Orders.Where(filter).ToListAsync(ct)",
+            AdditionalImports = ["System.Linq.Expressions"],
+            LocalVariableTypes = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["filter"] = "Expression<Func<SampleMySqlApp.Domain.Entities.Order, bool>>",
+            },
+        });
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.Contains("Orders", result.Sql, StringComparison.OrdinalIgnoreCase);
     }
 
     // ─── Result shape ─────────────────────────────────────────────────────────
@@ -616,12 +681,33 @@ public class QueryEvaluatorTests : IDisposable
     [Fact]
     public async Task Evaluate_MissingCancellationToken_InAsyncTerminal_IsSynthesized()
     {
+        // SingleOrDefaultAsync(ct) — ct is synthesized, Task<Order?> is unwrapped by UnwrapTask,
+        // and the offline capture scope records the SQL generated during execution.
         var result = await TranslateAsync("db.Orders.SingleOrDefaultAsync(ct)");
 
-        Assert.False(result.Success);
-        Assert.NotNull(result.ErrorMessage);
-        Assert.Contains("IQueryable", result.ErrorMessage, StringComparison.Ordinal);
-        Assert.DoesNotContain("Compilation error", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.DoesNotContain("Compilation error", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Evaluate_FindCall_RewritesPkTypeAndReturnsSql()
+    {
+        // Find(someId) — key arg is rewritten to Find(default(int)) via EF model PK lookup.
+        var result = await TranslateAsync("db.Orders.Find(someId)");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+    }
+
+    [Fact]
+    public async Task Evaluate_FindAsyncCall_RewritesPkTypeAndReturnsSql()
+    {
+        // FindAsync(someId) — rewritten to FindAsync(default(int), default(CancellationToken)).
+        var result = await TranslateAsync("db.Orders.FindAsync(someId)");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
     }
 
     [Fact]
@@ -738,11 +824,14 @@ public sealed class C
     [Fact]
     public async Task Evaluate_NonQueryableExpression_ReturnsFailure()
     {
+        // A literal integer produces no SQL — capture records zero commands, so the
+        // engine returns a hard failure.  The old "did not return an IQueryable" guard
+        // was removed; the new message reflects that no SQL was captured at all.
         var result = await TranslateAsync("42");
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorMessage);
-        Assert.Contains("IQueryable", result.ErrorMessage);
+        Assert.Contains("no SQL commands", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -784,64 +873,6 @@ public sealed class C
         Assert.True(r2.Metadata.TranslationTime < TimeSpan.FromSeconds(10));
     }
 
-    // ─── IQueryLensDbContextFactory discovery ────────────────────────────────────
-
-    [Fact]
-    public async Task Evaluate_WhenQueryLensFactoryExists_StrategyIsQueryLensFactory()
-    {
-        // SampleApp ships AppQueryLensFactory : IQueryLensDbContextFactory<AppDbContext>.
-        // QueryEvaluator must report "querylens-factory" as the creation strategy.
-        var result = await TranslateAsync("db.Orders");
-
-        Assert.True(result.Success, result.ErrorMessage);
-        Assert.Equal("querylens-factory", result.Metadata.CreationStrategy);
-    }
-
-    [Fact]
-    public async Task Evaluate_QueryLensFactory_AttemptsExecutionCapture()
-    {
-        var result = await TranslateAsync("db.Orders");
-
-        Assert.True(result.Success, result.ErrorMessage);
-        Assert.NotEmpty(result.Commands);
-        Assert.DoesNotContain(result.Warnings, w => w.Code == "QL_CAPTURE_SKIPPED");
-    }
-
-    [Fact]
-    public async Task Evaluate_QueryLensFactory_DoesNotUseLegacyStrategyValues()
-    {
-        // QueryLens factory is the only supported creation path.
-        var result = await TranslateAsync("db.Users");
-
-        Assert.True(result.Success, result.ErrorMessage);
-        Assert.Equal("querylens-factory", result.Metadata.CreationStrategy);
-        Assert.NotEqual("design-time-factory", result.Metadata.CreationStrategy);
-        Assert.NotEqual("bootstrap", result.Metadata.CreationStrategy);
-    }
-
-    [Fact]
-    public async Task Evaluate_QueryLensFactory_StillGeneratesSqlForSimpleSet()
-    {
-        var result = await TranslateAsync("db.Orders");
-
-        Assert.True(result.Success, result.ErrorMessage);
-        Assert.NotNull(result.Sql);
-        Assert.Contains("Orders", result.Sql, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("querylens-factory", result.Metadata.CreationStrategy);
-    }
-
-    [Fact]
-    public async Task Evaluate_QueryLensFactory_StillGeneratesSqlForWhereClause()
-    {
-        // Verify that using the factory does not break SQL generation for
-        // WHERE clauses or any other operator.
-        var result = await TranslateAsync("db.Orders.Where(o => o.UserId == 5)");
-
-        Assert.True(result.Success, result.ErrorMessage);
-        Assert.NotNull(result.Sql);
-        Assert.Contains("WHERE", result.Sql, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("querylens-factory", result.Metadata.CreationStrategy);
-    }
 
     [Fact]
     public void CreateDbContextInstance_WhenSelectedExecutableAssemblyDiffers_RejectsFactoriesFromOtherAssemblies()
@@ -864,27 +895,9 @@ public sealed class C
     }
 
     [Fact]
-    public void CreateDbContextInstance_WhenFactoryInSelectedExecutableAssembly_Succeeds()
-    {
-        var dbContextType = _alcCtx.FindDbContextType(
-            "SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext");
-
-        var created = QueryEvaluator.CreateDbContextInstance(
-            dbContextType,
-            _alcCtx.LoadedAssemblies,
-            _alcCtx.AssemblyPath);
-
-        Assert.NotNull(created.Instance);
-        Assert.Equal("querylens-factory", created.Strategy);
-
-        if (created.Instance is IDisposable disposable)
-            disposable.Dispose();
-    }
-
-    [Fact]
     public async Task Evaluate_ExistingTests_StillPassWithFactoryPath()
     {
-        // All four entity sets must translate correctly when any factory is active.
+        // All four entity sets must translate correctly.
         string[] expressions = ["db.Orders", "db.Users", "db.Products", "db.Categories"];
 
         foreach (var expr in expressions)
@@ -892,7 +905,6 @@ public sealed class C
             var result = await TranslateAsync(expr);
             Assert.True(result.Success, $"Failed for '{expr}': {result.ErrorMessage}");
             Assert.NotNull(result.Sql);
-            Assert.Equal("querylens-factory", result.Metadata.CreationStrategy);
         }
     }
 

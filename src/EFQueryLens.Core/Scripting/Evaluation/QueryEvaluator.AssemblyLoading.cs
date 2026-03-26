@@ -6,10 +6,10 @@ namespace EFQueryLens.Core.Scripting.Evaluation;
 
 public sealed partial class QueryEvaluator
 {
-    private static bool IsNoDbContextFoundError(InvalidOperationException ex) =>
+    internal static bool IsNoDbContextFoundError(InvalidOperationException ex) =>
         ex is DbContextDiscoveryException { FailureKind: DbContextDiscoveryFailureKind.NoDbContextFound };
 
-    private static void TryLoadSiblingAssemblies(ProjectAssemblyContext alcCtx)
+    internal static void TryLoadSiblingAssemblies(ProjectAssemblyContext alcCtx)
     {
         var dir = Path.GetDirectoryName(alcCtx.AssemblyPath);
         if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir))

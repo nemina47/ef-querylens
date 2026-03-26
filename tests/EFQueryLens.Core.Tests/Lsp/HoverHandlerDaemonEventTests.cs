@@ -1,8 +1,6 @@
 using System.Reflection;
 using EFQueryLens.Core;
 using EFQueryLens.Core.Contracts;
-using EFQueryLens.Core.Contracts.Explain;
-using EFQueryLens.Core.Grpc;
 using EFQueryLens.Lsp;
 using EFQueryLens.Lsp.Handlers;
 using EFQueryLens.Lsp.Services;
@@ -13,59 +11,31 @@ namespace EFQueryLens.Core.Tests.Lsp;
 
 public class HoverHandlerDaemonEventTests
 {
-    [Theory]
-    [MemberData(nameof(GetInvalidationEvents))]
-    public void HandleDaemonEvent_WhenDaemonSignals_InvalidateAllHoverCaches(DaemonEvent daemonEvent)
+    [Fact]
+    public void OnAssemblyChanged_InvalidatesAllHoverCaches()
     {
         var handler = CreateHandler();
         SeedCaches(handler);
 
         Assert.True(GetDictionaryCount(handler, "_hoverCache") > 0);
         Assert.True(GetDictionaryCount(handler, "_semanticHoverCache") > 0);
-        Assert.True(GetDictionaryCount(handler, "_structuredHoverCache") > 0);
-        Assert.True(GetDictionaryCount(handler, "_semanticStructuredHoverCache") > 0);
 
-        handler.HandleDaemonEvent(daemonEvent);
+        handler.OnAssemblyChanged();
 
         Assert.Equal(0, GetDictionaryCount(handler, "_hoverCache"));
         Assert.Equal(0, GetDictionaryCount(handler, "_semanticHoverCache"));
-        Assert.Equal(0, GetDictionaryCount(handler, "_structuredHoverCache"));
-        Assert.Equal(0, GetDictionaryCount(handler, "_semanticStructuredHoverCache"));
     }
 
-    public static IEnumerable<object[]> GetInvalidationEvents()
+    [Fact]
+    public void InvalidateForManualRecalculate_InvalidatesAllHoverCaches()
     {
-        yield return
-        [
-            new DaemonEvent
-            {
-                ConfigReloaded = new ConfigReloadedEvent(),
-            },
-        ];
+        var handler = CreateHandler();
+        SeedCaches(handler);
 
-        yield return
-        [
-            new DaemonEvent
-            {
-                StateChanged = new StateChangedEvent
-                {
-                    ContextName = "sample",
-                    State = DaemonWarmState.Ready,
-                },
-            },
-        ];
+        handler.InvalidateForManualRecalculate();
 
-        yield return
-        [
-            new DaemonEvent
-            {
-                AssemblyChanged = new AssemblyChangedEvent
-                {
-                    ContextName = "sample",
-                    AssemblyPath = "sample.dll",
-                },
-            },
-        ];
+        Assert.Equal(0, GetDictionaryCount(handler, "_hoverCache"));
+        Assert.Equal(0, GetDictionaryCount(handler, "_semanticHoverCache"));
     }
 
     private static HoverHandler CreateHandler()
@@ -83,6 +53,7 @@ public class HoverHandlerDaemonEventTests
             Statements: [],
             CommandCount: 0,
             SourceExpression: null,
+            ExecutedExpression: null,
             DbContextType: null,
             ProviderName: null,
             SourceFile: null,
@@ -106,21 +77,27 @@ public class HoverHandlerDaemonEventTests
             8);
         Assert.NotNull(semanticContext);
 
-        var cacheHoverMethod = typeof(HoverHandler).GetMethod(
-            "CacheHover",
+        var computedEntryType = typeof(HoverHandler).GetNestedType(
+            "ComputedEntry",
+            BindingFlags.NonPublic);
+        Assert.NotNull(computedEntryType);
+
+        var computedEntry = Activator.CreateInstance(
+            computedEntryType!,
+            hover,
+            structuredResult,
+            QueryTranslationStatus.Ready);
+        Assert.NotNull(computedEntry);
+
+        var cacheEntryMethod = typeof(HoverHandler).GetMethod(
+            "CacheEntry",
             BindingFlags.NonPublic | BindingFlags.Instance);
-        Assert.NotNull(cacheHoverMethod);
+        Assert.NotNull(cacheEntryMethod);
 
-        var cacheStructuredMethod = typeof(HoverHandler).GetMethod(
-            "CacheStructured",
-            BindingFlags.NonPublic | BindingFlags.Instance);
-        Assert.NotNull(cacheStructuredMethod);
-
-        cacheHoverMethod!.Invoke(handler, ["cursor-cache", hover, null]);
-        cacheHoverMethod.Invoke(handler, ["semantic-cache", hover, semanticContext]);
-
-        cacheStructuredMethod!.Invoke(handler, ["structured-cursor-cache", structuredResult, null]);
-        cacheStructuredMethod.Invoke(handler, ["structured-semantic-cache", structuredResult, semanticContext]);
+        // Populate position cache (semanticContext = null → only _hoverCache)
+        cacheEntryMethod!.Invoke(handler, ["cursor-cache", computedEntry, null]);
+        // Populate position + semantic cache
+        cacheEntryMethod.Invoke(handler, ["semantic-cache", computedEntry, semanticContext]);
     }
 
     private static int GetDictionaryCount(HoverHandler handler, string fieldName)
@@ -145,19 +122,6 @@ public class HoverHandlerDaemonEventTests
 
         public Task<QueryTranslationResult> TranslateAsync(TranslationRequest request, CancellationToken ct = default)
             => Task.FromResult(new QueryTranslationResult());
-
-        public Task<QueuedTranslationResult> TranslateQueuedAsync(TranslationRequest request, CancellationToken ct = default)
-            => Task.FromResult(new QueuedTranslationResult
-            {
-                Status = QueryTranslationStatus.Ready,
-                Result = new QueryTranslationResult(),
-            });
-
-        public Task<ExplainResult> ExplainAsync(ExplainRequest request, CancellationToken ct = default)
-            => Task.FromResult(new ExplainResult
-            {
-                Translation = new QueryTranslationResult(),
-            });
 
         public Task<ModelSnapshot> InspectModelAsync(ModelInspectionRequest request, CancellationToken ct = default)
             => Task.FromResult(new ModelSnapshot

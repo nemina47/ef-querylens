@@ -29,25 +29,29 @@ import javax.swing.JScrollPane
 import javax.swing.JTextArea
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.exists
-import kotlin.io.path.isDirectory
 
-class EFQueryLensLogToolWindowFactory : ToolWindowFactory, DumbAware {
-
+class EFQueryLensLogToolWindowFactory :
+    ToolWindowFactory,
+    DumbAware {
     companion object {
-        const val ToolWindowId = "EF QueryLens"
+        const val TOOL_WINDOW_ID = "EF QueryLens"
     }
 
     override fun shouldBeAvailable(project: Project): Boolean = true
 
-    override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
+    override fun createToolWindowContent(
+        project: Project,
+        toolWindow: ToolWindow,
+    ) {
         val contentPanel = JPanel(BorderLayout())
         val toolbar = JPanel()
         val statusLabel = JLabel("Initializing EF QueryLens logs...")
-        val textArea = JTextArea().apply {
-            isEditable = false
-            lineWrap = false
-            wrapStyleWord = false
-        }
+        val textArea =
+            JTextArea().apply {
+                isEditable = false
+                lineWrap = false
+                wrapStyleWord = false
+            }
 
         val refreshButton = JButton("Refresh")
         val openFolderButton = JButton("Open Log Folder")
@@ -86,27 +90,28 @@ class EFQueryLensLogToolWindowFactory : ToolWindowFactory, DumbAware {
             val fallbackLogFile = if (Files.exists(expectedLogFile)) null else findLatestLogFile()
             val logFile = fallbackLogFile ?: expectedLogFile
             val logText = readLogTail(logFile, maxLines = 800)
-            val status = buildString {
-                append("Workspace: ")
-                append(identity.workspacePath.absolutePathString())
-                append(" | Hash: ")
-                append(identity.hash)
-                append(" | Expected Log: ")
-                append(expectedLogFile.absolutePathString())
-                if (fallbackLogFile != null) {
-                    append(" | Active Log: ")
-                    append(fallbackLogFile.absolutePathString())
+            val status =
+                buildString {
+                    append("Workspace: ")
+                    append(identity.workspacePath.absolutePathString())
+                    append(" | Hash: ")
+                    append(identity.hash)
+                    append(" | Expected Log: ")
+                    append(expectedLogFile.absolutePathString())
+                    if (fallbackLogFile != null) {
+                        append(" | Active Log: ")
+                        append(fallbackLogFile.absolutePathString())
+                    }
+                    append(" | Reading: ")
+                    append(logFile.absolutePathString())
+                    if (Files.exists(logFile)) {
+                        val modified = Files.getLastModifiedTime(logFile).toInstant()
+                        append(" | Updated: ")
+                        append(formatter.format(modified.atZone(ZoneId.systemDefault())))
+                    } else {
+                        append(" | Waiting for log file...")
+                    }
                 }
-                append(" | Reading: ")
-                append(logFile.absolutePathString())
-                if (Files.exists(logFile)) {
-                    val modified = Files.getLastModifiedTime(logFile).toInstant()
-                    append(" | Updated: ")
-                    append(formatter.format(modified.atZone(ZoneId.systemDefault())))
-                } else {
-                    append(" | Waiting for log file...")
-                }
-            }
 
             ApplicationManager.getApplication().invokeLater {
                 if (project.isDisposed) {
@@ -133,37 +138,40 @@ class EFQueryLensLogToolWindowFactory : ToolWindowFactory, DumbAware {
         fun startWatchService() {
             val identity = logIdentity ?: return
 
-            val watcher = try {
-                val folder = WorkspaceLogIdentityResolver.logFolderPath()
-                Files.createDirectories(folder)
+            val watcher =
+                try {
+                    val folder = WorkspaceLogIdentityResolver.logFolderPath()
+                    Files.createDirectories(folder)
 
-                FileSystems.getDefault().newWatchService().also {
-                    watchService = it
-                    folder.register(
-                        it,
-                        StandardWatchEventKinds.ENTRY_CREATE,
-                        StandardWatchEventKinds.ENTRY_MODIFY,
-                        StandardWatchEventKinds.ENTRY_DELETE,
-                    )
-                }
-            } catch (ex: Exception) {
-                ApplicationManager.getApplication().invokeLater {
-                    if (!project.isDisposed) {
-                        statusLabel.text = "Live log watch unavailable (${ex.message ?: ex::class.java.simpleName}); using periodic refresh."
+                    FileSystems.getDefault().newWatchService().also {
+                        watchService = it
+                        folder.register(
+                            it,
+                            StandardWatchEventKinds.ENTRY_CREATE,
+                            StandardWatchEventKinds.ENTRY_MODIFY,
+                            StandardWatchEventKinds.ENTRY_DELETE,
+                        )
                     }
+                } catch (ex: Exception) {
+                    ApplicationManager.getApplication().invokeLater {
+                        if (!project.isDisposed) {
+                            statusLabel.text =
+                                "Live log watch unavailable (${ex.message ?: ex::class.java.simpleName}); using periodic refresh."
+                        }
+                    }
+                    return
                 }
-                return
-            }
 
             ApplicationManager.getApplication().executeOnPooledThread {
                 while (!project.isDisposed && !disposed.get()) {
-                    val key = try {
-                        watcher.poll(1200, TimeUnit.MILLISECONDS)
-                    } catch (_: InterruptedException) {
-                        continue
-                    } catch (_: Exception) {
-                        break
-                    } ?: continue
+                    val key =
+                        try {
+                            watcher.poll(1200, TimeUnit.MILLISECONDS)
+                        } catch (_: InterruptedException) {
+                            continue
+                        } catch (_: Exception) {
+                            break
+                        } ?: continue
 
                     var shouldRefresh = false
                     for (event in key.pollEvents()) {
@@ -204,7 +212,10 @@ class EFQueryLensLogToolWindowFactory : ToolWindowFactory, DumbAware {
         scheduleFallbackPolling()
     }
 
-    private fun readLogTail(logFile: Path, maxLines: Int): String {
+    private fun readLogTail(
+        logFile: Path,
+        maxLines: Int,
+    ): String {
         if (!Files.exists(logFile)) {
             return "EF QueryLens log file does not exist yet.\n\nExpected path:\n${logFile.absolutePathString()}"
         }
@@ -222,7 +233,8 @@ class EFQueryLensLogToolWindowFactory : ToolWindowFactory, DumbAware {
                 }
             }
         } catch (ex: Exception) {
-            return "Failed to read EF QueryLens log file.\n${ex.message ?: ex::class.java.simpleName}\n\nPath:\n${logFile.absolutePathString()}"
+            val detail = ex.message ?: ex::class.java.simpleName
+            return "Failed to read EF QueryLens log file.\n$detail\n\nPath:\n${logFile.absolutePathString()}"
         }
 
         return ring.joinToString("\n")
@@ -240,8 +252,7 @@ class EFQueryLensLogToolWindowFactory : ToolWindowFactory, DumbAware {
                 .filter { path ->
                     val fileName = path.fileName.toString()
                     fileName.startsWith("lsp-", ignoreCase = true) && fileName.endsWith(".log", ignoreCase = true)
-                }
-                .max(compareBy<Path> { Files.getLastModifiedTime(it).toMillis() })
+                }.max(compareBy<Path> { Files.getLastModifiedTime(it).toMillis() })
                 .orElse(null)
         }
     }

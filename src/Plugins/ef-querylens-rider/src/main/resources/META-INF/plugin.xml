@@ -8,15 +8,15 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <platform.lsp.serverSupportProvider implementation="efquerylens.EFQueryLensLspServerSupportProvider" />
-        <browserUrlOpener implementation="efquerylens.EFQueryLensUrlOpener" />
-        <toolWindow
-                id="EF QueryLens"
-                anchor="bottom"
-                icon="AllIcons.Toolwindows.ToolWindowMessages"
-                factoryClass="efquerylens.EFQueryLensLogToolWindowFactory"
-                secondary="true"
-                canCloseContents="false" />
+        <toolWindow id="EF QueryLens" factoryClass="efquerylens.EFQueryLensLogToolWindowFactory" anchor="bottom" />
+        <notificationGroup id="EF QueryLens" displayType="BALLOON" isLogByDefault="false" />
+        <platform.backend.documentation.linkHandler implementation="efquerylens.EFQueryLensDocumentationLinkHandler" />
     </extensions>
+
+    <extensions defaultExtensionNs="org.jetbrains">
+        <urlOpener implementation="efquerylens.EFQueryLensUrlOpener" order="first" />
+    </extensions>
+
 
     <actions>
         <action id="efquerylens.ShowToolWindow"

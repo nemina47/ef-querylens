@@ -57,7 +57,7 @@ function toQueryLensCommandUri(hostRaw: string, queryRaw: string): string | null
     const host = hostRaw.toLowerCase();
     const commandId = host === 'copysql'
         ? 'efquerylens.copySql'
-        : host === 'opensqleditor'
+        : host === 'opensql' || host === 'opensqleditor'
             ? 'efquerylens.openSqlEditor'
             : host === 'showsql'
                 ? 'efquerylens.showSql'

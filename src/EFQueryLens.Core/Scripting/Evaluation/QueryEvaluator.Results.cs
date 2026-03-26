@@ -72,7 +72,6 @@ public sealed partial class QueryEvaluator
             CompilationRetryCount = stageTimings?.CompilationRetryCount,
             EvalAssemblyLoadTime = stageTimings?.EvalAssemblyLoad,
             RunnerExecutionTime = stageTimings?.RunnerExecution,
-            ToQueryStringFallbackTime = stageTimings?.ToQueryStringFallback,
         };
     }
 

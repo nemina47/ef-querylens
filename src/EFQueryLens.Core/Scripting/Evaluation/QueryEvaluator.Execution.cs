@@ -100,40 +100,6 @@ public sealed partial class QueryEvaluator
         return (queryable, captureSkipReason, captureError, commands);
     }
 
-    private static bool IsQueryable(object? value) =>
-        value?.GetType().GetInterfaces()
-            .Any(i => i.FullName == "System.Linq.IQueryable") == true;
-
-    /// <summary>
-    /// Last-resort fallback - calls <c>ToQueryString()</c> via reflection on the user's
-    /// EF Core assembly. Used only when execution-based capture fails.
-    /// </summary>
-    private static string? TryToQueryString(object? queryable, IEnumerable<Assembly> userAssemblies)
-    {
-        if (queryable is null)
-            return null;
-
-        foreach (var asm in userAssemblies.Where(a => a.GetName().Name == "Microsoft.EntityFrameworkCore"))
-        {
-            var ext = asm.GetType("Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions");
-            var method = ext?.GetMethods(BindingFlags.Public | BindingFlags.Static)
-                .FirstOrDefault(m => m.Name == "ToQueryString" && m.GetParameters().Length == 1 && !m.IsGenericMethod);
-            if (method is null)
-                continue;
-
-            try
-            {
-                return (string?)method.Invoke(null, [queryable]);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        return null;
-    }
-
     /// <summary>
     /// Validates that the payload has the expected structure.
     /// Throws InvalidOperationException if structure mismatch is detected.

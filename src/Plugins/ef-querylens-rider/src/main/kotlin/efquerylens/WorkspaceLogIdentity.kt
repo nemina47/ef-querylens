@@ -45,17 +45,17 @@ internal object WorkspaceLogIdentityResolver {
 
     private fun looksLikeQueryLensRoot(path: Path): Boolean {
         val hasSolution = path.resolve("EFQueryLens.slnx").exists()
-        val hasLspProject = path
-            .resolve("src")
-            .resolve("EFQueryLens.Lsp")
-            .resolve("EFQueryLens.Lsp.csproj")
-            .exists()
+        val hasLspProject =
+            path
+                .resolve("src")
+                .resolve("EFQueryLens.Lsp")
+                .resolve("EFQueryLens.Lsp.csproj")
+                .exists()
 
         return hasSolution && hasLspProject
     }
 
-    fun logFolderPath(): Path =
-        Path.of(System.getProperty("java.io.tmpdir"), "EFQueryLens", "rider-logs")
+    fun logFolderPath(): Path = Path.of(System.getProperty("java.io.tmpdir"), "EFQueryLens", "rider-logs")
 
     private fun hashWorkspacePath(path: String): String {
         val bytes = MessageDigest.getInstance("SHA-256").digest(path.toByteArray(StandardCharsets.UTF_8))

@@ -1,3 +1,4 @@
+using System.Runtime.Loader;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -91,6 +92,9 @@ public sealed partial class QueryEvaluator
                 && !string.Equals(methodName, "EndsWith", StringComparison.Ordinal)
                 && !string.Equals(methodName, "Equals", StringComparison.Ordinal))
             {
+                var fromSignature = TryInferTypeFromMethodSignature(methodName, argumentIndex, dbContextType);
+                if (fromSignature is not null)
+                    return fromSignature;
                 continue;
             }
 
@@ -195,6 +199,70 @@ public sealed partial class QueryEvaluator
             default:
                 return null;
         }
+    }
+
+    private static Type? TryInferTypeFromMethodSignature(
+        string methodName, int argumentIndex, Type dbContextType)
+    {
+        var alc = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(dbContextType.Assembly);
+        var assemblies = (IEnumerable<System.Reflection.Assembly>?)alc?.Assemblies
+            ?? AppDomain.CurrentDomain.GetAssemblies();
+
+        var candidates = new HashSet<Type>();
+
+        foreach (var asm in assemblies)
+        {
+            if (IsRuntimeOrFrameworkAssembly(asm))
+                continue;
+
+            foreach (var type in SafeGetTypes(asm))
+            {
+                foreach (var method in type.GetMethods(
+                    System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.Static
+                    | System.Reflection.BindingFlags.Instance
+                    | System.Reflection.BindingFlags.DeclaredOnly))
+                {
+                    if (!string.Equals(method.Name, methodName, StringComparison.Ordinal))
+                        continue;
+
+                    var parameters = method.GetParameters();
+                    if (argumentIndex >= parameters.Length)
+                        continue;
+
+                    var paramType = parameters[argumentIndex].ParameterType;
+                    if (paramType.IsGenericParameter || paramType == typeof(object))
+                        continue;
+
+                    candidates.Add(paramType);
+                }
+            }
+        }
+
+        return candidates.Count == 1 ? candidates.First() : null;
+    }
+
+    private static bool IsRuntimeOrFrameworkAssembly(System.Reflection.Assembly asm)
+    {
+        var name = asm.GetName().Name ?? string.Empty;
+        return name.StartsWith("System.", StringComparison.Ordinal)
+            || name.StartsWith("Microsoft.Extensions.", StringComparison.Ordinal)
+            || name.StartsWith("Microsoft.AspNetCore.", StringComparison.Ordinal)
+            || name.StartsWith("Microsoft.CodeAnalysis", StringComparison.Ordinal)
+            || name == "mscorlib"
+            || name == "netstandard"
+            || name == "System"
+            || name == "Microsoft.CSharp";
+    }
+
+    private static IEnumerable<Type> SafeGetTypes(System.Reflection.Assembly asm)
+    {
+        try { return asm.GetTypes(); }
+        catch (System.Reflection.ReflectionTypeLoadException e)
+        {
+            return e.Types.Where(t => t is not null).Select(t => t!);
+        }
+        catch { return []; }
     }
 
     private static bool LooksLikeStringExpression(ExpressionSyntax expression, Type dbContextType)

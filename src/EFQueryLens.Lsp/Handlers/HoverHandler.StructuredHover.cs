@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using EFQueryLens.Core;
 using EFQueryLens.Core.Contracts;
-using EFQueryLens.Core.Grpc;
 using EFQueryLens.Lsp.Services;
 using Microsoft.VisualStudio.LanguageServer.Protocol;
 
@@ -34,20 +33,25 @@ internal sealed partial class HoverHandler
             return cachedResult;
         }
 
-        if (semanticContext is not null && TryGetSemanticCachedStructured(semanticContext.SemanticKey, out var semanticCached))
+        if (semanticContext is not null
+            && _hoverCacheTtlMs > 0
+            && _semanticHoverCache.TryGetValue(semanticContext.SemanticKey, out var semEntry)
+            && !IsExpired(semEntry)
+            && semEntry.Structured is not null)
         {
             LogHoverDebug($"structured-hover-semantic-cache-hit line={effectiveLine} char={effectiveCharacter}");
-            CacheStructured(cacheKey, semanticCached, semanticContext);
-            return semanticCached;
+            _hoverCache.TryAdd(cacheKey, semEntry);
+            return semEntry.Structured;
         }
 
         if (semanticContext is not null)
         {
             var inFlightKey = BuildInFlightKey(filePath, semanticContext);
-            var lazyTask = _inflightSemanticStructuredHover.GetOrAdd(
+            // Share the same inflight task as HandleAsync — one engine call serves both.
+            var lazyTask = _inflightSemanticHover.GetOrAdd(
                 inFlightKey,
-                _ => new Lazy<Task<QueryLensStructuredHoverResult?>>(
-                    () => ComputeAndCacheStructuredSemanticHoverAsync(
+                _ => new Lazy<Task<ComputedEntry>>(
+                    () => ComputeAndCacheCombinedAsync(
                         inFlightKey,
                         cacheKey,
                         filePath,
@@ -59,8 +63,8 @@ internal sealed partial class HoverHandler
             {
                 var sharedTask = lazyTask.Value;
                 var sharedResult = await WaitWithCancellationAsync(sharedTask, cancellationToken);
-                CacheStructured(cacheKey, sharedResult, semanticContext);
-                return sharedResult;
+                CacheEntry(cacheKey, sharedResult, semanticContext);
+                return sharedResult.Structured;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -68,15 +72,29 @@ internal sealed partial class HoverHandler
                 var (completed, salvagedResult) = await TryGetResultWithinGraceAsync(sharedTask, _hoverCancellationGraceMs);
                 if (completed)
                 {
-                    CacheStructured(cacheKey, salvagedResult, semanticContext);
+                    CacheEntry(cacheKey, salvagedResult, semanticContext);
                     LogHoverDebug($"structured-hover-cancel-salvaged line={effectiveLine} char={effectiveCharacter}");
-                    return salvagedResult;
+                    return salvagedResult.Structured;
                 }
 
-                if (TryGetSemanticCachedStructured(semanticContext.SemanticKey, out var semanticCachedAfterCancel))
+                if (_hoverCacheTtlMs > 0
+                    && _semanticHoverCache.TryGetValue(semanticContext.SemanticKey, out var semEntryAfterCancel)
+                    && !IsExpired(semEntryAfterCancel)
+                    && semEntryAfterCancel.Structured is not null)
                 {
-                    CacheStructured(cacheKey, semanticCachedAfterCancel, semanticContext);
-                    return semanticCachedAfterCancel;
+                    _hoverCache.TryAdd(cacheKey, semEntryAfterCancel);
+                    return semEntryAfterCancel.Structured;
+                }
+
+                var fallbackStructured = await TryBuildCanceledStatusFallbackStructuredAsync(
+                    filePath,
+                    sourceText,
+                    effectiveLine,
+                    effectiveCharacter);
+                if (fallbackStructured is not null)
+                {
+                    LogHoverDebug($"structured-hover-cancel-fallback-hit line={effectiveLine} char={effectiveCharacter}");
+                    return fallbackStructured;
                 }
 
                 return null;
@@ -84,10 +102,10 @@ internal sealed partial class HoverHandler
         }
 
         var sw = Stopwatch.StartNew();
-        QueryLensStructuredHoverResult? computed;
+        ComputedEntry computed;
         try
         {
-            computed = await ComputeStructuredHoverAsync(
+            computed = await ComputeCombinedAsync(
                 filePath,
                 sourceText,
                 effectiveLine,
@@ -97,98 +115,64 @@ internal sealed partial class HoverHandler
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             LogHoverDebug($"structured-hover-canceled line={effectiveLine} char={effectiveCharacter}");
+
+            var fallbackStructured = await TryBuildCanceledStatusFallbackStructuredAsync(
+                filePath,
+                sourceText,
+                effectiveLine,
+                effectiveCharacter);
+            if (fallbackStructured is not null)
+            {
+                LogHoverDebug($"structured-hover-cancel-fallback-hit line={effectiveLine} char={effectiveCharacter}");
+                return fallbackStructured;
+            }
+
             return null;
         }
 
         sw.Stop();
-        LogHoverDebug($"structured-hover-compute-finished line={effectiveLine} char={effectiveCharacter} elapsedMs={sw.ElapsedMilliseconds} hasResult={computed is not null}");
-        CacheStructured(cacheKey, computed, semanticContext);
-        return computed;
+        LogHoverDebug($"structured-hover-compute-finished line={effectiveLine} char={effectiveCharacter} elapsedMs={sw.ElapsedMilliseconds} hasResult={computed.Structured is not null}");
+        CacheEntry(cacheKey, computed, semanticContext);
+        return computed.Structured;
     }
 
-    private async Task<QueryLensStructuredHoverResult?> ComputeAndCacheStructuredSemanticHoverAsync(
-        string inFlightKey,
-        string cacheKey,
-        string filePath,
-        string sourceText,
-        SemanticHoverContext semanticContext)
-    {
-        var sw = Stopwatch.StartNew();
-        try
-        {
-            var computed = await ComputeStructuredHoverAsync(
-                filePath,
-                sourceText,
-                semanticContext.EffectiveLine,
-                semanticContext.EffectiveCharacter,
-                CancellationToken.None);
-            sw.Stop();
-            LogHoverDebug(
-                $"structured-hover-compute-finished line={semanticContext.EffectiveLine} char={semanticContext.EffectiveCharacter} " +
-                $"elapsedMs={sw.ElapsedMilliseconds} hasResult={computed is not null}");
-            CacheStructured(cacheKey, computed, semanticContext);
-            return computed;
-        }
-        catch (Exception ex)
-        {
-            sw.Stop();
-            LogHoverDebug(
-                $"structured-hover-compute-failed line={semanticContext.EffectiveLine} char={semanticContext.EffectiveCharacter} " +
-                $"elapsedMs={sw.ElapsedMilliseconds} type={ex.GetType().Name} message={ex.Message}");
-            throw;
-        }
-        finally
-        {
-            _inflightSemanticStructuredHover.TryRemove(inFlightKey, out _);
-        }
-    }
-
-    private async Task<QueryLensStructuredHoverResult?> ComputeStructuredHoverAsync(
+    private async Task<QueryLensStructuredHoverResult?> TryBuildCanceledStatusFallbackStructuredAsync(
         string filePath,
         string sourceText,
         int line,
-        int character,
-        CancellationToken cancellationToken)
+        int character)
     {
-        var result = await _hoverPreviewService.BuildStructuredAsync(
-            filePath,
-            sourceText,
-            line,
-            character,
-            cancellationToken);
-
-        if (result.Status is QueryTranslationStatus.InQueue or QueryTranslationStatus.Starting
-            && result.AvgTranslationMs > 0
-            && result.AvgTranslationMs < _structuredQueuedAdaptiveWaitMs
-            && _structuredQueuedAdaptiveWaitMs > 0)
+        using var fallbackCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        try
         {
-            LogHoverDebug(
-                $"structured-hover-adaptive-wait line={line} char={character} " +
-                $"waitMs={_structuredQueuedAdaptiveWaitMs} avgMs={result.AvgTranslationMs:0.##}");
-
-            await Task.Delay(_structuredQueuedAdaptiveWaitMs, cancellationToken);
-
-            var secondAttempt = await _hoverPreviewService.BuildStructuredAsync(
+            var fallback = await _hoverPreviewService.BuildStructuredAsync(
                 filePath,
                 sourceText,
                 line,
                 character,
-                cancellationToken);
+                fallbackCts.Token);
 
-            if (secondAttempt.Status is QueryTranslationStatus.Ready)
+            if (fallback.Success)
             {
-                return secondAttempt;
+                return fallback;
             }
 
-            return result;
+            if (fallback.Status is QueryTranslationStatus.Starting
+                or QueryTranslationStatus.InQueue
+                or QueryTranslationStatus.DaemonUnavailable)
+            {
+                return fallback;
+            }
         }
-
-        if (!result.Success &&
-            result.ErrorMessage?.StartsWith("Could not extract a LINQ query expression", StringComparison.OrdinalIgnoreCase) == true)
+        catch (OperationCanceledException)
         {
-            return null;
+            // Ignore fallback timeout and keep the primary cancellation behavior.
+        }
+        catch (Exception ex)
+        {
+            LogHoverDebug($"structured-hover-cancel-fallback-failed line={line} char={character} type={ex.GetType().Name} message={ex.Message}");
         }
 
-        return result;
+        return null;
     }
 }

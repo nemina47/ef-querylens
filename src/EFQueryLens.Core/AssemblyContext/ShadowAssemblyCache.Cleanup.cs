@@ -4,95 +4,67 @@ namespace EFQueryLens.Core.AssemblyContext;
 
 internal sealed partial class ShadowAssemblyCache
 {
+    public void RunStartupCleanup()
+    {
+        try { CleanupCore(); }
+        catch { /* best-effort */ }
+    }
+
     private void CleanupCore()
     {
         try
         {
-            if (!Directory.Exists(_root))
-            {
-                return;
-            }
+            if (!Directory.Exists(_root)) return;
 
             var maxAgeHours = EnvironmentVariableParser.ReadInt(
                 "QUERYLENS_SHADOW_CACHE_MAX_AGE_HOURS",
-                DefaultShadowCacheMaxAgeHours,
-                min: 1,
-                max: 720);
-
-            var softLimitMb = EnvironmentVariableParser.ReadInt(
-                "QUERYLENS_SHADOW_CACHE_SOFT_LIMIT_MB",
-                (int)(DefaultShadowCacheSoftLimitBytes / (1024L * 1024L)),
-                min: 256,
-                max: 1024 * 1024);
-
-            var targetMb = EnvironmentVariableParser.ReadInt(
-                "QUERYLENS_SHADOW_CACHE_TARGET_MB",
-                (int)(DefaultShadowCacheTargetBytes / (1024L * 1024L)),
-                min: 128,
-                max: softLimitMb);
-
-            var softLimitBytes = softLimitMb * 1024L * 1024L;
-            var targetBytes = targetMb * 1024L * 1024L;
+                DefaultShadowCacheMaxAgeHours, min: 1, max: 720);
+            var maxBundles = EnvironmentVariableParser.ReadInt(
+                "QUERYLENS_SHADOW_CACHE_MAX_BUNDLES",
+                DefaultShadowCacheMaxBundles, min: 1, max: 500);
             var cutoff = DateTime.UtcNow.AddHours(-maxAgeHours);
 
-            foreach (var stagingDir in Directory.EnumerateDirectories(_stagingRoot))
+            // Delete stale staging dirs
+            if (Directory.Exists(_stagingRoot))
             {
-                DateTime lastWriteUtc;
-                try
+                foreach (var stagingDir in Directory.EnumerateDirectories(_stagingRoot))
                 {
-                    lastWriteUtc = Directory.GetLastWriteTimeUtc(stagingDir);
-                }
-                catch
-                {
-                    continue;
-                }
-
-                if (lastWriteUtc < cutoff)
-                {
-                    TryDeleteDirectory(stagingDir);
+                    try
+                    {
+                        if (Directory.GetLastWriteTimeUtc(stagingDir) < cutoff)
+                            TryDeleteDirectory(stagingDir);
+                    }
+                    catch { /* ignore */ }
                 }
             }
 
+            // Delete old bundles by age
+            if (!Directory.Exists(_bundleRoot)) return;
             var bundleDirs = Directory.EnumerateDirectories(_bundleRoot)
-                .Select(path => new DirectoryInfo(path))
+                .Select(p => new DirectoryInfo(p))
+                .OrderBy(d => d.LastWriteTimeUtc)
                 .ToList();
 
-            foreach (var dir in bundleDirs)
+            foreach (var dir in bundleDirs.ToList())
             {
                 if (dir.LastWriteTimeUtc < cutoff)
                 {
                     TryDeleteDirectory(dir.FullName);
+                    bundleDirs.Remove(dir);
                 }
             }
 
-            var currentSize = GetDirectorySizeSafe(_bundleRoot);
-            if (currentSize > softLimitBytes)
+            // Trim to max bundle count (oldest first)
+            while (bundleDirs.Count > maxBundles)
             {
-                var oldestFirst = Directory.EnumerateDirectories(_bundleRoot)
-                    .Select(path => new DirectoryInfo(path))
-                    .OrderBy(d => d.LastWriteTimeUtc)
-                    .ToList();
-
-                foreach (var dir in oldestFirst)
-                {
-                    TryDeleteDirectory(dir.FullName);
-                    currentSize = GetDirectorySizeSafe(_bundleRoot);
-                    if (currentSize <= targetBytes)
-                    {
-                        break;
-                    }
-                }
+                TryDeleteDirectory(bundleDirs[0].FullName);
+                bundleDirs.RemoveAt(0);
             }
 
             if (_debugEnabled)
-            {
                 Console.Error.WriteLine($"[QL-Engine] shadow-cache-cleanup root={_root}");
-            }
         }
-        catch
-        {
-            // Best-effort cleanup only.
-        }
+        catch { /* best-effort */ }
     }
 
     private static void TouchDirectory(string path)
@@ -120,48 +92,5 @@ internal sealed partial class ShadowAssemblyCache
         {
             // Ignore locked or transient IO failures.
         }
-    }
-
-    private static long GetDirectorySizeSafe(string root)
-    {
-        long total = 0;
-
-        if (!Directory.Exists(root))
-        {
-            return total;
-        }
-
-        var stack = new Stack<string>();
-        stack.Push(root);
-
-        while (stack.Count > 0)
-        {
-            var current = stack.Pop();
-            try
-            {
-                foreach (var file in Directory.EnumerateFiles(current))
-                {
-                    try
-                    {
-                        total += new FileInfo(file).Length;
-                    }
-                    catch
-                    {
-                        // Ignore per-file access issues.
-                    }
-                }
-
-                foreach (var dir in Directory.EnumerateDirectories(current))
-                {
-                    stack.Push(dir);
-                }
-            }
-            catch
-            {
-                // Ignore per-directory access issues.
-            }
-        }
-
-        return total;
     }
 }

@@ -38,43 +38,54 @@ public static partial class LspSyntaxHelper
         if (targetExpression == null)
             return null;
 
-        // We need the entire chain, so we walk to the top-most invocation/member access
-        // Example: db.Orders.Where(x).Select(y) -> We want the whole outer Invocation
-        while (targetExpression.Parent is MemberAccessExpressionSyntax ||
-               targetExpression.Parent is InvocationExpressionSyntax)
+        // Walk to the topmost invocation/member access, including any terminal call
+        // (Count, ToList, FirstOrDefaultAsync, ExecuteDeleteAsync, etc.) so the engine
+        // receives the exact expression the app runs and generates the real SQL.
+        while (targetExpression.Parent is MemberAccessExpressionSyntax or InvocationExpressionSyntax)
         {
-            if (targetExpression.Parent is MemberAccessExpressionSyntax m)
-            {
-                if (TerminalMethods.Contains(m.Name.Identifier.Text))
-                {
-                    break;
-                }
-            }
-
             targetExpression = (ExpressionSyntax)targetExpression.Parent;
         }
 
-        // Post-process: strip any trailing terminal method calls from the result.
-        // This handles hovering directly over a terminal keyword (e.g. "ToList"):
-        //   db.Orders.Where(...).ToList()  ->  db.Orders.Where(...)
-        // The while loop above only guards upward traversal; this handles the case
-        // where the starting node is already the outermost terminal invocation.
-        while (targetExpression is InvocationExpressionSyntax terminalInvocation &&
-               terminalInvocation.Expression is MemberAccessExpressionSyntax terminalAccess &&
-               TerminalMethods.Contains(terminalAccess.Name.Identifier.Text))
+        // Guard: reject expressions that are not LINQ query chains.
+        // Without this, hovering inside a lambda argument of a non-LINQ method call
+        // (e.g. "x => new Dto{...}" passed to GetFooAsync(id, x => new Dto{...}, ct))
+        // causes the entire call site to be extracted as the LINQ expression, with the
+        // method name mis-identified as the DbContext variable name. The engine then
+        // declares a variable using that name and later tries to invoke it as a method,
+        // producing CS0149: Method name expected.
+        // GetInvocationChainMethodNames only yields for member-access chains (a.b.c()),
+        // so a bare call like GetFooAsync(...) yields nothing → IsLikelyQueryChain = false.
+        if (targetExpression is InvocationExpressionSyntax finalInvocation
+            && !IsLikelyQueryChain(finalInvocation))
         {
-            if (TryRewriteTerminalInvocation(
-                    terminalAccess.Expression,
-                    terminalAccess.Name.Identifier.Text,
-                    terminalInvocation.ArgumentList.Arguments,
-                    terminalInvocation,
-                    out var rewritten))
+            if (TryExtractFromExpressionParameterHelperCall(
+                    root,
+                    finalInvocation,
+                    position,
+                    out var synthesizedExpression,
+                    out var synthesizedContextVariableName))
             {
-                targetExpression = rewritten;
-                continue;
+                contextVariableName = synthesizedContextVariableName;
+                return synthesizedExpression;
             }
 
-            targetExpression = terminalAccess.Expression;
+            // The cursor is inside a nested call (e.g. a predicate method inside a lambda
+            // argument: "w.IsNotDeleted()" inside ".Where(w => w.IsNotDeleted())").
+            // Walk up through ancestors to find a containing LINQ query chain — this
+            // handles hovering on any token within a .Where(…) or .Select(…) lambda
+            // in Visual Studio / Rider, where the QuickInfo trigger fires on the exact
+            // token under the cursor rather than the method name.
+            var outerChain = node?.AncestorsAndSelf()
+                .OfType<InvocationExpressionSyntax>()
+                .Select(GetOutermostInvocationChain)
+                .FirstOrDefault(IsLikelyQueryChain);
+
+            if (outerChain is null)
+            {
+                return null;
+            }
+
+            targetExpression = outerChain;
         }
 
         // Inline local IQueryable variables for non-terminal chains too, so

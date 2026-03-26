@@ -47,31 +47,6 @@ public static partial class LspSyntaxHelper
         "ExecuteUpdate", "ExecuteUpdateAsync", "ExecuteDelete", "ExecuteDeleteAsync"
     };
 
-    private static readonly HashSet<string> PredicateTerminalMethods = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Count", "CountAsync", "LongCount", "LongCountAsync",
-        "Any", "AnyAsync",
-        "First", "FirstOrDefault", "FirstAsync", "FirstOrDefaultAsync",
-        "Single", "SingleOrDefault", "SingleAsync", "SingleOrDefaultAsync",
-        "Last", "LastOrDefault", "LastAsync", "LastOrDefaultAsync"
-    };
-
-    private static readonly HashSet<string> TakeOneTerminalMethods = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Any", "AnyAsync",
-        "First", "FirstOrDefault", "FirstAsync", "FirstOrDefaultAsync"
-    };
-
-    private static readonly HashSet<string> TakeTwoTerminalMethods = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Single", "SingleOrDefault", "SingleAsync", "SingleOrDefaultAsync"
-    };
-
-    private static readonly HashSet<string> CountTerminalMethods = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Count", "CountAsync", "LongCount", "LongCountAsync"
-    };
-
     private static readonly HashSet<string> QueryChainMethods = new(StringComparer.OrdinalIgnoreCase)
     {
         "Where", "Select", "SelectMany", "Join", "GroupBy", "OrderBy", "OrderByDescending",

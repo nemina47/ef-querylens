@@ -3,6 +3,10 @@ using EFQueryLens.Core.Contracts;
 
 namespace EFQueryLens.Lsp.Services;
 
+internal sealed record CombinedHoverResult(
+    HoverPreviewComputationResult Markdown,
+    QueryLensStructuredHoverResult Structured);
+
 internal sealed record HoverPreviewComputationResult(
     bool Success,
     string Output,
@@ -18,6 +22,7 @@ internal sealed record QueryLensStructuredHoverResult(
     IReadOnlyList<QueryLensSqlStatement> Statements,
     int CommandCount,
     string? SourceExpression,
+    string? ExecutedExpression,
     string? DbContextType,
     string? ProviderName,
     string? SourceFile,
@@ -33,12 +38,26 @@ internal sealed record QueryLensStructuredHoverResult(
 internal sealed partial class HoverPreviewService
 {
     private readonly IQueryLensEngine _engine;
+    private readonly bool _useBrowserSafeHoverActionLinks;
+    private readonly int _actionPort;
     private bool _debugEnabled;
 
     public HoverPreviewService(IQueryLensEngine engine, bool debugEnabled = false)
     {
         _engine = engine;
+        var client = Environment.GetEnvironmentVariable("QUERYLENS_CLIENT");
+        _useBrowserSafeHoverActionLinks =
+            string.Equals(client, "rider", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(client, "vscode", StringComparison.OrdinalIgnoreCase);
+        _actionPort = int.TryParse(
+            Environment.GetEnvironmentVariable("QUERYLENS_ACTION_PORT"),
+            out var port) ? port : 0;
         _debugEnabled = debugEnabled;
+
+        Console.Error.WriteLine(
+            $"[QL-Hover] init: client='{Environment.GetEnvironmentVariable("QUERYLENS_CLIENT")}' " +
+            $"useBrowserSafe={_useBrowserSafeHoverActionLinks} actionPort={_actionPort} " +
+            $"linkScheme={(_actionPort > 0 ? $"http://127.0.0.1:{_actionPort}" : "efquerylens://")}");
     }
 
     internal void SetDebugEnabled(bool enabled)

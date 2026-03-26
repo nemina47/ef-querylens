@@ -41,17 +41,50 @@ public static partial class LspSyntaxHelper
         }
     }
 
-    private static bool TryGetTerminalMethodName(InvocationExpressionSyntax invocation, out string methodName)
+    private static bool TryExtractFirstMemberAfterRoot(
+        ExpressionSyntax expression,
+        out string memberName)
     {
-        methodName = string.Empty;
+        memberName = string.Empty;
+        var current = expression;
 
-        if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
+        while (true)
         {
-            return false;
-        }
+            switch (current)
+            {
+                case InvocationExpressionSyntax invocation
+                    when invocation.Expression is MemberAccessExpressionSyntax memberAccess:
+                    if (memberAccess.Expression is IdentifierNameSyntax or ThisExpressionSyntax)
+                    {
+                        memberName = memberAccess.Name.Identifier.Text;
+                        return true;
+                    }
 
-        methodName = memberAccess.Name.Identifier.Text;
-        return TerminalMethods.Contains(methodName);
+                    current = memberAccess.Expression;
+                    continue;
+
+                case MemberAccessExpressionSyntax memberAccess:
+                    if (memberAccess.Expression is IdentifierNameSyntax or ThisExpressionSyntax)
+                    {
+                        memberName = memberAccess.Name.Identifier.Text;
+                        return true;
+                    }
+
+                    current = memberAccess.Expression;
+                    continue;
+
+                case ParenthesizedExpressionSyntax parenthesized:
+                    current = parenthesized.Expression;
+                    continue;
+
+                case CastExpressionSyntax cast:
+                    current = cast.Expression;
+                    continue;
+
+                default:
+                    return false;
+            }
+        }
     }
 
     private static bool IsInsideLambda(SyntaxNode node)

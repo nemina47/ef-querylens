@@ -13,16 +13,30 @@ namespace EFQueryLens.Core
 
 namespace SampleSqlServerApp.Infrastructure.Persistence
 {
-    public sealed class SqlServerAppQueryLensFactory :
-        EFQueryLens.Core.IQueryLensDbContextFactory<SqlServerAppDbContext>,
-        EFQueryLens.Core.IQueryLensDbContextFactory<SqlServerReportingDbContext>
+    public sealed class SqlServerAppDbContextFactory :
+        EFQueryLens.Core.IQueryLensDbContextFactory<SqlServerAppDbContext>
     {
         public SqlServerAppDbContext CreateOfflineContext()
         {
             return new SqlServerAppDbContext(CreateSqlServerOptions<SqlServerAppDbContext>());
         }
 
-        SqlServerReportingDbContext EFQueryLens.Core.IQueryLensDbContextFactory<SqlServerReportingDbContext>.CreateOfflineContext()
+        private static DbContextOptions<TContext> CreateSqlServerOptions<TContext>()
+            where TContext : DbContext
+        {
+            var connectionString = "Server=ef_querylens_offline;Database=ef_querylens_offline;User Id=ef_querylens_offline;Password=ef_querylens_offline;TrustServerCertificate=True";
+            return new DbContextOptionsBuilder<TContext>()
+                .UseSqlServer(connectionString,
+                    sqlServer => sqlServer.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
+                .UseProjectables()
+                .Options;
+        }
+    }
+
+    public sealed class SqlServerReportingDbContextFactory :
+        EFQueryLens.Core.IQueryLensDbContextFactory<SqlServerReportingDbContext>
+    {
+        public SqlServerReportingDbContext CreateOfflineContext()
         {
             return new SqlServerReportingDbContext(CreateSqlServerOptions<SqlServerReportingDbContext>());
         }
@@ -30,17 +44,12 @@ namespace SampleSqlServerApp.Infrastructure.Persistence
         private static DbContextOptions<TContext> CreateSqlServerOptions<TContext>()
             where TContext : DbContext
         {
-            // SQL preview only needs provider metadata/model; no live DB call is made.
             var connectionString = "Server=ef_querylens_offline;Database=ef_querylens_offline;User Id=ef_querylens_offline;Password=ef_querylens_offline;TrustServerCertificate=True";
-
-            var options = new DbContextOptionsBuilder<TContext>()
-                .UseSqlServer(
-                    connectionString,
+            return new DbContextOptionsBuilder<TContext>()
+                .UseSqlServer(connectionString,
                     sqlServer => sqlServer.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
                 .UseProjectables()
                 .Options;
-
-            return options;
         }
     }
 }

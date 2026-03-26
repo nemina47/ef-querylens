@@ -9,3 +9,13 @@ namespace EFQueryLens.Core.Tests;
 public sealed class AssemblyLoadContextIsolationCollection
 {
 }
+
+[CollectionDefinition("QueryEvaluatorIsolation", DisableParallelization = true)]
+public sealed class QueryEvaluatorIsolationCollection
+{
+}
+
+[CollectionDefinition("ProjectAssemblyContextIsolation", DisableParallelization = true)]
+public sealed class ProjectAssemblyContextIsolationCollection
+{
+}

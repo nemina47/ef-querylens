@@ -1,5 +1,3 @@
-using EFQueryLens.Core.Contracts.Explain;
-
 namespace EFQueryLens.Core.Contracts;
 
 /// <summary>
@@ -9,20 +7,11 @@ namespace EFQueryLens.Core.Contracts;
 public interface IQueryLensEngine : IAsyncDisposable
 {
     /// <summary>
-    /// Translates a LINQ expression to SQL using offline execution-based capture,
-    /// with ToQueryString() fallback when capture cannot be installed.
+    /// Translates a LINQ expression to SQL using offline execution-based capture.
     /// Does not require a real database connection.
     /// </summary>
     Task<QueryTranslationResult> TranslateAsync(
         TranslationRequest request,
-        CancellationToken ct = default);
-
-    /// <summary>
-    /// Runs EXPLAIN (ANALYZE) against a real database and returns the normalized plan.
-    /// Requires a live connection string.
-    /// </summary>
-    Task<ExplainResult> ExplainAsync(
-        ExplainRequest request,
         CancellationToken ct = default);
 
     /// <summary>

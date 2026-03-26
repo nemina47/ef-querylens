@@ -26,9 +26,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\EFQueryLens.Core\EFQueryLens.Core.csproj" />
     <ProjectReference Include="..\..\src\EFQueryLens.Daemon\EFQueryLens.Daemon.csproj" />
-    <ProjectReference Include="..\..\src\EFQueryLens.DaemonClient\EFQueryLens.DaemonClient.csproj" />
     <ProjectReference Include="..\..\src\EFQueryLens.Lsp\EFQueryLens.Lsp.csproj" />
-    <ProjectReference Include="..\..\src\EFQueryLens.Transport.Grpc\EFQueryLens.Transport.Grpc.csproj" />
   </ItemGroup>
 
   <!-- Build SampleMySqlApp and copy its output to the test bin dir so ALC tests

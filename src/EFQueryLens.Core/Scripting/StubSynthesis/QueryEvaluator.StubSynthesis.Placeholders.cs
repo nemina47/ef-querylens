@@ -1,9 +1,15 @@
+using System.Collections.Concurrent;
+using System.Reflection;
 using System.Text.RegularExpressions;
 
 namespace EFQueryLens.Core.Scripting.Evaluation;
 
 public sealed partial class QueryEvaluator
 {
+    // Cache placeholder expressions for provider-specific types — keyed by CLR type.
+    // BuildScalarPlaceholderExpression is called in the retry loop so the cache is important.
+    private static readonly ConcurrentDictionary<Type, string> _providerTypePlaceholderCache = new();
+
     private static bool LooksLikeCancellationTokenArgument(string v, string expr)
     {
         if (Regex.IsMatch(expr, $@"\w+Async\s*\([^\)]*\b{Regex.Escape(v)}\b[^\)]*\)")) return true;
@@ -91,6 +97,10 @@ public sealed partial class QueryEvaluator
             return $"({enumTypeName})0, ({enumTypeName})1";
         }
 
+        var t2 = Nullable.GetUnderlyingType(elementType) ?? elementType;
+        if (TryBuildReflectionPlaceholder(t2, out var reflPlaceholder))
+            return $"{reflPlaceholder}, {reflPlaceholder}";
+
         var typeName = ToCSharpTypeName(elementType);
         return $"default({typeName})!, default({typeName})!";
     }
@@ -134,8 +144,76 @@ public sealed partial class QueryEvaluator
         if (t.IsEnum)
             return $"({ToCSharpTypeName(t)})1";
 
+        // Provider-specific / unknown types: try to discover a constructible placeholder via reflection.
+        // This handles types like Pgvector.Vector, NetTopologySuite geometries, etc. where
+        // default(T) would produce null and cause EF Core "does not have a type mapping assigned" errors.
+        if (TryBuildReflectionPlaceholder(t, out var reflectionPlaceholder))
+            return reflectionPlaceholder;
+
         var variableTypeName = ToCSharpTypeName(variableType);
         return $"default({variableTypeName})";
+    }
+
+    /// <summary>
+    /// Attempts to build a non-null C# constructor expression for a provider-specific type
+    /// by inspecting its public constructors via reflection. Tries, in order:
+    /// 1. Parameterless constructor → <c>new T()</c>
+    /// 2. Single-param constructor accepting an array of primitives → <c>new T(new float[1])</c>
+    /// 3. Constructor whose all parameters are numeric primitives → <c>new T(0, 0)</c>
+    /// Results are cached to avoid repeated reflection during the retry loop.
+    /// </summary>
+    private static bool TryBuildReflectionPlaceholder(Type t, out string placeholder)
+    {
+        if (_providerTypePlaceholderCache.TryGetValue(t, out var cached))
+        {
+            placeholder = cached;
+            return true;
+        }
+
+        placeholder = string.Empty;
+
+        if (t.IsAbstract || t.IsInterface || t.IsGenericTypeDefinition || !t.IsClass && !t.IsValueType)
+            return false;
+
+        var typeName = ToCSharpTypeName(t);
+
+        // 1. Parameterless public constructor: new T()
+        if (t.GetConstructor(Type.EmptyTypes) is not null)
+        {
+            placeholder = $"new {typeName}()";
+            _providerTypePlaceholderCache[t] = placeholder;
+            return true;
+        }
+
+        foreach (var ctor in t.GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+                               .OrderBy(c => c.GetParameters().Length))
+        {
+            var ps = ctor.GetParameters();
+            if (ps.Length == 0) continue;
+
+            // 2. Single array-of-primitives parameter: new T(new float[1])
+            if (ps.Length == 1 && ps[0].ParameterType.IsArray)
+            {
+                var elem = ps[0].ParameterType.GetElementType()!;
+                if (elem.IsPrimitive || elem == typeof(decimal))
+                {
+                    placeholder = $"new {typeName}(new {ToCSharpTypeName(elem)}[1])";
+                    _providerTypePlaceholderCache[t] = placeholder;
+                    return true;
+                }
+            }
+
+            // 3. All parameters are numeric primitives: new T(0, 0, 0)
+            if (ps.All(p => p.ParameterType.IsPrimitive || p.ParameterType == typeof(decimal)))
+            {
+                var args = string.Join(", ", ps.Select(p => BuildScalarPlaceholderExpression(p.ParameterType)));
+                placeholder = $"new {typeName}({args})";
+                _providerTypePlaceholderCache[t] = placeholder;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static Type? FindEntityPropertyType(Type ctx, string propName)

@@ -38,14 +38,14 @@ internal sealed partial class HoverPreviewService
             .ToArray();
     }
 
-    private static string BuildHoverMarkdown(
+    private string BuildHoverMarkdown(
         IReadOnlyList<QuerySqlCommand> commands,
         IReadOnlyList<QueryWarning> warnings,
-        string uri,
-        int line,
-        int character,
         TranslationMetadata? metadata,
-        double avgTranslationMs = 0)
+        double avgTranslationMs = 0,
+        string? filePath = null,
+        int line = 0,
+        int character = 0)
     {
         var providerName = metadata?.ProviderName;
         var statements = BuildFormattedStatements(commands, providerName);
@@ -54,33 +54,48 @@ internal sealed partial class HoverPreviewService
         var statementWord = commands.Count == 1 ? "query" : "queries";
         var warningLines = BuildWarningLines(warnings);
 
-        var queryParams = $"uri={Uri.EscapeDataString(uri)}&line={line}&character={character}";
-        var copyLink = $"[Copy SQL](efquerylens://copySql?{queryParams})";
-        var openLink = $"[Open SQL](efquerylens://openSqlEditor?{queryParams})";
-        var recalculateLink = $"[Reanalyze](efquerylens://recalculate?{queryParams})";
+        string? actionLinks = null;
+        if (_useBrowserSafeHoverActionLinks && !string.IsNullOrWhiteSpace(filePath))
+        {
+            try
+            {
+                var fileUri = Uri.EscapeDataString(new Uri(filePath).AbsoluteUri);
+                actionLinks =
+                    $"[Copy SQL](efquerylens://copysql?uri={fileUri}&line={line}&character={character})" +
+                    $" | [Open SQL](efquerylens://opensql?uri={fileUri}&line={line}&character={character})" +
+                    $" | [Reanalyze](efquerylens://recalculate?uri={fileUri}&line={line}&character={character})";
+            }
+            catch { /* skip links if path is unparseable */ }
+        }
 
-        // Plain Markdown only (no HTML entities) so VS Code, VS, and Rider all render the same.
-        var header = $"**EF QueryLens** · {commands.Count} {statementWord}";
-        var actionsRow = $"{copyLink} | {openLink} | {recalculateLink}";
+        var header = actionLinks is null
+            ? $"**EF QueryLens** · {commands.Count} {statementWord}"
+            : $"**EF QueryLens** · {commands.Count} {statementWord} {actionLinks}";
+
         var timingLine = avgTranslationMs > 0
             ? $"\n\n*SQL generation time {avgTranslationMs:0} ms*"
             : string.Empty;
 
         var body = warningLines.Count == 0
-            ? $"{header}  \n{actionsRow}\n\n```sql\n{sql}\n```{timingLine}"
-            : $"{header}  \n{actionsRow}\n\n```sql\n{sql}\n```\n\n**Notes**\n{string.Join("\n", warningLines.Select(line => $"- {line}"))}{timingLine}";
+            ? $"{header}\n\n```sql\n{sql}\n```{timingLine}"
+            : $"{header}\n\n```sql\n{sql}\n```\n\n**Notes**\n{string.Join("\n", warningLines.Select(w => $"- {w}"))}{timingLine}";
 
         return body;
     }
+
 
     private static string? BuildStructuredEnrichedSql(
         string? rawSql,
         string sourceFile,
         int sourceLine,
         string? sourceExpression,
-        string? dbContextType,
-        string? providerName,
-        IReadOnlyList<QueryWarning>? warnings = null)
+        string? executedExpression = null,
+        string? efCoreVersion = null,
+        string? dbContextType = null,
+        string? providerName = null,
+        IReadOnlyList<QueryWarning>? warnings = null,
+        bool hasClientEvaluation = false,
+        IReadOnlyList<QueryParameter>? parameters = null)
     {
         if (string.IsNullOrWhiteSpace(rawSql))
         {
@@ -96,11 +111,14 @@ internal sealed partial class HoverPreviewService
             sb.AppendLine($"-- Source:    {sourceFile}{lineDisplay}");
         }
 
-        AppendCommentedExpression(sb, "LINQ", sourceExpression);
+        if (!string.IsNullOrWhiteSpace(efCoreVersion))
+        {
+            sb.AppendLine($"-- EF Core:   {efCoreVersion}");
+        }
 
         if (!string.IsNullOrWhiteSpace(dbContextType))
         {
-            sb.AppendLine($"-- DbContext: {dbContextType}");
+            sb.AppendLine($"-- DbContext: {ShortTypeName(dbContextType)}");
         }
 
         if (!string.IsNullOrWhiteSpace(providerName))
@@ -108,15 +126,47 @@ internal sealed partial class HoverPreviewService
             sb.AppendLine($"-- Provider:  {providerName}");
         }
 
-        if (warnings is { Count: > 0 })
+        AppendCommentedExpression(sb, "LINQ", sourceExpression);
+
+        // Only shown when EFQueryLens rewrote the expression before evaluation.
+        if (!string.IsNullOrWhiteSpace(executedExpression)
+            && !string.Equals(executedExpression, sourceExpression, StringComparison.Ordinal))
+        {
+            AppendCommentedExpression(sb, "Executed LINQ", executedExpression);
+        }
+
+        if (parameters is { Count: > 0 })
+        {
+            sb.AppendLine("-- Parameters:");
+            var nameWidth = parameters.Max(p => p.Name.Length);
+            foreach (var param in parameters)
+            {
+                var shortType = ShortTypeName(param.ClrType);
+                var valueSuffix = string.IsNullOrWhiteSpace(param.InferredValue)
+                    ? string.Empty
+                    : $" = {param.InferredValue}";
+                sb.AppendLine($"--   {param.Name.PadRight(nameWidth)}  {shortType}{valueSuffix}");
+            }
+        }
+
+        var hasNotes = (warnings is { Count: > 0 }) || hasClientEvaluation;
+        if (hasNotes)
         {
             sb.AppendLine("-- Notes:");
-            foreach (var warning in warnings)
+            if (hasClientEvaluation)
             {
-                var warningLine = string.IsNullOrWhiteSpace(warning.Suggestion)
-                    ? $"--   - {warning.Code}: {warning.Message}"
-                    : $"--   - {warning.Code}: {warning.Message} ({warning.Suggestion})";
-                sb.AppendLine(warningLine);
+                sb.AppendLine("--   ⚠ Client evaluation: EF Core evaluated part of this query in memory (silent performance risk)");
+            }
+
+            if (warnings is { Count: > 0 })
+            {
+                foreach (var warning in warnings)
+                {
+                    var warningLine = string.IsNullOrWhiteSpace(warning.Suggestion)
+                        ? $"--   - {warning.Code}: {warning.Message}"
+                        : $"--   - {warning.Code}: {warning.Message} ({warning.Suggestion})";
+                    sb.AppendLine(warningLine);
+                }
             }
         }
 
@@ -124,6 +174,9 @@ internal sealed partial class HoverPreviewService
         sb.Append(rawSql);
         return sb.ToString();
     }
+
+    private static string ShortTypeName(string? fullName) =>
+        fullName?.Split('.').LastOrDefault() ?? fullName ?? string.Empty;
 
     private static void AppendCommentedExpression(StringBuilder sb, string label, string? expression)
     {

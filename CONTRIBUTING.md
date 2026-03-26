@@ -84,6 +84,24 @@ Run sandbox IDE for local plugin debugging:
 dotnet build src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/EFQueryLens.VisualStudio.csproj -c Debug
 ```
 
+## Local Release Packaging
+
+Build all three plugin artifacts into a single local release folder and generate release notes from `CHANGELOG.md`:
+
+```powershell
+pwsh ./scripts/release.ps1 -Version 0.0.2 -Clean
+```
+
+Output layout:
+
+```text
+releases/<version>/
+	release-notes.md
+	vscode/*.vsix
+	rider/*.zip
+	visualstudio/*.vsix
+```
+
 ## Full Validation Sequence
 
 ```bash

@@ -2,8 +2,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\EFQueryLens.Core\EFQueryLens.Core.csproj" />
-    <ProjectReference Include="..\EFQueryLens.DaemonClient\EFQueryLens.DaemonClient.csproj" />
-    <ProjectReference Include="..\EFQueryLens.Transport.Grpc\EFQueryLens.Transport.Grpc.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -19,6 +17,10 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Allow the app to run on any installed .NET >= the target version.
+         Without this a user on .NET 9 gets a hard startup failure even though
+         the runtime APIs we use are stable across major versions. -->
+    <RollForward>LatestMajor</RollForward>
   </PropertyGroup>
 
 </Project>

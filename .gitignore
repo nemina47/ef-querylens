@@ -2,6 +2,7 @@
 bin/
 obj/
 out/
+releases/
 
 # Generated VS extension payload (copied from LSP build output)
 src/Plugins/ef-querylens-visualstudio/server/
@@ -36,6 +37,7 @@ src/Plugins/ef-querylens-rider/.intellijPlatform/
 # Test results
 TestResults/
 coverage/
+coverage-output/
 *.trx
 *.coveragexml
 
@@ -97,3 +99,4 @@ test_results_new.txt
 test.cs
 QueryLens.csproj
 
+src/Plugins/ef-querylens-rider/server/

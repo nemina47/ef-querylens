@@ -2,18 +2,14 @@ namespace EFQueryLens.Core.AssemblyContext;
 
 internal sealed partial class ShadowAssemblyCache
 {
-    private const int DefaultShadowCacheMaxAgeHours = 12;
-    private const long DefaultShadowCacheSoftLimitBytes = 5L * 1024L * 1024L * 1024L;
-    private const long DefaultShadowCacheTargetBytes = 3L * 1024L * 1024L * 1024L;
-    private static readonly TimeSpan CleanupInterval = TimeSpan.FromMinutes(15);
+    private const int DefaultShadowCacheMaxAgeHours = 48;
+    private const int DefaultShadowCacheMaxBundles = 20;
 
     private readonly bool _debugEnabled;
     private readonly string _root;
     private readonly string _bundleRoot;
     private readonly string _stagingRoot;
     private readonly Lock _gate = new();
-    private int _backgroundCleanupScheduled;
-    private DateTime _lastCleanupUtc = DateTime.MinValue;
 
     public ShadowAssemblyCache(bool debugEnabled)
     {
@@ -55,20 +51,12 @@ internal sealed partial class ShadowAssemblyCache
         var bundleKey = ComputeBundleKey(sourceDir, manifest);
         var bundlePath = Path.Combine(_bundleRoot, bundleKey);
         var bundleAssemblyPath = Path.Combine(bundlePath, Path.GetFileName(fullSourcePath));
-        bool shouldScheduleCleanup;
-        var forceCleanup = false;
 
         if (File.Exists(bundleAssemblyPath))
         {
             lock (_gate)
             {
                 TouchDirectory(bundlePath);
-                shouldScheduleCleanup = IsCleanupDue(DateTime.UtcNow, force: false);
-            }
-
-            if (shouldScheduleCleanup)
-            {
-                ScheduleCleanupIfDue(force: false);
             }
 
             return bundleAssemblyPath;
@@ -96,11 +84,10 @@ internal sealed partial class ShadowAssemblyCache
                 if (!File.Exists(bundleAssemblyPath))
                 {
                     TryAtomicPromote(stagingPath, bundlePath);
-                    forceCleanup = true;
+                    Task.Run(() => { try { CleanupCore(); } catch { } });
                 }
 
                 TouchDirectory(bundlePath);
-                shouldScheduleCleanup = IsCleanupDue(DateTime.UtcNow, force: false);
             }
         }
         finally
@@ -108,59 +95,6 @@ internal sealed partial class ShadowAssemblyCache
             TryDeleteDirectory(stagingPath);
         }
 
-        if (forceCleanup)
-        {
-            ScheduleCleanupIfDue(force: true);
-        }
-        else if (shouldScheduleCleanup)
-        {
-            ScheduleCleanupIfDue(force: false);
-        }
-
         return bundleAssemblyPath;
-    }
-
-    public void CleanupIfDue(bool force)
-    {
-        lock (_gate)
-        {
-            if (!IsCleanupDue(DateTime.UtcNow, force))
-            {
-                return;
-            }
-
-            CleanupCore();
-            _lastCleanupUtc = DateTime.UtcNow;
-        }
-    }
-
-    public void ScheduleCleanupIfDue(bool force)
-    {
-        if (Interlocked.Exchange(ref _backgroundCleanupScheduled, 1) != 0)
-        {
-            return;
-        }
-
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                CleanupIfDue(force);
-            }
-            finally
-            {
-                Volatile.Write(ref _backgroundCleanupScheduled, 0);
-            }
-        });
-    }
-
-    private bool IsCleanupDue(DateTime utcNow, bool force)
-    {
-        if (force)
-        {
-            return true;
-        }
-
-        return utcNow - _lastCleanupUtc >= CleanupInterval;
     }
 }

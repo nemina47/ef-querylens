@@ -20,6 +20,7 @@ public sealed partial class QueryEvaluator
         var sw = Stopwatch.StartNew();
         var compilationRetryCount = 0;
         IDbContextLease? dbContextLease = null;
+        var originalExpression = request.Expression;
 
         try
         {
@@ -73,6 +74,21 @@ public sealed partial class QueryEvaluator
             dbContextCreationWatch.Stop();
             TimeSpan? dbContextCreationTime = dbContextCreationWatch.Elapsed;
 
+            // 2b. If the expression contains Find/FindAsync, rewrite key args to default(PKType)
+            // using the EF model — avoids the ArgumentException on PK type mismatch.
+            if (ContainsFindInvocation(request.Expression))
+            {
+                var rewritten = TryRewriteFindExpression(request.Expression, dbInstance);
+                if (rewritten != null)
+                    request = request with { Expression = rewritten };
+                else
+                    return Failure(
+                        "DbSet.Find() and FindAsync() require the entity's primary key type from " +
+                        "the EF model, but the model lookup failed for this DbSet. " +
+                        "Use db.YourEntities.Where(e => e.Id == id).FirstOrDefault() instead.",
+                        sw.Elapsed, dbContextType, alcCtx.LoadedAssemblies);
+            }
+
             // 3. Build compilation assembly set and compute eval-runner cache key.
             var compilationAssemblies = BuildCompilationAssemblySet(alcCtx);
             var asmSetHash = ComputeAssemblySetHash(
@@ -84,11 +100,13 @@ public sealed partial class QueryEvaluator
             TimeSpan? metadataReferenceBuildTime;
             TimeSpan? roslynCompilationTime;
             TimeSpan? evalAssemblyLoadTime;
+            string? executedExpression;
             if (_evalRunnerCache.TryGetValue(evalCacheKey, out var cachedRunner))
             {
                 // Warm path: skip MetadataRefs, namespace scan, compile, emit, load.
                 TouchEvalRunnerCacheEntry(evalCacheKey, cachedRunner);
                 runMethod = cachedRunner.RunMethod;
+                executedExpression = cachedRunner.ExecutedExpression;
                 metadataReferenceBuildTime = TimeSpan.Zero;
                 roslynCompilationTime = TimeSpan.Zero;
                 evalAssemblyLoadTime = TimeSpan.Zero;
@@ -103,7 +121,6 @@ public sealed partial class QueryEvaluator
 
                 // 5. Build known namespace/type index for import filtering (cached by assemblySetHash).
                 var (knownNamespaces, knownTypes) = GetOrBuildNamespaceTypeIndex(
-                    alcCtx.AssemblyPath,
                     asmSetHash,
                     compilationAssemblies);
 
@@ -140,7 +157,7 @@ public sealed partial class QueryEvaluator
                     if (hardErrors.Count > 0)
                     {
                         return Failure(
-                            $"Compilation error: {string.Join("; ", hardErrors.Select(d => d.GetMessage()))}",
+                            $"Compilation error: {FormatHardDiagnostics(hardErrors)}",
                             sw.Elapsed, dbContextType, alcCtx.LoadedAssemblies);
                     }
 
@@ -150,7 +167,7 @@ public sealed partial class QueryEvaluator
                     if (maxRetries-- <= 0)
                     {
                         return Failure(
-                            $"Compilation error (too many retries): {string.Join("; ", errors.Select(d => d.GetMessage()))}",
+                            $"Compilation error: {FormatSoftDiagnostics(errors)}",
                             sw.Elapsed, dbContextType, alcCtx.LoadedAssemblies);
                     }
 
@@ -228,7 +245,7 @@ public sealed partial class QueryEvaluator
                     if (!changed)
                     {
                         return Failure(
-                            $"Compilation error: {string.Join("; ", errors.Select(d => d.GetMessage()))}",
+                            $"Compilation error: {FormatSoftDiagnostics(errors)}",
                             sw.Elapsed, dbContextType, alcCtx.LoadedAssemblies);
                     }
                 }
@@ -244,7 +261,7 @@ public sealed partial class QueryEvaluator
                     if (!emitResult.Success)
                     {
                         return Failure(
-                            $"Emit error: {string.Join("; ", emitResult.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.GetMessage()))}",
+                            $"Emit error: {FormatHardDiagnostics(emitResult.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error))}",
                             sw.Elapsed, dbContextType, alcCtx.LoadedAssemblies);
                     }
 
@@ -259,7 +276,10 @@ public sealed partial class QueryEvaluator
                 runMethod = runType.GetMethod("Run", BindingFlags.Public | BindingFlags.Static)
                     ?? throw new InvalidOperationException("Could not find Run method in __QueryLensRunner__.");
 
-                _evalRunnerCache[evalCacheKey] = new EvalRunnerEntry(evalAssembly, runMethod, GetUtcNowTicks());
+                executedExpression = string.Equals(workingExpression, originalExpression, StringComparison.Ordinal)
+                    ? null
+                    : workingExpression;
+                _evalRunnerCache[evalCacheKey] = new EvalRunnerEntry(evalAssembly, runMethod, GetUtcNowTicks(), executedExpression);
                 TrimCacheByLastAccess(_evalRunnerCache, MaxEvalRunnerCacheEntries, static e => e.LastAccessTicks);
             } // end else (eval runner cache miss)
 
@@ -273,7 +293,6 @@ public sealed partial class QueryEvaluator
             runnerExecutionWatch.Stop();
             TimeSpan? runnerExecutionTime = runnerExecutionWatch.Elapsed;
 
-            TimeSpan? toQueryStringFallbackTime = null;
             if (capturedCommands.Count > 0)
             {
                 commands = capturedCommands;
@@ -291,65 +310,8 @@ public sealed partial class QueryEvaluator
             }
             else
             {
-                if (!IsQueryable(queryable))
-                {
-                    return Failure(
-                        $"Expression did not return an IQueryable. Got: '{queryable?.GetType().Name ?? "null"}'.",
-                        sw.Elapsed,
-                        dbContextType,
-                        alcCtx.LoadedAssemblies);
-                }
-
-                var toQueryStringStopwatch = Stopwatch.StartNew();
-                var sql = TryToQueryString(queryable, alcCtx.LoadedAssemblies);
-                toQueryStringStopwatch.Stop();
-                toQueryStringFallbackTime = toQueryStringStopwatch.Elapsed;
-                if (sql is null)
-                {
-                    return Failure(
-                        captureSkipReason ?? captureError ?? "Could not generate SQL.",
-                        sw.Elapsed,
-                        dbContextType,
-                        alcCtx.LoadedAssemblies);
-                }
-
-                commands = [new QuerySqlCommand { Sql = sql, Parameters = ParseParameters(sql) }];
-
-                if (!string.IsNullOrWhiteSpace(captureSkipReason))
-                {
-                    warnings.Add(new QueryWarning
-                    {
-                        Severity = WarningSeverity.Info,
-                        Code = "QL_CAPTURE_SKIPPED",
-                        Message = "Could not install offline connection; used ToQueryString() instead.",
-                        Suggestion = captureSkipReason,
-                    });
-                }
-                else if (!string.IsNullOrWhiteSpace(captureError))
-                {
-                    warnings.Add(new QueryWarning
-                    {
-                        Severity = WarningSeverity.Warning,
-                        Code = "QL_CAPTURE_PARTIAL",
-                        Message = "Execution capture failed during materialization; used ToQueryString() instead.",
-                        Suggestion = captureError,
-                    });
-                }
-                else
-                {
-                    warnings.Add(new QueryWarning
-                    {
-                        Severity = WarningSeverity.Warning,
-                        Code = "QL_CAPTURE_FALLBACK",
-                        Message = "Execution capture produced no SQL; fell back to ToQueryString().",
-                    });
-                }
-            }
-
-            if (!IsQueryable(queryable))
-            {
                 return Failure(
-                    $"Expression did not return an IQueryable. Got: '{queryable?.GetType().Name ?? "null"}'.",
+                    captureSkipReason ?? captureError ?? "Offline capture produced no SQL commands.",
                     sw.Elapsed,
                     dbContextType,
                     alcCtx.LoadedAssemblies);
@@ -376,8 +338,7 @@ public sealed partial class QueryEvaluator
                 roslynCompilationTime,
                 compilationRetryCount,
                 evalAssemblyLoadTime,
-                runnerExecutionTime,
-                toQueryStringFallbackTime);
+                runnerExecutionTime);
 
             return new QueryTranslationResult
             {
@@ -387,6 +348,7 @@ public sealed partial class QueryEvaluator
                 Parameters = commands[0].Parameters,
                 Warnings = warnings,
                 Metadata = BuildMetadata(dbContextType, alcCtx.LoadedAssemblies, sw.Elapsed, creationStrategy, stageTimings),
+                ExecutedExpression = executedExpression,
             };
         }
         catch (OperationCanceledException)
@@ -398,6 +360,15 @@ public sealed partial class QueryEvaluator
             var msg = ex is TargetInvocationException { InnerException: { } inner }
                 ? inner.ToString()
                 : ex.Message;
+
+            if (msg.Contains("does not have a type mapping assigned", StringComparison.OrdinalIgnoreCase))
+            {
+                msg += "\n\nHint: A variable in your query has a type that EF Core cannot map to a SQL parameter type. " +
+                       "This often happens with provider-specific value types (e.g. Pgvector.Vector for pgvector, " +
+                       "NetTopologySuite.Geometries.Point for spatial). Ensure the variable is typed explicitly in " +
+                       "the hovered expression, or assign it from a typed entity property.";
+            }
+
             return Failure(msg, sw.Elapsed, null, null);
         }
         finally

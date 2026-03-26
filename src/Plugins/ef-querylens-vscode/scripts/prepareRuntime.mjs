@@ -147,51 +147,23 @@ function removeDirectoryWithRetry(directoryPath) {
     return;
   }
 
-  let lastError;
-
+  // Phase 1: quick attempt before doing anything disruptive.
   try {
-    fs.rmSync(directoryPath, {
-      recursive: true,
-      force: true,
-      maxRetries: 15,
-      retryDelay: 100,
-    });
+    fs.rmSync(directoryPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     return;
   } catch (error) {
-    lastError = error;
-    if (!isFileLockError(error)) {
-      throw error;
-    }
+    if (!isFileLockError(error)) throw error;
   }
 
-  const processNames = getLikelyLockedRuntimeProcesses(directoryPath);
-  if (processNames.length > 0) {
-    console.warn(
-      `[EFQueryLens] Runtime files appear locked at ${directoryPath}. Attempting to stop stale runtime processes: ${processNames.join(', ')}`
-    );
-    for (const processName of processNames) {
-      killProcessByName(processName);
-    }
-  }
-
-  sleepSync(300);
+  // Phase 2: kill QueryLens processes (LSP + daemon) that hold locks, then retry with patience.
+  killQueryLensProcesses(directoryPath);
 
   try {
-    fs.rmSync(directoryPath, {
-      recursive: true,
-      force: true,
-      maxRetries: 20,
-      retryDelay: 150,
-    });
-    return;
+    fs.rmSync(directoryPath, { recursive: true, force: true, maxRetries: 30, retryDelay: 200 });
   } catch (error) {
-    lastError = error;
-    if (!isFileLockError(error)) {
-      throw error;
-    }
+    if (!isFileLockError(error)) throw error;
+    throw error;
   }
-
-  throw lastError;
 }
 
 function copyDirectoryBestEffort(sourceDir, destinationDir) {
@@ -239,27 +211,28 @@ function copyDirectoryEntriesBestEffort(sourceDir, destinationDir, lockedFiles) 
   }
 }
 
-function getLikelyLockedRuntimeProcesses(directoryPath) {
-  const folder = path.basename(directoryPath).toLowerCase();
+function killQueryLensProcesses(directoryPath) {
+  console.warn(
+    `[EFQueryLens] Runtime files appear locked at ${directoryPath}. Killing QueryLens processes...`
+  );
 
-  if (folder === 'daemon') {
-    return ['EFQueryLens.Daemon.exe', 'EFQueryLens.Daemon'];
-  }
-
-  if (folder === 'server') {
-    return ['EFQueryLens.Lsp.exe', 'EFQueryLens.Lsp'];
-  }
-
-  return ['EFQueryLens.Daemon.exe', 'EFQueryLens.Daemon', 'EFQueryLens.Lsp.exe', 'EFQueryLens.Lsp'];
-}
-
-function killProcessByName(processName) {
   if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/F', '/T', '/IM', processName], { stdio: 'ignore' });
+    // Kill any dotnet process whose command line contains EFQueryLens (covers LSP + daemon
+    // running as framework-dependent: "dotnet EFQueryLens.Lsp.dll" / "dotnet EFQueryLens.Daemon.dll").
+    // Also kills self-contained exe variants if present.
+    spawnSync(
+      'powershell',
+      [
+        '-NonInteractive', '-NoProfile', '-Command',
+        `Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like '*EFQueryLens*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
+      ],
+      { stdio: 'ignore' }
+    );
     return;
   }
 
-  spawnSync('pkill', ['-f', processName], { stdio: 'ignore' });
+  // Unix: pkill by command pattern covers all variants.
+  spawnSync('pkill', ['-9', '-f', 'EFQueryLens'], { stdio: 'ignore' });
 }
 
 function isFileLockError(error) {
@@ -269,10 +242,4 @@ function isFileLockError(error) {
 
   const candidate = error;
   return candidate.code === 'EPERM' || candidate.code === 'EBUSY' || candidate.code === 'EACCES' || candidate.code === 'ENOTEMPTY';
-}
-
-function sleepSync(milliseconds) {
-  const waitBuffer = new SharedArrayBuffer(4);
-  const waitArray = new Int32Array(waitBuffer);
-  Atomics.wait(waitArray, 0, 0, milliseconds);
 }

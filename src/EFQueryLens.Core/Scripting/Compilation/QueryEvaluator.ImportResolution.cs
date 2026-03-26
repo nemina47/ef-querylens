@@ -515,4 +515,7 @@ public sealed partial class QueryEvaluator
         return true;
     }
 
+    private static bool ContainsFindInvocation(string expression) =>
+        Regex.IsMatch(expression, @"\.\s*Find(Async)?\s*\(", RegexOptions.IgnoreCase);
+
 }

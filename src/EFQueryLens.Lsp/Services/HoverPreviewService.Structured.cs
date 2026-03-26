@@ -12,13 +12,6 @@ internal sealed partial class HoverPreviewService
         int character,
         CancellationToken cancellationToken)
     {
-        static QueryLensStructuredHoverResult Fail(
-            string msg,
-            QueryTranslationStatus status = QueryTranslationStatus.Ready,
-            double avgTranslationMs = 0,
-            double lastTranslationMs = 0) =>
-            new(false, msg, [], 0, null, null, null, null, 0, [], null, null, status, msg, avgTranslationMs, lastTranslationMs);
-
         Action<string> log = message => LogDebug($"structured {message}");
         var canonical = await BuildCanonicalAsync(
             filePath,
@@ -28,6 +21,20 @@ internal sealed partial class HoverPreviewService
             cancellationToken,
             log);
 
+        return FormatStructured(canonical, filePath);
+    }
+
+    private QueryLensStructuredHoverResult FormatStructured(
+        HoverCanonicalComputationResult canonical,
+        string filePath)
+    {
+        static QueryLensStructuredHoverResult Fail(
+            string msg,
+            QueryTranslationStatus status = QueryTranslationStatus.Ready,
+            double avgTranslationMs = 0,
+            double lastTranslationMs = 0) =>
+            new(false, msg, [], 0, null, null, null, null, null, 0, [], null, null, status, msg, avgTranslationMs, lastTranslationMs);
+
         if (canonical.Status is not QueryTranslationStatus.Ready && canonical.Success)
         {
             return new QueryLensStructuredHoverResult(
@@ -36,6 +43,7 @@ internal sealed partial class HoverPreviewService
                 Statements: [],
                 CommandCount: 0,
                 SourceExpression: canonical.SourceExpression,
+                ExecutedExpression: null,
                 DbContextType: null,
                 ProviderName: null,
                 SourceFile: filePath,
@@ -66,17 +74,26 @@ internal sealed partial class HoverPreviewService
             sourceFile: filePath,
             sourceLine: canonical.SourceLine,
             sourceExpression: canonical.SourceExpression,
+            executedExpression: canonical.ExecutedExpression,
+            efCoreVersion: canonical.Metadata?.EfCoreVersion,
             dbContextType: canonical.Metadata?.DbContextType,
             providerName: canonical.Metadata?.ProviderName,
-            warnings: canonical.Warnings);
+            warnings: canonical.Warnings,
+            hasClientEvaluation: canonical.Metadata?.HasClientEvaluation ?? false,
+            parameters: canonical.Commands.Count > 0
+                ? canonical.Commands.SelectMany(c => c.Parameters)
+                    .GroupBy(p => p.Name, StringComparer.Ordinal)
+                    .Select(g => g.First())
+                    .ToList()
+                : []);
 
-        LogDebug($"structured hover-ready line={line} char={character} commands={canonical.Commands.Count}");
         return new QueryLensStructuredHoverResult(
             Success: true,
             ErrorMessage: null,
             Statements: statements,
             CommandCount: canonical.Commands.Count,
             SourceExpression: canonical.SourceExpression,
+            ExecutedExpression: canonical.ExecutedExpression,
             DbContextType: canonical.Metadata?.DbContextType,
             ProviderName: canonical.Metadata?.ProviderName,
             SourceFile: filePath,

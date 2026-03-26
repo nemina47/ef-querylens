@@ -102,7 +102,9 @@ public static partial class LspSyntaxHelper
 
         foreach (var (_, (outermostInvocation, _)) in bestPerStatement)
         {
-            var targetExpression = StripTerminalInvocation(outermostInvocation) ?? outermostInvocation;
+            // Pass the full expression including any terminal call (Count, ToList, etc.)
+            // so the engine sees exactly what the app executes and produces accurate SQL.
+            ExpressionSyntax targetExpression = outermostInvocation;
             if (targetExpression is null)
             {
                 continue;
@@ -166,16 +168,24 @@ public static partial class LspSyntaxHelper
             var anchorStart = anchorLineSpan.StartLinePosition;
             var anchorEnd = anchorLineSpan.EndLinePosition;
 
-            // Containing statement: for badge (line above) and for hover binding (full statement span).
-            var containingStatement = outermostInvocation.Ancestors().FirstOrDefault(a => a is StatementSyntax) as StatementSyntax;
-            var statementSpan = containingStatement != null ? tree.GetLineSpan(containingStatement.Span) : anchorLineSpan;
-            var statementStart = statementSpan.StartLinePosition;
-            var statementEnd = statementSpan.EndLinePosition;
-            var statementFirstLine = statementStart.Line;
+            // Expression span drives the END of the hover range — prevents bleeding into if/while bodies.
+            // Using outermostInvocation.Span ensures hovers inside an if-body don't match the condition chain.
+            var expressionLineSpan = tree.GetLineSpan(outermostInvocation.Span);
+            var expressionStart = expressionLineSpan.StartLinePosition;
+            var expressionEnd = expressionLineSpan.EndLinePosition;
 
-            // Badge at statementFirstLine: VS Code CodeLens appears above the line it is placed on,
-            // so placing it at the first line of the statement puts it visually on top of that line.
-            var badgeLine = statementFirstLine;
+            // Containing statement span drives the START of the hover range.
+            // This covers the full declaration line: "var x = await expr" so hovering on
+            // "var", "x", "=", or "await" (before the expression token) still matches the chain.
+            var containingStatement = outermostInvocation.Ancestors()
+                .FirstOrDefault(a => a is StatementSyntax) as StatementSyntax;
+            var statementLineSpan = containingStatement != null
+                ? tree.GetLineSpan(containingStatement.Span)
+                : expressionLineSpan;
+            var statementStart = statementLineSpan.StartLinePosition;
+
+            // Badge placement: CodeLens badge sits above the start of the containing statement.
+            var badgeLine = statementStart.Line;
             var badgeCharacter = 0;
 
             results.Add(new LinqChainInfo(
@@ -188,10 +198,10 @@ public static partial class LspSyntaxHelper
                 anchorEnd.Character,
                 badgeLine,
                 badgeCharacter,
-                statementStart.Line,
+                statementStart.Line,    // wider start: "var x = await" included
                 statementStart.Character,
-                statementEnd.Line,
-                statementEnd.Character));
+                expressionEnd.Line,     // tight end: stops at expression, not if-body
+                expressionEnd.Character));
         }
 
         return results

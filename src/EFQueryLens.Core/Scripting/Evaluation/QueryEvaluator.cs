@@ -39,26 +39,24 @@ public sealed partial class QueryEvaluator
     private const int MaxNamespaceTypeIndexCacheEntries = 64;
 
     // Building MetadataReference objects from disk is expensive (100-500 ms for a
-    // large project). Cache them keyed on assembly path + last-write timestamp +
-    // assembly-set hash so the cost is paid only on initial load or after a rebuild.
-    private sealed record MetadataRefEntry(
-        DateTime AssemblyTimestamp,
-        string AssemblySetHash,
-        MetadataReference[] Refs,
-        long LastAccessTicks);
+    // large project). Cache them keyed on shadow path + last-write timestamp +
+    // assembly-set hash — the fingerprint changes on every rebuild, so stale entries
+    // expire naturally via LRU without explicit eviction.
+    private sealed record MetadataRefEntry(MetadataReference[] Refs, long LastAccessTicks);
 
     private readonly ConcurrentDictionary<string, MetadataRefEntry> _refCache = new();
 
     // Compiled + loaded eval runner cache: skip the entire Roslyn pipeline on warm hits.
     // Keys follow the pattern: "shadowAssemblyPath|timestampTicks|assemblySetHash|dbContextTypeName|requestHash"
     // Evicted whenever the ALC for a shadow assembly is released (InvalidateMetadataRefCache).
-    private sealed record EvalRunnerEntry(Assembly EvalAssembly, MethodInfo RunMethod, long LastAccessTicks);
+    private sealed record EvalRunnerEntry(Assembly EvalAssembly, MethodInfo RunMethod, long LastAccessTicks, string? ExecutedExpression = null);
     private readonly ConcurrentDictionary<string, EvalRunnerEntry> _evalRunnerCache = new(StringComparer.Ordinal);
 
     // Known namespace/type index cache keyed by assemblySetHash — the scan is expensive
     // on large projects but the result only changes when the assembly set changes.
+    // The assemblySetHash is computed from shadow bundle paths, which change on every
+    // rebuild, so stale entries expire naturally via LRU without explicit eviction.
     private sealed record NamespaceTypeIndexEntry(
-        string AssemblyPath,
         HashSet<string> Namespaces,
         HashSet<string> Types,
         long LastAccessTicks);
@@ -73,36 +71,24 @@ public sealed partial class QueryEvaluator
         TimeSpan? RoslynCompilation,
         int CompilationRetryCount,
         TimeSpan? EvalAssemblyLoad,
-        TimeSpan? RunnerExecution,
-        TimeSpan? ToQueryStringFallback);
+        TimeSpan? RunnerExecution);
 
     internal void InvalidateMetadataRefCache(string assemblyPath)
     {
         if (string.IsNullOrWhiteSpace(assemblyPath))
             return;
 
-        var normalized = Path.GetFullPath(assemblyPath);
-        _refCache.TryRemove(normalized, out _);
-
-        // Evict all eval runner cache entries for this assembly — they hold Assembly
+        // Only the eval runner cache needs explicit eviction — its entries hold Assembly
         // references that would prevent the collectible ALC from being GC'd.
+        // MetadataRef and NamespaceTypeIndex caches are fingerprint-keyed (path + timestamp +
+        // assemblySetHash) so stale entries expire naturally via LRU on the next rebuild.
+        var normalized = Path.GetFullPath(assemblyPath);
         var prefix = normalized + "|";
         foreach (var key in _evalRunnerCache.Keys
                      .Where(k => k.StartsWith(prefix, StringComparison.Ordinal))
                      .ToList())
         {
             _evalRunnerCache.TryRemove(key, out _);
-        }
-
-        foreach (var key in _namespaceTypeIndexCache
-                     .Where(kvp => string.Equals(
-                         kvp.Value.AssemblyPath,
-                         normalized,
-                         StringComparison.OrdinalIgnoreCase))
-                     .Select(kvp => kvp.Key)
-                     .ToList())
-        {
-            _namespaceTypeIndexCache.TryRemove(key, out _);
         }
     }
 
@@ -117,12 +103,13 @@ public sealed partial class QueryEvaluator
             sb.Append(kv.Key).Append('=').Append(kv.Value).Append('\0');
         foreach (var s in request.UsingStaticTypes)
             sb.Append(s).Append('\0');
+        foreach (var kv in request.LocalVariableTypes.OrderBy(x => x.Key, StringComparer.Ordinal))
+            sb.Append(kv.Key).Append(':').Append(kv.Value).Append('\0');
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(sb.ToString())))[..16];
     }
 
     private (HashSet<string> Namespaces, HashSet<string> Types) GetOrBuildNamespaceTypeIndex(
-        string assemblyPath,
         string assemblySetHash,
         IReadOnlyList<Assembly> compilationAssemblies)
     {
@@ -134,7 +121,6 @@ public sealed partial class QueryEvaluator
 
         var result = BuildKnownNamespaceAndTypeIndex(compilationAssemblies);
         _namespaceTypeIndexCache[assemblySetHash] = new NamespaceTypeIndexEntry(
-            Path.GetFullPath(assemblyPath),
             result.Namespaces,
             result.Types,
             GetUtcNowTicks());

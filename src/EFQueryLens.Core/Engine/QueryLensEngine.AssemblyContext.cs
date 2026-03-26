@@ -108,8 +108,7 @@ public sealed partial class QueryLensEngine
             $"compileMs={m.RoslynCompilationTime?.TotalMilliseconds:F0} " +
             $"retries={m.CompilationRetryCount} " +
             $"evalLoadMs={m.EvalAssemblyLoadTime?.TotalMilliseconds:F0} " +
-            $"runnerMs={m.RunnerExecutionTime?.TotalMilliseconds:F0} " +
-            $"fallbackMs={m.ToQueryStringFallbackTime?.TotalMilliseconds:F0}");
+            $"runnerMs={m.RunnerExecutionTime?.TotalMilliseconds:F0}");
     }
 
     private static bool NeedsDbContextDiscoveryRetry(QueryTranslationResult result) =>

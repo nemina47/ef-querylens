@@ -34,12 +34,6 @@ namespace EFQueryLens.Core.Contracts;
 /// QueryLens resolves dependencies from the selected executable assembly output,
 /// and only factories declared in that assembly are used.
 /// </para>
-///
-/// <para>
-/// <b>Discovery:</b> QueryLens finds your factory via full-name reflection —
-/// only <c>IQueryLensDbContextFactory&lt;T&gt;</c> is used for offline DbContext
-/// creation.
-/// </para>
 /// </summary>
 /// <typeparam name="TContext">The DbContext type this factory creates.</typeparam>
 public interface IQueryLensDbContextFactory<out TContext>

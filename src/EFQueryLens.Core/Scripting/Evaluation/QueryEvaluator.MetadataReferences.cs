@@ -13,11 +13,8 @@ public sealed partial class QueryEvaluator
         List<Assembly> compilationAssemblies,
         string assemblySetHash)
     {
-        var cacheKey = Path.GetFullPath(alcCtx.AssemblyPath);
-        var setHash = assemblySetHash;
-        if (_refCache.TryGetValue(cacheKey, out var entry)
-            && entry.AssemblyTimestamp == alcCtx.AssemblyTimestamp
-            && entry.AssemblySetHash == setHash)
+        var cacheKey = $"{Path.GetFullPath(alcCtx.AssemblyPath)}|{alcCtx.AssemblyTimestamp.Ticks}|{assemblySetHash}";
+        if (_refCache.TryGetValue(cacheKey, out var entry))
         {
             TouchMetadataRefCacheEntry(cacheKey, entry);
             return entry.Refs;
@@ -25,8 +22,6 @@ public sealed partial class QueryEvaluator
 
         var refs = CollectMetadataReferences(compilationAssemblies).ToArray();
         _refCache[cacheKey] = new QueryEvaluator.MetadataRefEntry(
-            alcCtx.AssemblyTimestamp,
-            setHash,
             refs,
             QueryEvaluator.GetUtcNowTicks());
         TrimCacheByLastAccess(_refCache, QueryEvaluator.MaxMetadataRefCacheEntries, static e => e.LastAccessTicks);

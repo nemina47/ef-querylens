@@ -7,14 +7,29 @@ __QL_STUBS__
         string? __captureSkipReason = null;
         string? __captureError = null;
         var __captureInstalled = __QueryLensOfflineCapture__.TryInstall(__QL_CONTEXT_VAR__, out __captureSkipReason);
-        var __query = (object?)(__QL_EXPRESSION__);
         var __captured = Array.Empty<__QueryLensCapturedSqlCommand__>();
+        object? __query = null;
         if (__captureInstalled)
         {
             using var __scope = __QueryLensSqlCaptureScope__.Begin();
-            try { EnumerateQueryable(__query); }
+            try
+            {
+                __query = (object?)(__QL_EXPRESSION__);
+                __query = UnwrapTask(__query);
+                if (__query is System.Collections.IEnumerable __enumerable)
+                    EnumerateQueryable(__enumerable);
+            }
             catch (Exception ex) { __captureError = ex.GetType().Name + ": " + ex.Message; }
             __captured = __scope.GetCommands();
+        }
+        else
+        {
+            try
+            {
+                __query = (object?)(__QL_EXPRESSION__);
+                __query = UnwrapTask(__query);
+            }
+            catch (Exception ex) { __captureError = ex.GetType().Name + ": " + ex.Message; }
         }
         return new __QueryLensExecutionResult__
         {
@@ -25,10 +40,17 @@ __QL_STUBS__
         };
     }
 
-    private static void EnumerateQueryable(object? queryable)
+    private static object? UnwrapTask(object? value)
     {
-        if (queryable is not IEnumerable enumerable) return;
+        if (value is not System.Threading.Tasks.Task task)
+            return value;
+        task.GetAwaiter().GetResult();
+        var resultProp = value.GetType().GetProperty("Result");
+        return resultProp?.GetValue(value);
+    }
 
+    private static void EnumerateQueryable(System.Collections.IEnumerable enumerable)
+    {
         var enumerator = enumerable.GetEnumerator();
         try
         {
@@ -37,7 +59,7 @@ __QL_STUBS__
         }
         finally
         {
-            (enumerator as IDisposable)?.Dispose();
+            (enumerator as System.IDisposable)?.Dispose();
         }
     }
 }

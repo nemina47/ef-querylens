@@ -23,26 +23,14 @@ public sealed partial class QueryEvaluator
         if (fromQueryLens is not null)
             return (fromQueryLens, "querylens-factory");
 
-        var fromEfDesignTime = DesignTimeDbContextFactory.TryCreateEfDesignTimeFactory(
-            dbContextType,
-            all,
-            executableAssemblyPath,
-            out var efDesignTimeFailure);
-        if (fromEfDesignTime is not null)
-            return (fromEfDesignTime, "ef-design-time-factory");
-
-        var details = string.Join(" ", new[] { queryLensFailure, efDesignTimeFailure }
-            .Where(s => !string.IsNullOrWhiteSpace(s)));
-
         var executableHint = string.IsNullOrWhiteSpace(executableAssemblyPath)
             ? "Use the compiled executable assembly (API / Worker / Console) as the QueryLens target."
             : $"Selected executable assembly: '{Path.GetFileName(executableAssemblyPath)}'.";
 
         throw new InvalidOperationException(
-            $"No factory found for '{dbContextType.FullName}'. " +
-            "Add an IQueryLensDbContextFactory<T> or IDesignTimeDbContextFactory<T> implementation to your executable project (API / Worker / Console), not in a class library. " +
-            executableHint + " " +
-            "See the QueryLens README for setup instructions." +
-            (string.IsNullOrWhiteSpace(details) ? string.Empty : $" Details: {details}"));
+            $"No IQueryLensDbContextFactory<{dbContextType.Name}> found. " +
+            "Add an IQueryLensDbContextFactory<T> implementation to your executable project (API / Worker / Console), not in a class library. " +
+            executableHint +
+            (string.IsNullOrWhiteSpace(queryLensFailure) ? string.Empty : $" Details: {queryLensFailure}"));
     }
 }

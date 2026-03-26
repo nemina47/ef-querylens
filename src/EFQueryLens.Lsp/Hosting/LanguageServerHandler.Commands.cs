@@ -136,6 +136,95 @@ internal sealed partial class LanguageServerHandler
             };
         }
 
+        if (command.Equals("efquerylens.showsqlpopup", StringComparison.OrdinalIgnoreCase))
+        {
+            var arguments = request["arguments"] as JArray;
+            var req = arguments?.Count > 0
+                ? arguments[0].ToObject<TextDocumentPositionParams>()
+                : null;
+
+            if (req is null) return new JObject { ["success"] = false };
+
+            var hover = await _hover.HandleStructuredAsync(req, ct);
+            if (hover is not null)
+            {
+                _ = JsonRpc?.NotifyAsync("efquerylens/showSqlPopup", new JObject
+                {
+                    ["hover"] = JObject.FromObject(hover),
+                    ["fallbackFileUri"] = req.TextDocument.Uri.ToString(),
+                    ["fallbackLine"] = req.Position.Line
+                });
+            }
+
+            return new JObject { ["success"] = true };
+        }
+
+        if (command.Equals("efquerylens.opensqleditor", StringComparison.OrdinalIgnoreCase))
+        {
+            var arguments = request["arguments"] as JArray;
+            var req = arguments?.Count > 0
+                ? arguments[0].ToObject<TextDocumentPositionParams>()
+                : null;
+
+            if (req is null)
+            {
+                return new JObject
+                {
+                    ["success"] = false,
+                    ["message"] = "Missing or invalid payload.",
+                };
+            }
+
+            var hover = await _hover.HandleStructuredAsync(req, ct);
+            if (hover is not null)
+            {
+                var payload = new JObject
+                {
+                    ["hover"] = JObject.FromObject(hover),
+                    ["fallbackFileUri"] = req.TextDocument.Uri.ToString(),
+                    ["fallbackLine"] = req.Position.Line
+                };
+                
+                _ = JsonRpc?.NotifyAsync("efquerylens/showSqlPreview", payload);
+            }
+
+            return new JObject { ["success"] = true };
+        }
+
+        if (command.Equals("efquerylens.copysql", StringComparison.OrdinalIgnoreCase))
+        {
+            var arguments = request["arguments"] as JArray;
+            var req = arguments?.Count > 0
+                ? arguments[0].ToObject<TextDocumentPositionParams>()
+                : null;
+
+            if (req is null) return new JObject { ["success"] = false };
+
+            var hover = await _hover.HandleStructuredAsync(req, ct);
+            if (hover is not null)
+            {
+                _ = JsonRpc?.NotifyAsync("efquerylens/copySqlToClipboard", new JObject
+                {
+                    ["sql"] = hover.EnrichedSql ?? string.Join("\n\n", hover.Statements.Select(s => s.Sql))
+                });
+            }
+
+            return new JObject { ["success"] = true };
+        }
+
+        if (command.Equals("efquerylens.reanalyze", StringComparison.OrdinalIgnoreCase))
+        {
+            var arguments = request["arguments"] as JArray;
+            var req = arguments?.Count > 0
+                ? arguments[0].ToObject<TextDocumentPositionParams>()
+                : null;
+
+            if (req is null) return new JObject { ["success"] = false };
+
+            await RecalculatePreviewAsync(req, ct);
+            return new JObject { ["success"] = true };
+        }
+
         return new JObject
         {
             ["success"] = false,

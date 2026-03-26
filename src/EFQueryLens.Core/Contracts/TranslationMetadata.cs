@@ -13,7 +13,6 @@ public sealed record TranslationMetadata
     public int? CompilationRetryCount { get; init; }
     public TimeSpan? EvalAssemblyLoadTime { get; init; }
     public TimeSpan? RunnerExecutionTime { get; init; }
-    public TimeSpan? ToQueryStringFallbackTime { get; init; }
 
     /// <summary>
     /// True when EF Core silently evaluated part of the query on the client.
@@ -25,10 +24,6 @@ public sealed record TranslationMetadata
     /// How the offline DbContext instance was created.
     /// <list type="bullet">
     ///   <item><description>
-    ///     <c>"querylens-factory"</c> — an <c>IQueryLensDbContextFactory&lt;T&gt;</c>
-    ///     created the DbContext for this request.
-    ///   </description></item>
-    ///   <item><description>
     ///     <c>"ef-design-time-factory"</c> — an
     ///     <c>IDesignTimeDbContextFactory&lt;T&gt;</c> created the DbContext.
     ///   </description></item>
@@ -38,5 +33,5 @@ public sealed record TranslationMetadata
     ///   </description></item>
     /// </list>
     /// </summary>
-    public string CreationStrategy { get; init; } = "querylens-factory";
+    public string CreationStrategy { get; init; } = "ef-design-time-factory";
 }

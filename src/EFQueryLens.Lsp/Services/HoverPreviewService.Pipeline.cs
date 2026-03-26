@@ -2,7 +2,6 @@ using EFQueryLens.Core;
 using EFQueryLens.Lsp.Parsing;
 using System.Diagnostics;
 using EFQueryLens.Core.Contracts;
-using EFQueryLens.DaemonClient;
 
 namespace EFQueryLens.Lsp.Services;
 
@@ -15,6 +14,7 @@ internal sealed partial class HoverPreviewService
         double AvgTranslationMs,
         double LastTranslationMs,
         string? SourceExpression,
+        string? ExecutedExpression,
         int SourceLine,
         TranslationMetadata? Metadata,
         IReadOnlyList<QuerySqlCommand> Commands,
@@ -47,6 +47,7 @@ internal sealed partial class HoverPreviewService
                 AvgTranslationMs: 0,
                 LastTranslationMs: 0,
                 SourceExpression: null,
+                ExecutedExpression: null,
                 SourceLine: sourceLine,
                 Metadata: null,
                 Commands: [],
@@ -71,6 +72,11 @@ internal sealed partial class HoverPreviewService
         }
 
         var usingContext = LspSyntaxHelper.ExtractUsingContext(sourceText);
+        var localVariableTypes = LspSyntaxHelper.ExtractLocalVariableTypesAtPosition(sourceText, line, character);
+        // Factory declaration is authoritative (T in IQueryLensDbContextFactory<T> is always concrete).
+        // Fall back to the declared type of the context variable for projects without a factory.
+        var dbContextTypeName = AssemblyResolver.TryExtractDbContextTypeFromFactory(targetAssembly)
+            ?? LspSyntaxHelper.TryResolveDbContextTypeName(sourceText, contextVariableName);
 
         try
         {
@@ -82,9 +88,11 @@ internal sealed partial class HoverPreviewService
                 AssemblyPath = targetAssembly,
                 Expression = expression,
                 ContextVariableName = contextVariableName,
+                DbContextTypeName = dbContextTypeName,
                 AdditionalImports = usingContext.Imports.ToArray(),
                 UsingAliases = new Dictionary<string, string>(usingContext.Aliases, StringComparer.Ordinal),
                 UsingStaticTypes = usingContext.StaticTypes.ToArray(),
+                LocalVariableTypes = localVariableTypes,
             };
 
             var queued = await TranslateQueuedOrImmediateAsync(translationRequest, cancellationToken);
@@ -104,6 +112,7 @@ internal sealed partial class HoverPreviewService
                     AvgTranslationMs: queued.AverageTranslationMs,
                     LastTranslationMs: queued.LastTranslationMs,
                     SourceExpression: expression,
+                    ExecutedExpression: null,
                     SourceLine: sourceLine,
                     Metadata: null,
                     Commands: [],
@@ -149,6 +158,7 @@ internal sealed partial class HoverPreviewService
                 AvgTranslationMs: queued.AverageTranslationMs,
                 LastTranslationMs: queued.LastTranslationMs,
                 SourceExpression: expression,
+                ExecutedExpression: translation.ExecutedExpression,
                 SourceLine: sourceLine,
                 Metadata: translation.Metadata,
                 Commands: commands,
@@ -161,15 +171,37 @@ internal sealed partial class HoverPreviewService
         }
     }
 
+    internal async Task<CombinedHoverResult> BuildCombinedAsync(
+        string filePath,
+        string sourceText,
+        int line,
+        int character,
+        CancellationToken cancellationToken)
+    {
+        Action<string> log = message => LogDebug($"combined {message}");
+        var canonical = await BuildCanonicalAsync(
+            filePath,
+            sourceText,
+            line,
+            character,
+            cancellationToken,
+            log);
+
+        var markdown = FormatMarkdown(canonical, filePath, line, character);
+        var structured = FormatStructured(canonical, filePath);
+
+        if (markdown.Success && markdown.Status is QueryTranslationStatus.Ready)
+        {
+            LogDebug($"combined hover-ready line={line} char={character} markdownLen={markdown.Output.Length}");
+        }
+
+        return new CombinedHoverResult(markdown, structured);
+    }
+
     private async Task<QueuedTranslationResult> TranslateQueuedOrImmediateAsync(
         TranslationRequest request,
         CancellationToken cancellationToken)
     {
-        if (_engine is IQueuedTranslationEngine queuedEngine)
-        {
-            return await queuedEngine.TranslateQueuedAsync(request, cancellationToken);
-        }
-
         var result = await _engine.TranslateAsync(request, cancellationToken);
         var lastTranslationMs = Math.Max(0, result.Metadata.TranslationTime.TotalMilliseconds);
         return new QueuedTranslationResult

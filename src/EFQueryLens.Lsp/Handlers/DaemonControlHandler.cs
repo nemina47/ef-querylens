@@ -1,7 +1,6 @@
-using EFQueryLens.Core;
 using EFQueryLens.Core.Contracts;
-using EFQueryLens.DaemonClient;
 using EFQueryLens.Lsp;
+using EFQueryLens.Lsp.Engine;
 
 namespace EFQueryLens.Lsp.Handlers;
 
@@ -21,59 +20,45 @@ internal sealed class DaemonControlHandler
 
     public async Task<DaemonRestartResponse> RestartAsync(CancellationToken cancellationToken)
     {
-        if (_engine is not ResiliencyDaemonEngine resiliency)
+        if (_engine is not IEngineControl control)
         {
-            return new DaemonRestartResponse(false, "Daemon restart is unavailable for this engine mode.");
+            return new DaemonRestartResponse(false, "Engine restart is unavailable for this engine mode.");
         }
 
         try
         {
-            var restarted = await resiliency.RestartDaemonAsync(cancellationToken);
-            if (restarted)
-            {
-                LogDebug("daemon-restart-request success");
-                return new DaemonRestartResponse(true, "Daemon restarted.");
-            }
-
-            return new DaemonRestartResponse(false, "Daemon restart did not complete.");
+            await control.RestartAsync(cancellationToken);
+            LogDebug("engine-restart-request success");
+            return new DaemonRestartResponse(true, "Engine restarted.");
         }
         catch (Exception ex)
         {
-            LogDebug($"daemon-restart-request failed type={ex.GetType().Name} message={ex.Message}");
-            return new DaemonRestartResponse(false, $"Daemon restart failed: {ex.Message}");
+            LogDebug($"engine-restart-request failed type={ex.GetType().Name} message={ex.Message}");
+            return new DaemonRestartResponse(false, $"Engine restart failed: {ex.Message}");
         }
     }
 
     public async Task<DaemonCacheInvalidateResponse> InvalidateQueryCachesAsync(CancellationToken cancellationToken)
     {
-        if (_engine is not ResiliencyDaemonEngine resiliency)
+        if (_engine is not IEngineControl control)
         {
             return new DaemonCacheInvalidateResponse(
                 false,
-                "Daemon cache invalidation is unavailable for this engine mode.",
+                "Engine cache invalidation is unavailable for this engine mode.",
                 0,
                 0);
         }
 
         try
         {
-            var response = await resiliency.InvalidateQueryCachesAsync(cancellationToken);
-            LogDebug(
-                $"daemon-cache-invalidate success={response.Success} cachedRemoved={response.RemovedCachedResults} " +
-                $"inflightRemoved={response.RemovedInflightJobs}");
-
-            return new DaemonCacheInvalidateResponse(
-                response.Success,
-                string.IsNullOrWhiteSpace(response.Message)
-                    ? (response.Success ? "Preview cache invalidated." : "Preview cache invalidation did not complete.")
-                    : response.Message,
-                response.RemovedCachedResults,
-                response.RemovedInflightJobs);
+            await control.InvalidateCacheAsync(cancellationToken);
+            LogDebug("engine-cache-invalidate success");
+            return new DaemonCacheInvalidateResponse(true, "Engine cache invalidated.", 0, 0);
         }
         catch (Exception ex)
         {
-            LogDebug($"daemon-cache-invalidate failed type={ex.GetType().Name} message={ex.Message}");
-            return new DaemonCacheInvalidateResponse(false, $"Preview cache invalidation failed: {ex.Message}", 0, 0);
+            LogDebug($"engine-cache-invalidate failed type={ex.GetType().Name} message={ex.Message}");
+            return new DaemonCacheInvalidateResponse(false, $"Engine cache invalidation failed: {ex.Message}", 0, 0);
         }
     }
 

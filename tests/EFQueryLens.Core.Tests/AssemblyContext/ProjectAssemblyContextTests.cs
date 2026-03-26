@@ -10,7 +10,7 @@ namespace EFQueryLens.Core.Tests.AssemblyContext;
 /// ReferenceOutputAssembly="false". We locate it relative to this assembly's
 /// location at runtime.
 /// </summary>
-[Collection("AssemblyLoadContextIsolation")]
+[Collection("ProjectAssemblyContextIsolation")]
 public class ProjectAssemblyContextTests
 {
     // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -388,5 +388,117 @@ public class ProjectAssemblyContextTests
         var dll = GetSampleMySqlAppDll();
         using var ctx = ProjectAssemblyContextFactory.Create(dll);
         Assert.False(ProjectAssemblyContextFactory.IsStale(ctx));
+    }
+
+    // ─── LoadAdditionalAssembly / LoadedAssemblies post-dispose ───────────────
+
+    [Fact]
+    public void LoadedAssemblies_AfterDispose_ThrowsObjectDisposedException()
+    {
+        var dll = GetSampleMySqlAppDll();
+        var ctx = new ProjectAssemblyContext(dll);
+        ctx.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => ctx.LoadedAssemblies.Any());
+    }
+
+    [Fact]
+    public void LoadAdditionalAssembly_AfterDispose_ThrowsObjectDisposedException()
+    {
+        var dll = GetSampleMySqlAppDll();
+        var ctx = new ProjectAssemblyContext(dll);
+        ctx.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => ctx.LoadAdditionalAssembly(dll));
+    }
+
+    [Fact]
+    public void EnterContextualReflection_BeforeDispose_ReturnsDisposable()
+    {
+        var dll = GetSampleMySqlAppDll();
+        using var ctx = new ProjectAssemblyContext(dll);
+
+        using var scope = ctx.EnterContextualReflection();
+        Assert.NotNull(scope);
+    }
+
+    [Fact]
+    public void LoadedAssemblies_BeforeDispose_ContainsMainAssembly()
+    {
+        var dll = GetSampleMySqlAppDll();
+        using var ctx = new ProjectAssemblyContext(dll);
+
+        Assert.Contains(ctx.LoadedAssemblies,
+            a => string.Equals(a.GetName().Name, "SampleMySqlApp", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // ─── EnsureExecutableArtifacts — partial-missing branches ─────────────────
+
+    [Fact]
+    public void Constructor_MissingOnlyRuntimeConfig_ThrowsWithRuntimeConfigInMessage()
+    {
+        var sourceDll = GetSampleMySqlAppDll();
+        var sourceDir = Path.GetDirectoryName(sourceDll)!;
+        var tempDir = Path.Combine(
+            Path.GetTempPath(),
+            "querylens-only-deps-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var dllName = Path.GetFileName(sourceDll);
+            var baseName = Path.GetFileNameWithoutExtension(sourceDll);
+
+            var destDll = Path.Combine(tempDir, dllName);
+            File.Copy(sourceDll, destDll, overwrite: true);
+
+            // Copy deps.json but NOT runtimeconfig.json
+            var srcDeps = Path.Combine(sourceDir, baseName + ".deps.json");
+            if (File.Exists(srcDeps))
+                File.Copy(srcDeps, Path.Combine(tempDir, baseName + ".deps.json"), overwrite: true);
+
+            var ex = Assert.Throws<InvalidOperationException>(
+                () => new ProjectAssemblyContext(destDll));
+            Assert.Contains(".runtimeconfig.json", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Constructor_MissingOnlyDepsJson_ThrowsWithDepsInMessage()
+    {
+        var sourceDll = GetSampleMySqlAppDll();
+        var sourceDir = Path.GetDirectoryName(sourceDll)!;
+        var tempDir = Path.Combine(
+            Path.GetTempPath(),
+            "querylens-only-rtconfig-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var dllName = Path.GetFileName(sourceDll);
+            var baseName = Path.GetFileNameWithoutExtension(sourceDll);
+
+            var destDll = Path.Combine(tempDir, dllName);
+            File.Copy(sourceDll, destDll, overwrite: true);
+
+            // Copy runtimeconfig.json but NOT deps.json
+            var srcRtConfig = Path.Combine(sourceDir, baseName + ".runtimeconfig.json");
+            if (File.Exists(srcRtConfig))
+                File.Copy(srcRtConfig, Path.Combine(tempDir, baseName + ".runtimeconfig.json"), overwrite: true);
+
+            var ex = Assert.Throws<InvalidOperationException>(
+                () => new ProjectAssemblyContext(destDll));
+            Assert.Contains(".deps.json", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
     }
 }

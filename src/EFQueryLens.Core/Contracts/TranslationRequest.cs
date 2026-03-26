@@ -34,4 +34,13 @@ public record TranslationRequest
     /// from source files into the script preamble.
     /// </summary>
     public IReadOnlyList<string> UsingStaticTypes { get; init; } = [];
+
+    /// <summary>
+    /// CLR type name strings for local variables visible at the cursor position,
+    /// extracted by the LSP from the source file's syntax tree.
+    /// The engine uses these as authoritative types when synthesising stub declarations,
+    /// falling back to heuristics only for variables absent from this map.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> LocalVariableTypes { get; init; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
 }

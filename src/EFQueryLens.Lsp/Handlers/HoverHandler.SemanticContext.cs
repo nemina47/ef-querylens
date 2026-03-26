@@ -41,21 +41,6 @@ internal sealed partial class HoverHandler
         }
 
         var expression = LspSyntaxHelper.TryExtractLinqExpression(sourceText, line, character, out var contextVariableName);
-        if (string.IsNullOrWhiteSpace(expression) || string.IsNullOrWhiteSpace(contextVariableName))
-        {
-            var fallback = LspSyntaxHelper.FindAllLinqChains(sourceText)
-                .OrderBy(chain => Math.Abs(chain.Line - line))
-                .ThenBy(chain => Math.Abs(chain.Character - character))
-                .FirstOrDefault();
-
-            if (fallback is not null)
-            {
-                expression = fallback.Expression;
-                contextVariableName = fallback.ContextVariableName;
-                line = fallback.Line;
-                character = fallback.Character;
-            }
-        }
 
         if (string.IsNullOrWhiteSpace(expression) || string.IsNullOrWhiteSpace(contextVariableName))
         {

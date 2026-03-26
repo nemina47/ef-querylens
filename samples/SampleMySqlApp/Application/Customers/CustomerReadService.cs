@@ -391,3 +391,6 @@ public sealed class CustomerReadService
     public sealed record CustomerRevenueDto(Guid CustomerId, string CustomerName, int OrderCount, decimal Revenue, decimal AverageOrderValue);
     public sealed record CustomerHealthDto(Guid CustomerId, string CustomerName, int TotalOrders, decimal AverageOrderValue);
 }
+
+
+

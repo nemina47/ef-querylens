@@ -80,8 +80,9 @@ public static partial class AssemblyResolver
         // Step 3: Detect if this is an executable project
         if (IsExecutableProject(csprojContent))
         {
-            debugLog += "  -> Project is executable, using own bin dir\n";
-            var resolved = FindDllInBin(projectDir, assemblyName, ref debugLog)
+            debugLog += "  -> Project is executable, using own output dir\n";
+            var candidates = FindProjectOutputDllPaths(csprojFile!, assemblyName, ref debugLog);
+            var resolved = SelectBestDll(candidates, ref debugLog)
                            ?? $"DEBUG_FAIL:\n{debugLog}";
             CacheTargetAssembly(normalizedSourceFilePath, resolved);
             return resolved;

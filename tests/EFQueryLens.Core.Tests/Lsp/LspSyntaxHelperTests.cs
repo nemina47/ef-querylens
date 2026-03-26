@@ -64,6 +64,30 @@ public class LspSyntaxHelperTests
     }
 
     [Fact]
+    public void FindAllLinqChains_IfConditionChainDoesNotBleedIntoIfBody()
+    {
+        // AnyAsync is the condition of the if-statement; ToDictionaryAsync is inside the body.
+        // The hover-binding range for AnyAsync must not extend into the if-body.
+        var source = """
+            if (!await context.CatalogItems.AnyAsync())
+            {
+                var ids = await context.CatalogTypes.ToDictionaryAsync(x => x.Type, x => x.Id);
+            }
+            """;
+
+        var chains = LspSyntaxHelper.FindAllLinqChains(source);
+
+        Assert.Equal(2, chains.Count);
+        var anyChain = chains.Single(c => c.Expression.Contains("AnyAsync"));
+        var dictChain = chains.Single(c => c.Expression.Contains("ToDictionaryAsync"));
+
+        // AnyAsync chain's hover range must not bleed into the if-body where ToDictionaryAsync lives.
+        Assert.True(anyChain.StatementEndLine < dictChain.StatementStartLine,
+            $"AnyAsync StatementEndLine ({anyChain.StatementEndLine}) must be before " +
+            $"ToDictionaryAsync StatementStartLine ({dictChain.StatementStartLine})");
+    }
+
+    [Fact]
     public void FindAllLinqChains_DoesNotTreatMapGetRegistrationAsQueryChain()
     {
         var source = """
@@ -222,8 +246,10 @@ public class LspSyntaxHelperTests
     }
 
     [Fact]
-    public void TryExtractLinqExpression_CountAsyncInlinePredicate_PreservesPredicateAsWhere()
+    public void TryExtractLinqExpression_CountAsyncInlinePredicate_PassesThroughToEngine()
     {
+        // The LSP no longer rewrites terminals — the engine receives the exact expression
+        // the app runs and generates accurate SQL from the real CountAsync call.
         var source = """
             var count = await dbContext.Applications
                 .CountAsync(w => w.ApplicationId != applicationId, ct);
@@ -239,13 +265,13 @@ public class LspSyntaxHelperTests
 
         Assert.NotNull(expression);
         Assert.Equal("dbContext", contextVariableName);
-        Assert.Contains(".Where(", expression, StringComparison.Ordinal);
+        Assert.Contains("dbContext.Applications", expression, StringComparison.Ordinal);
+        Assert.Contains("CountAsync", expression, StringComparison.Ordinal);
         Assert.Contains("ApplicationId != applicationId", expression, StringComparison.Ordinal);
-        Assert.Contains(".GroupBy(_ => 1).Select(g => g.Count())", expression, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TryExtractLinqExpression_CountAsyncPredicateVariable_PreservesPredicateAsWhere()
+    public void TryExtractLinqExpression_CountAsyncPredicateVariable_PassesThroughToEngine()
     {
         var source = """
             var count = await dbContext.Applications
@@ -262,13 +288,16 @@ public class LspSyntaxHelperTests
 
         Assert.NotNull(expression);
         Assert.Equal("dbContext", contextVariableName);
-        Assert.Contains(".Where(countPredicate)", expression, StringComparison.Ordinal);
-        Assert.Contains(".GroupBy(_ => 1).Select(g => g.Count())", expression, StringComparison.Ordinal);
+        Assert.Contains("dbContext.Applications", expression, StringComparison.Ordinal);
+        Assert.Contains("CountAsync", expression, StringComparison.Ordinal);
+        Assert.Contains("countPredicate", expression, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TryExtractLinqExpression_CountAsyncLocalPredicateVariable_InlinesLambdaExpression()
+    public void TryExtractLinqExpression_CountAsyncLocalPredicateVariable_PassesThroughToEngine()
     {
+        // The predicate variable is no longer inlined into a Where() — the raw CountAsync
+        // expression is sent to the engine, which synthesizes missing identifiers as stubs.
         var source = """
             Expression<Func<Entities.Application, bool>> countPredicate = w =>
                 w.SubmittedAt != null
@@ -288,14 +317,16 @@ public class LspSyntaxHelperTests
 
         Assert.NotNull(expression);
         Assert.Equal("dbContext", contextVariableName);
-        Assert.Contains("ApplicationId != applicationId", expression, StringComparison.Ordinal);
-        Assert.DoesNotContain("Where(countPredicate)", expression, StringComparison.Ordinal);
-        Assert.Contains(".GroupBy(_ => 1).Select(g => g.Count())", expression, StringComparison.Ordinal);
+        Assert.Contains("dbContext.Applications", expression, StringComparison.Ordinal);
+        Assert.Contains("CountAsync", expression, StringComparison.Ordinal);
+        Assert.Contains("countPredicate", expression, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TryExtractLinqExpression_CountAsyncOnLocalQueryVariable_InlinesQuerySource()
+    public void TryExtractLinqExpression_CountAsyncOnLocalQueryVariable_InlinesQuerySourceAndKeepsTerminal()
     {
+        // Local IQueryable variable is still inlined (query root substitution),
+        // and the terminal CountAsync is now kept — engine sees the exact expression.
         var source = """
             var auditTrailQuery = dbContext.Applications
                 .AsNoTracking()
@@ -317,7 +348,7 @@ public class LspSyntaxHelperTests
         Assert.Equal("dbContext", contextVariableName);
         Assert.DoesNotContain("auditTrailQuery", expression, StringComparison.Ordinal);
         Assert.Contains("Applications", expression, StringComparison.Ordinal);
-        Assert.Contains(".GroupBy(_ => 1).Select(g => g.Count())", expression, StringComparison.Ordinal);
+        Assert.Contains("CountAsync", expression, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -348,8 +379,9 @@ public class LspSyntaxHelperTests
     }
 
     [Fact]
-    public void TryExtractLinqExpression_LongCountOnCastedQueryableLocal_StripsTransparentTypeCast()
+    public void TryExtractLinqExpression_LongCountOnCastedQueryableLocal_StripsTransparentTypeCastAndKeepsTerminal()
     {
+        // Cast is stripped and local variable is inlined; the terminal LongCountAsync is kept.
         var source = """
             var root = (IQueryable<CatalogItem>)services.Context.CatalogItems;
             var totalItems = await root.LongCountAsync();
@@ -367,11 +399,11 @@ public class LspSyntaxHelperTests
         Assert.Equal("services", contextVariableName);
         Assert.Contains("services.Context.CatalogItems", expression, StringComparison.Ordinal);
         Assert.DoesNotContain("IQueryable<CatalogItem>", expression, StringComparison.Ordinal);
-        Assert.Contains(".GroupBy(_ => 1).Select(g => g.LongCount())", expression, StringComparison.Ordinal);
+        Assert.Contains("LongCountAsync", expression, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TryExtractLinqExpression_AnyAsync_RewritesToTakeOne()
+    public void TryExtractLinqExpression_AnyAsync_PassesThroughToEngine()
     {
         var source = """
             var exists = await dbContext.Applications.AnyAsync(ct);
@@ -387,11 +419,12 @@ public class LspSyntaxHelperTests
 
         Assert.NotNull(expression);
         Assert.Equal("dbContext", contextVariableName);
-        Assert.Contains(".Take(1)", expression, StringComparison.Ordinal);
+        Assert.Contains("dbContext.Applications", expression, StringComparison.Ordinal);
+        Assert.Contains("AnyAsync", expression, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TryExtractLinqExpression_FirstAsyncPredicate_RewritesToWhereTakeOne()
+    public void TryExtractLinqExpression_FirstAsyncPredicate_PassesThroughToEngine()
     {
         var source = """
             var entity = await dbContext.Applications.FirstAsync(a => a.ApplicationId == applicationId, ct);
@@ -407,12 +440,13 @@ public class LspSyntaxHelperTests
 
         Assert.NotNull(expression);
         Assert.Equal("dbContext", contextVariableName);
-        Assert.Contains(".Where(", expression, StringComparison.Ordinal);
-        Assert.Contains(".Take(1)", expression, StringComparison.Ordinal);
+        Assert.Contains("dbContext.Applications", expression, StringComparison.Ordinal);
+        Assert.Contains("FirstAsync", expression, StringComparison.Ordinal);
+        Assert.Contains("applicationId", expression, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TryExtractLinqExpression_SingleAsyncPredicateVariable_RewritesToWhereTakeTwo()
+    public void TryExtractLinqExpression_SingleAsyncPredicateVariable_PassesThroughToEngine()
     {
         var source = """
             var entity = await dbContext.Applications.SingleAsync(matchExpr, ct);
@@ -428,8 +462,155 @@ public class LspSyntaxHelperTests
 
         Assert.NotNull(expression);
         Assert.Equal("dbContext", contextVariableName);
-        Assert.Contains(".Where(matchExpr)", expression, StringComparison.Ordinal);
-        Assert.Contains(".Take(2)", expression, StringComparison.Ordinal);
+        Assert.Contains("dbContext.Applications", expression, StringComparison.Ordinal);
+        Assert.Contains("SingleAsync", expression, StringComparison.Ordinal);
+        Assert.Contains("matchExpr", expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryExtractLinqExpression_HoverInsideLambdaArgOfNonLinqMethod_ReturnsNull()
+    {
+        // Hovering inside "x => new Dto { ... }" that is an argument to a wrapper method
+        // (not a LINQ chain) previously caused CS0149 by extracting the entire call site
+        // as a "LINQ expression" with the method name as the DbContext variable name.
+        var source = """
+            var result = await service.GetOrdersAsync(
+                customerId,
+                x => new OrderSummaryDto
+                {
+                    Id = x.Id,
+                    Total = x.Total
+                },
+                ct);
+            """;
+
+        var (line, character) = FindPosition(source, "Total = x.Total");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName);
+
+        Assert.Null(expression);
+        Assert.Null(contextVariableName);
+    }
+
+    [Fact]
+    public void TryExtractLinqExpression_HelperMethodWithSelectorExpression_SynthesizesQueryableChain()
+    {
+        var source = """
+            public class DemoService
+            {
+                private async Task<List<TResult>> GetOrdersAsync<TResult>(
+                    Guid customerId,
+                    Expression<Func<Order, TResult>> selector,
+                    CancellationToken ct)
+                {
+                    return await dbContext.Orders
+                        .Where(o => o.CustomerId == customerId)
+                        .Select(selector)
+                        .ToListAsync(ct);
+                }
+
+                private async Task Run(Guid customerId, CancellationToken ct)
+                {
+                    var result = await GetOrdersAsync(
+                        customerId,
+                        o => new { o.Id, o.Total },
+                        ct);
+                }
+            }
+            """;
+
+        var (line, character) = FindPosition(source, "o.Total");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName);
+
+        Assert.NotNull(expression);
+        Assert.Equal("dbContext", contextVariableName);
+        Assert.Contains("dbContext.Orders", expression, StringComparison.Ordinal);
+        Assert.Contains("o => new { o.Id, o.Total }", expression, StringComparison.Ordinal);
+        Assert.Contains("ToListAsync", expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryExtractLinqExpression_HelperMethodWithWhereAndSelectorExpressions_SynthesizesQueryableChain()
+    {
+        var source = """
+            public class DemoService
+            {
+                private async Task<List<TResult>> GetOrdersAsync<TResult>(
+                    Guid customerId,
+                    Expression<Func<Order, bool>> whereExpression,
+                    Expression<Func<Order, TResult>> selector,
+                    CancellationToken ct)
+                {
+                    return await dbContext.Orders
+                        .Where(o => o.CustomerId == customerId)
+                        .Where(whereExpression)
+                        .Select(selector)
+                        .ToListAsync(ct);
+                }
+
+                private async Task Run(Guid customerId, CancellationToken ct)
+                {
+                    var result = await GetOrdersAsync(
+                        customerId,
+                        o => o.IsNotDeleted,
+                        o => new { o.Id, o.Total },
+                        ct);
+                }
+            }
+            """;
+
+        var (line, character) = FindPosition(source, "o.IsNotDeleted");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName);
+
+        Assert.NotNull(expression);
+        Assert.Equal("dbContext", contextVariableName);
+        Assert.Contains("dbContext.Orders", expression, StringComparison.Ordinal);
+        Assert.Contains("o => o.IsNotDeleted", expression, StringComparison.Ordinal);
+        Assert.Contains("o => new { o.Id, o.Total }", expression, StringComparison.Ordinal);
+        Assert.Contains("ToListAsync", expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryExtractLinqExpression_WhereClauseReceivesExpressionVariable_ExtractsChainAndIncludesVariable()
+    {
+        // Where(filter) / Select(selector) with a pre-built Expression<Func<...>> variable
+        // is a common EF Core pattern. The extractor must pass the variable name through
+        // so the engine can synthesize a proper lambda stub for it.
+        var source = """
+            Expression<Func<Order, bool>> filter = o => o.IsNotDeleted;
+
+            var result = await dbContext.Orders
+                .Where(filter)
+                .ToListAsync(ct);
+            """;
+
+        var (line, character) = FindPosition(source, "ToListAsync");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName);
+
+        Assert.NotNull(expression);
+        Assert.Equal("dbContext", contextVariableName);
+        Assert.Contains("dbContext.Orders", expression, StringComparison.Ordinal);
+        Assert.Contains("filter", expression, StringComparison.Ordinal);
+        Assert.Contains("ToListAsync", expression, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -505,6 +686,25 @@ public class LspSyntaxHelperTests
         var candidate = LspSyntaxHelper.IsLikelyDbContextRootIdentifier("service");
 
         Assert.False(candidate);
+    }
+
+    [Fact]
+    public void FindAllLinqChains_StatementStartCoversDeclarationLine()
+    {
+        // "var x = await" lives before the expression start character on the same line.
+        // StatementStartCharacter must be at the "var" column (0), not at "dbContext".
+        var source = """
+            var itemsWithDistance = await dbContext.CatalogItems
+                .Where(c => c.Id > 0)
+                .ToListAsync();
+            """;
+
+        var chains = LspSyntaxHelper.FindAllLinqChains(source);
+        var chain = Assert.Single(chains);
+
+        // Start should be at column 0 (the "var" keyword), not mid-line at "dbContext"
+        Assert.Equal(0, chain.StatementStartLine);
+        Assert.Equal(0, chain.StatementStartCharacter);
     }
 
     private static (int line, int character) FindPosition(string source, string marker)

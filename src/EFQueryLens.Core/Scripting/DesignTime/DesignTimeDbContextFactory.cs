@@ -8,7 +8,4 @@ internal static partial class DesignTimeDbContextFactory
 {
     private const string QueryLensInterfaceName =
         "EFQueryLens.Core.Contracts.IQueryLensDbContextFactory`1";
-
-    private const string EfDesignTimeInterfaceName =
-        "Microsoft.EntityFrameworkCore.Design.IDesignTimeDbContextFactory`1";
 }

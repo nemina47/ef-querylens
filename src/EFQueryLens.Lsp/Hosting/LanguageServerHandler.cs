@@ -135,13 +135,21 @@ internal sealed partial class LanguageServerHandler
                     ["save"] = new JObject { ["includeText"] = true },
                 },
                 ["hoverProvider"] = enableLspHover,
+                ["codeLensProvider"] = new JObject
+                {
+                    ["resolveProvider"] = false
+                },
                 ["executeCommandProvider"] = new JObject
                 {
                     ["commands"] = new JArray(
                         "efquerylens.warmup",
                         "efquerylens.daemon.restart",
                         "efquerylens.preview.recalculate",
-                        "efquerylens.preview.structuredHover")
+                        "efquerylens.preview.structuredHover",
+                        "efquerylens.showsqlpopup",
+                        "efquerylens.opensqleditor",
+                        "efquerylens.copysql",
+                        "efquerylens.reanalyze")
                 },
             },
         };
