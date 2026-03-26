@@ -152,7 +152,22 @@ jobs:
           Write-Host "Set VSIX version to $version"
 
       - name: Build Visual Studio extension
-        run: dotnet build src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/EFQueryLens.VisualStudio.csproj -c Debug
+        run: dotnet build src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/EFQueryLens.VisualStudio.csproj -c Release
+
+      - name: Publish to Visual Studio Marketplace
+        shell: pwsh
+        env:
+          VS_MARKETPLACE_PAT: ${{ secrets.VS_MARKETPLACE_PAT }}
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsixPublisher = & $vswhere -latest -find "VSSDK\VisualStudioIntegration\Tools\Bin\VsixPublisher.exe"
+          $vsix = Get-Item "src\Plugins\ef-querylens-visualstudio\EFQueryLens.VisualStudio\bin\Release\*.vsix" | Select-Object -First 1
+          $manifest = Resolve-Path "src\Plugins\ef-querylens-visualstudio\publishManifest.json"
+          Write-Host "Publishing $($vsix.FullName)"
+          & $vsixPublisher publish `
+            -payload $vsix.FullName `
+            -publishManifest $manifest `
+            -personalAccessToken "$env:VS_MARKETPLACE_PAT"
 
       - name: Upload Visual Studio artifact
         uses: actions/upload-artifact@v4

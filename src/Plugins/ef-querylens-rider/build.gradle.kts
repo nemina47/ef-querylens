@@ -31,29 +31,43 @@ dependencies {
 
 val bundledRuntimeOutputDir = layout.buildDirectory.dir("generated/querylens-runtime")
 
-// .NET RIDs to bundle inside the plugin ZIP.
-// dotnet publish produces a native AppHost launcher per RID (framework-dependent, not self-contained),
-// so the daemon runs natively on each platform without needing `dotnet` in PATH explicitly —
-// Rider's own embedded .NET runtime is used via the AppHost.
-val daemonRids = listOf("win-x64", "win-arm64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64")
-
-val lspProjectPath = projectDir.resolve("../../../src/EFQueryLens.Lsp/EFQueryLens.Lsp.csproj").canonicalPath
-val daemonProjectPath = projectDir.resolve("../../../src/EFQueryLens.Daemon/EFQueryLens.Daemon.csproj").canonicalPath
-
 val bundleQueryLensRuntime by tasks.registering {
+    // -------------------------------------------------------------------------
+    // IMPORTANT — configuration cache compatibility
+    //
+    // Gradle's configuration cache serializes task *actions* (doLast lambdas)
+    // and all values they capture. If lspCsprojPath / daemonCsprojPath / rids
+    // were declared at script (Build_gradle) scope, the doLast lambda would
+    // capture Build_gradle as $$implicitReceiver_Project. Gradle nulls that
+    // object out before executing actions, causing:
+    //   Cannot invoke "Build_gradle.getLspProjectPath()" because "this.this$0" is null
+    //
+    // By declaring them here (task configuration block, outside doLast), doLast
+    // only captures plain String / List<String> values — serializable by the
+    // config cache. notCompatibleWithConfigurationCache is also set as a
+    // belt-and-suspenders guard so this task is always skipped by the cache even
+    // if a linter or merge ever moves the declarations back to script scope.
+    // -------------------------------------------------------------------------
+    notCompatibleWithConfigurationCache("bundleQueryLensRuntime runs dotnet publish via ProcessBuilder")
+
     val outputDir = bundledRuntimeOutputDir
     outputs.dir(outputDir)
+
+    // Compute these as plain Strings at configuration time, captured by doLast.
+    val lspCsprojPath = projectDir.resolve("../../../src/EFQueryLens.Lsp/EFQueryLens.Lsp.csproj").canonicalPath
+    val daemonCsprojPath = projectDir.resolve("../../../src/EFQueryLens.Daemon/EFQueryLens.Daemon.csproj").canonicalPath
+    // .NET RIDs to bundle inside the plugin ZIP.
+    // dotnet publish produces a native AppHost launcher per RID (framework-dependent, not self-contained),
+    // so the daemon runs natively on each platform without needing `dotnet` in PATH explicitly —
+    // Rider's own embedded .NET runtime is used via the AppHost.
+    val rids = listOf("win-x64", "win-arm64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64")
 
     doLast {
         val out = outputDir.get().asFile
 
-        // Project.exec {} was removed in Gradle 9; use ProcessBuilder directly.
         fun dotnetPublish(vararg args: String) {
             val cmd = listOf("dotnet", "publish") + args.toList()
-            val process =
-                ProcessBuilder(cmd)
-                    .inheritIO()
-                    .start()
+            val process = ProcessBuilder(cmd).inheritIO().start()
             val exit = process.waitFor()
             if (exit != 0) throw GradleException("dotnet publish failed (exit $exit): ${args.joinToString(" ")}")
         }
@@ -61,30 +75,21 @@ val bundleQueryLensRuntime by tasks.registering {
         // LSP: portable framework-dependent DLL, no AppHost.
         // Always launched as `dotnet EFQueryLens.Lsp.dll` by Rider's GeneralCommandLine — no AppHost needed.
         dotnetPublish(
-            lspProjectPath,
-            "-c",
-            "Release",
-            "--no-self-contained",
-            "/p:UseAppHost=false",
-            "--output",
-            out.resolve("server").absolutePath,
+            lspCsprojPath,
+            "-c", "Release", "--no-self-contained", "/p:UseAppHost=false",
+            "--output", out.resolve("server").absolutePath,
         )
 
         // Daemon: framework-dependent AppHost per RID.
         // --no-self-contained: DLL requires .NET (supplied by Rider).
         // /p:UseAppHost=true -r <rid>: adds the tiny native launcher (.exe / bare) for that platform.
         // EngineDiscovery.cs finds the AppHost adjacent to the DLL and uses it directly.
-        for (rid in daemonRids) {
+        for (rid in rids) {
             dotnetPublish(
-                daemonProjectPath,
-                "-c",
-                "Release",
-                "--no-self-contained",
-                "-r",
-                rid,
-                "/p:UseAppHost=true",
-                "--output",
-                out.resolve("daemon/$rid").absolutePath,
+                daemonCsprojPath,
+                "-c", "Release", "--no-self-contained",
+                "-r", rid, "/p:UseAppHost=true",
+                "--output", out.resolve("daemon/$rid").absolutePath,
             )
         }
     }
