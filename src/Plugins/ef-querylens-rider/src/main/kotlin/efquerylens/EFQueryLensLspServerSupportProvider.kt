@@ -137,8 +137,6 @@ private class EFQueryLensServerDescriptor(
             serverDirs.flatMap { serverDir ->
                 listOf(
                     serverDir.resolve("EFQueryLens.Lsp.dll"),
-                    serverDir.resolve("win-x64").resolve("EFQueryLens.Lsp.dll"),
-                    serverDir.resolve("win-x64").resolve("publish").resolve("EFQueryLens.Lsp.dll"),
                     serverDir.resolve("publish").resolve("EFQueryLens.Lsp.dll"),
                 )
             }
@@ -200,15 +198,33 @@ private class EFQueryLensServerDescriptor(
         return this
     }
 
+    /**
+     * Returns the .NET RID string that matches the JVM's current OS and CPU architecture.
+     * Used to select the correct per-platform daemon binary from inside the plugin ZIP.
+     */
+    private fun currentRid(): String {
+        val os = System.getProperty("os.name").lowercase()
+        val arch = System.getProperty("os.arch").lowercase()
+        val isArm = arch == "aarch64"
+        return when {
+            os.contains("win") -> if (isArm) "win-arm64" else "win-x64"
+            os.contains("mac") -> if (isArm) "osx-arm64" else "osx-x64"
+            else -> if (isArm) "linux-arm64" else "linux-x64"
+        }
+    }
+
     private fun resolvePackagedDaemonExecutable(): Path? {
         val pluginRoot = resolvePluginRoot() ?: return null
+        val rid = currentRid()
+        val isWindows = rid.startsWith("win")
+        val exeName = if (isWindows) "EFQueryLens.Daemon.exe" else "EFQueryLens.Daemon"
         val daemonDirs = listOfNotNull(pluginRoot.resolve("daemon"), pluginRoot.parent?.resolve("daemon")).distinct()
+        // Prefer the platform-specific AppHost inside daemon/<rid>/; fall back to root daemon dir.
         val candidates =
             daemonDirs.flatMap { daemonDir ->
                 listOf(
-                    daemonDir.resolve("EFQueryLens.Daemon.exe"),
-                    daemonDir.resolve("win-x64").resolve("EFQueryLens.Daemon.exe"),
-                    daemonDir.resolve("win-x64").resolve("publish").resolve("EFQueryLens.Daemon.exe"),
+                    daemonDir.resolve(rid).resolve(exeName),
+                    daemonDir.resolve(exeName),
                 )
             }
         return candidates.firstOrNull { it.exists() && it.isRegularFile() }
@@ -216,13 +232,15 @@ private class EFQueryLensServerDescriptor(
 
     private fun resolvePackagedDaemonAssembly(): Path? {
         val pluginRoot = resolvePluginRoot() ?: return null
+        val rid = currentRid()
         val daemonDirs = listOfNotNull(pluginRoot.resolve("daemon"), pluginRoot.parent?.resolve("daemon")).distinct()
+        // Prefer the RID-specific directory so EngineDiscovery also finds the adjacent AppHost.
+        // Fall back to the root daemon dir (framework-dependent DLL without AppHost).
         val candidates =
             daemonDirs.flatMap { daemonDir ->
                 listOf(
+                    daemonDir.resolve(rid).resolve("EFQueryLens.Daemon.dll"),
                     daemonDir.resolve("EFQueryLens.Daemon.dll"),
-                    daemonDir.resolve("win-x64").resolve("EFQueryLens.Daemon.dll"),
-                    daemonDir.resolve("win-x64").resolve("publish").resolve("EFQueryLens.Daemon.dll"),
                 )
             }
         return candidates.firstOrNull { it.exists() && it.isRegularFile() }
