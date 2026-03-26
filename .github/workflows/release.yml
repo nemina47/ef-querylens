@@ -64,7 +64,6 @@ jobs:
         # inherited by the hook so prepare-runtime publishes the correct RID.
         run: |
           npx --yes @vscode/vsce package \
-            --pre-release \
             --target ${{ matrix.target }} \
             -o ef-querylens-vscode-${{ matrix.target }}.vsix
 
@@ -76,7 +75,6 @@ jobs:
         # passing it again alongside --packagePath (-i) is an error in vsce.
         run: |
           npx --yes @vscode/vsce publish \
-            --pre-release \
             -i ef-querylens-vscode-${{ matrix.target }}.vsix \
             --pat "$VSCE_PAT"
 
@@ -133,14 +131,49 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Inject version into vsixmanifest
+        shell: pwsh
+        # Updates the <Identity Version="..."> attribute in the VSIX manifest so the
+        # published extension version matches the git tag.
+        run: |
+          $manifestPath = Resolve-Path "src\Plugins\ef-querylens-visualstudio\EFQueryLens.VisualStudio\source.extension.vsixmanifest"
+          $xml = [xml](Get-Content $manifestPath)
+          $xml.PackageManifest.Metadata.Identity.Version = "${{ steps.version.outputs.VERSION }}"
+          $xml.Save($manifestPath)
+          Write-Host "Set VSIX version to ${{ steps.version.outputs.VERSION }}"
+
       - name: Build Visual Studio extension
-        run: dotnet build src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/EFQueryLens.VisualStudio.csproj -c Debug
+        run: dotnet build src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/EFQueryLens.VisualStudio.csproj -c Release
+
+      - name: Publish to Visual Studio Marketplace
+        shell: pwsh
+        env:
+          VS_MARKETPLACE_PAT: ${{ secrets.VS_MARKETPLACE_PAT }}
+        # VsixPublisher.exe is part of the VS SDK, located via vswhere so the path
+        # stays correct across VS version updates on the GitHub Actions runner.
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsixPublisher = & $vswhere -latest -products * `
+            -find "VSSDK\VisualStudioIntegration\Tools\Bin\VsixPublisher.exe" |
+            Select-Object -First 1
+          if (-not $vsixPublisher) { throw "VsixPublisher.exe not found via vswhere" }
+          $vsix = Get-Item "src\Plugins\ef-querylens-visualstudio\EFQueryLens.VisualStudio\bin\Release\net472\*.vsix"
+          Write-Host "Publishing $($vsix.FullName)"
+          & $vsixPublisher publish `
+            -payload $vsix.FullName `
+            -personalAccessToken $env:VS_MARKETPLACE_PAT `
+            -ignoreWarnings "VSIXValidatorWarning01,VSIXValidatorWarning02"
 
       - name: Upload Visual Studio artifact
         uses: actions/upload-artifact@v4
         with:
           name: ef-querylens-visualstudio
-          path: src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/bin/Debug/net472/*.vsix
+          path: src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/bin/Release/net472/*.vsix
 
   release:
     runs-on: ubuntu-latest

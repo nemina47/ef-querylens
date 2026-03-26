@@ -11,7 +11,7 @@
         <Icon>icon.png</Icon>
         <PreviewImage>preview.png</PreviewImage>
         <Tags>EF Core, Entity Framework, SQL, LINQ, C#, Productivity</Tags>
-        <Preview>true</Preview>
+        <Preview>false</Preview>
     </Metadata>
     <Installation ExtensionType="VSSDK+VisualStudio.Extensibility">
         <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.14,)">
