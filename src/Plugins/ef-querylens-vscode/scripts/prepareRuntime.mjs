@@ -114,24 +114,6 @@ function getPublishDirectory(repositoryRoot, projectName, configuration, framewo
   return path.join(base, 'publish');
 }
 
-/**
- * VS Code Marketplace target names differ from .NET RIDs.
- * Normalise the incoming value so dotnet publish always receives a valid RID.
- *
- * VS Code target  →  .NET RID
- *   win32-x64    →  win-x64
- *   win32-arm64  →  win-arm64
- *   darwin-x64   →  osx-x64
- *   darwin-arm64 →  osx-arm64
- *   linux-*      →  linux-* (unchanged)
- */
-const VSCODE_TARGET_TO_DOTNET_RID = {
-  'win32-x64': 'win-x64',
-  'win32-arm64': 'win-arm64',
-  'darwin-x64': 'osx-x64',
-  'darwin-arm64': 'osx-arm64',
-};
-
 function normalizeRuntimeIdentifier(value) {
   if (typeof value !== 'string') {
     return null;
@@ -139,7 +121,26 @@ function normalizeRuntimeIdentifier(value) {
 
   const trimmed = value.trim();
   if (trimmed.length === 0) return null;
-  return VSCODE_TARGET_TO_DOTNET_RID[trimmed] ?? trimmed;
+
+  // VS Code Marketplace target names differ from .NET RIDs.
+  // Map is inline (not module-scope) to avoid the temporal dead zone — this
+  // function is called at line 13 during module evaluation, before any
+  // module-scope `const` declared later in the file would be initialized.
+  //
+  // VS Code target  →  .NET RID
+  //   win32-x64    →  win-x64
+  //   win32-arm64  →  win-arm64
+  //   darwin-x64   →  osx-x64
+  //   darwin-arm64 →  osx-arm64
+  //   linux-*      →  linux-* (unchanged)
+  const vsCodeTargetToRid = {
+    'win32-x64': 'win-x64',
+    'win32-arm64': 'win-arm64',
+    'darwin-x64': 'osx-x64',
+    'darwin-arm64': 'osx-arm64',
+  };
+
+  return vsCodeTargetToRid[trimmed] ?? trimmed;
 }
 
 function copyDirectory(sourceDir, destinationDir) {
