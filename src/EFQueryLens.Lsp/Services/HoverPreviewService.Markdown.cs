@@ -12,7 +12,7 @@ internal sealed partial class HoverPreviewService
         int character,
         CancellationToken cancellationToken)
     {
-        Action<string> log = message => Console.Error.WriteLine($"[QL-Hover] {message}");
+        Action<string> log = message => LogDebug($"markdown {message}");
         var canonical = await BuildCanonicalAsync(
             filePath,
             sourceText,
@@ -24,7 +24,7 @@ internal sealed partial class HoverPreviewService
         var result = FormatMarkdown(canonical, filePath, line, character);
         if (result.Success && result.Status is QueryTranslationStatus.Ready)
         {
-            Console.Error.WriteLine($"[QL-Hover] hover-markdown-ready line={line} char={character} markdownLen={result.Output.Length}");
+            LogDebug($"markdown hover-markdown-ready line={line} char={character} markdownLen={result.Output.Length}");
         }
 
         return result;
