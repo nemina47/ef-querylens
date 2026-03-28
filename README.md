@@ -83,29 +83,6 @@ EF QueryLens translates EF Core LINQ to SQL at hover time. A shared daemon does 
 >
 > EF QueryLens launches bundled backend processes via `dotnet`, so SQL preview features will not start if .NET 10 is missing.
 
-Install quickly with the official installer scripts:
-
-**PowerShell (Windows)**
-
-```powershell
-Invoke-WebRequest https://dot.net/v1/dotnet-install.ps1 -OutFile dotnet-install.ps1
-.\dotnet-install.ps1 -Channel 10.0 -Runtime dotnet
-.\dotnet-install.ps1 -Channel 10.0 -Runtime aspnetcore
-# Optional (only for local build/dev):
-.\dotnet-install.ps1 -Channel 10.0
-```
-
-**Bash (Linux/macOS)**
-
-```bash
-curl -fsSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
-chmod +x dotnet-install.sh
-./dotnet-install.sh --channel 10.0 --runtime dotnet
-./dotnet-install.sh --channel 10.0 --runtime aspnetcore
-# Optional (only for local build/dev):
-./dotnet-install.sh --channel 10.0
-```
-
 **1. Add a factory to your executable project**
 
 QueryLens needs a factory class to create an offline `DbContext` for SQL generation. Add it to your **executable startup project** (ASP.NET API, Worker Service, Console app) — not a class library.
@@ -153,7 +130,7 @@ dotnet build EFQueryLens.slnx
 | IDE | Install |
 |---|---|
 | VS Code | [Marketplace](https://marketplace.visualstudio.com/items?itemName=EFQueryLens.ef-querylens-vscode) |
-| JetBrains Rider | [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/30753-ef-querylens) *(under review)* |
+| JetBrains Rider | [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/30753-ef-querylens) |
 | Visual Studio | [VS Marketplace](https://marketplace.visualstudio.com/items?itemName=EFQueryLens.EFQueryLensVS) |
 
 **4. Hover any LINQ expression**
