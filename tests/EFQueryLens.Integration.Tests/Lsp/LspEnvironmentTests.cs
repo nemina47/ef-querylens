@@ -203,51 +203,5 @@ public class LspEnvironmentTests : IDisposable
 
         Assert.Null(result);
     }
-
-    // ── Client detection: QUERYLENS_CLIENT environment variable ──────────────
-
-    [Theory]
-    [InlineData("rider")]
-    [InlineData("Rider")]
-    [InlineData("RIDER")]
-    public void ReadBool_RiderClientDetection_CaseInsensitive(string clientValue)
-    {
-        SetEnv("QUERYLENS_CLIENT", clientValue);
-
-        // Simulates how HoverPreviewService detects Rider
-        var isRider = string.Equals(
-            Environment.GetEnvironmentVariable("QUERYLENS_CLIENT"),
-            "rider",
-            StringComparison.OrdinalIgnoreCase);
-
-        Assert.True(isRider);
-    }
-
-    [Theory]
-    [InlineData("vscode")]
-    [InlineData("Rider")]
-    [InlineData("visualstudio")]
-    [InlineData("")]
-    public void ActionPortResolution_RiderSpecificLogic(string clientValue)
-    {
-        SetEnv("QUERYLENS_CLIENT", clientValue);
-        SetEnv("QUERYLENS_ACTION_PORT", "9999");
-
-        // Decoder client detection logic
-        var isRider = string.Equals(
-            clientValue,
-            "rider",
-            StringComparison.OrdinalIgnoreCase);
-
-        if (isRider)
-        {
-            // Rider should not show clickable links
-            Assert.True(isRider);
-        }
-        else
-        {
-            // Other clients or unset should use HTTP links
-            Assert.False(isRider);
-        }
-    }
 }
+

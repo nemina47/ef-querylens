@@ -24,6 +24,8 @@ EF QueryLens translates EF Core LINQ to SQL at hover time. A shared daemon does 
       <strong>Hover SQL preview</strong><br/><br/>
       <img src="docs/assets/onhover_sql.gif" alt="Hover SQL preview" />
     </td>
+    </tr>
+    <tr>
     <td align="center" width="50%">
       <strong>Edit &amp; re-preview</strong><br/><br/>
       <img src="docs/assets/onhover_edit_sql.gif" alt="Edit and re-preview" />
@@ -37,17 +39,21 @@ EF QueryLens translates EF Core LINQ to SQL at hover time. A shared daemon does 
 
 <table>
   <tr>
-    <td align="center" valign="top" width="33%">
+    <td align="center" width="50%">
       <strong>Visual Studio</strong><br/><br/>
-      <img src="docs/assets/vs_extension_single_query.png" alt="Visual Studio" width="100%" />
+      <img src="docs/assets/vs_extension_single_query.png" alt="Visual Studio"  />
     </td>
-    <td align="center" valign="top" width="33%">
+    </tr>
+    <tr>
+    <td  align="center" width="50%">
       <strong>VS Code</strong><br/><br/>
-      <img src="docs/assets/vs_code_plugin_single_query.png" alt="VS Code" width="100%" />
+      <img src="docs/assets/vs_code_plugin_single_query.png" alt="VS Code" />
     </td>
-    <td align="center" valign="top" width="33%">
+    </tr>
+    <tr>
+    <td  align="center" width="50%">
       <strong>JetBrains Rider</strong><br/><br/>
-      <img src="docs/assets/rider_plugin_single_query.png" alt="Rider" width="100%" />
+      <img src="docs/assets/rider_plugin_single_query.png" alt="Rider" />
     </td>
   </tr>
 </table>
@@ -104,7 +110,8 @@ chmod +x dotnet-install.sh
 
 QueryLens needs a factory class to create an offline `DbContext` for SQL generation. Add it to your **executable startup project** (ASP.NET API, Worker Service, Console app) — not a class library.
 
-First, define the interface (or reference `EFQueryLens.Core`):
+First, define the interface
+Then implement it. This is where you configure your provider, extensions like `UseProjectables()` or Gridify, query splitting behaviour, custom conventions — anything that affects the generated SQL:
 
 ```csharp
 namespace EFQueryLens.Core;
@@ -114,11 +121,8 @@ public interface IQueryLensDbContextFactory<out TContext>
 {
     TContext CreateOfflineContext();
 }
-```
 
-Then implement it. This is where you configure your provider, extensions like `UseProjectables()` or Gridify, query splitting behaviour, custom conventions — anything that affects the generated SQL:
 
-```csharp
 public sealed class AppQueryLensFactory : IQueryLensDbContextFactory<AppDbContext>
 {
     public AppDbContext CreateOfflineContext()
