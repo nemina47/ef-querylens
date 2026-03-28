@@ -370,10 +370,13 @@ public sealed partial class QueryEvaluator
             else if (unwrapped is MissingMethodException ||
                      msg.Contains("Method not found", StringComparison.OrdinalIgnoreCase))
             {
-                msg += "\n\nHint: This is usually caused by an EF Core version mismatch. " +
-                       "The EF Core assemblies loaded from your project are not binary-compatible with the " +
-                       "version EF QueryLens was built against. " +
-                       "Ensure your project's EF Core packages are up to date.";
+                msg += "\n\nHint: A method expected by one EF Core assembly was not found in another. " +
+                       "This is usually an intra-project version conflict — for example, the EF Core base package " +
+                       "and a provider package (SQL Server, Pomelo, Npgsql) resolved to different major or minor " +
+                       "versions in your project output. " +
+                       "Check that all Microsoft.EntityFrameworkCore.* and provider package references in your " +
+                       "project target the same version, and that no transitive dependency is pulling in a " +
+                       "mismatched version.";
             }
 
             return Failure(msg, sw.Elapsed, null, null);

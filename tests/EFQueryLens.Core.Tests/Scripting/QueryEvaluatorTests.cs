@@ -163,9 +163,9 @@ public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
         // The raw technical exception message must be present so the user can see what went wrong.
         Assert.Contains("Method not found", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
 
-        // A friendly hint about EF Core version mismatch must be appended.
-        Assert.Contains("EF Core version mismatch", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("up to date", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        // A friendly hint about the intra-project EF Core version conflict must be appended.
+        Assert.Contains("intra-project version conflict", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("provider package", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
