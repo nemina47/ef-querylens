@@ -31,6 +31,11 @@ public sealed class PostgresAppDbContext : DbContext, IPostgresAppDbContext
             b.Property(x => x.IsDeleted).HasDefaultValue(false);
             b.Property(x => x.IsActive).HasDefaultValue(true);
             b.Property(x => x.CreatedUtc);
+
+            // Global query filters: soft-delete + active-only.
+            // EF QueryLens includes these automatically in every hover preview
+            // unless you call .IgnoreQueryFilters() in your query.
+            b.HasQueryFilter(x => !x.IsDeleted && x.IsActive);
         });
 
         modelBuilder.Entity<Order>(b =>
@@ -49,6 +54,9 @@ public sealed class PostgresAppDbContext : DbContext, IPostgresAppDbContext
                 .WithMany(c => c.Orders)
                 .HasForeignKey(x => x.CustomerId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Soft-delete filter on orders.
+            b.HasQueryFilter(x => !x.IsDeleted);
         });
     }
 }
