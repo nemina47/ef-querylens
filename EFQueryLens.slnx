@@ -2,6 +2,7 @@
   <Folder Name="/samples/">
     <Project Path="samples/SampleMySqlApp/SampleMySqlApp.csproj" />
     <Project Path="samples/SamplePostgresApp/SamplePostgresApp.csproj" />
+    <Project Path="samples/SampleSqliteApp/SampleSqliteApp.csproj" />
     <Project Path="samples/SampleSqlServerApp/SampleSqlServerApp.csproj" />
   </Folder>
   <Folder Name="/src/">
@@ -12,6 +13,7 @@
     <Project Path="src/EFQueryLens.Lsp/EFQueryLens.Lsp.csproj" />
     <Project Path="src/EFQueryLens.Mcp/EFQueryLens.Mcp.csproj" />
   </Folder>
+  <Folder Name="/src/Plugins/" />
   <Folder Name="/src/Plugins/ef-querylens-visualstudio/">
     <Project Path="src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/EFQueryLens.VisualStudio.csproj">
       <Deploy />
