@@ -130,7 +130,7 @@ dotnet build EFQueryLens.slnx
 | IDE | Install |
 |---|---|
 | VS Code | [Marketplace](https://marketplace.visualstudio.com/items?itemName=EFQueryLens.ef-querylens-vscode) |
-| JetBrains Rider | [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/30753-ef-querylens) *(under review)* |
+| JetBrains Rider | [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/30753-ef-querylens) |
 | Visual Studio | [VS Marketplace](https://marketplace.visualstudio.com/items?itemName=EFQueryLens.EFQueryLensVS) |
 
 **4. Hover any LINQ expression**
