@@ -9,39 +9,6 @@ public sealed partial class QueryEvaluator
     private static readonly ConcurrentDictionary<string, (string ProviderName, string EfCoreVersion)>
         SProviderMetadataCache = new(StringComparer.Ordinal);
 
-    private static bool ShouldWarnExpressionPartialRisk(
-        string expression,
-        IReadOnlyList<QuerySqlCommand> commands)
-    {
-        if (string.IsNullOrWhiteSpace(expression))
-            return false;
-
-        // Only warn when the query shape can genuinely produce child-collection SQL commands
-        // that the offline interceptor might not capture.  The two real triggers are:
-        //
-        //   1. EF actually emitted more than one SQL command (split-query or multi-table
-        //      materialisation that we already captured — warn to note the preview shows all).
-        //   2. The expression contains .Include(, which is the main driver of split queries /
-        //      extra round-trips for collection navigations.
-        //
-        // A plain .Select(c => c.Name).ToList() on a scalar projection never generates a
-        // second command and should not raise this warning.
-        if (commands.Count > 1)
-            return true;
-
-        var hasSelect = expression.Contains(".Select(", StringComparison.OrdinalIgnoreCase);
-        var hasInclude = expression.Contains(".Include(", StringComparison.OrdinalIgnoreCase)
-                      || expression.Contains(".ThenInclude(", StringComparison.OrdinalIgnoreCase);
-
-        if (!hasSelect || !hasInclude)
-            return false;
-
-        return expression.Contains(".ToList(", StringComparison.OrdinalIgnoreCase)
-            || expression.Contains(".ToArray(", StringComparison.OrdinalIgnoreCase)
-            || expression.Contains(".ToDictionary(", StringComparison.OrdinalIgnoreCase)
-            || expression.Contains(".ToLookup(", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static void AddWarningIfMissing(List<QueryWarning> warnings, QueryWarning warning)
     {
         if (warnings.Any(w => string.Equals(w.Code, warning.Code, StringComparison.OrdinalIgnoreCase)))

@@ -317,19 +317,6 @@ public sealed partial class QueryEvaluator
                     alcCtx.LoadedAssemblies);
             }
 
-            if (ShouldWarnExpressionPartialRisk(request.Expression, commands))
-            {
-                AddWarningIfMissing(
-                    warnings,
-                    new QueryWarning
-                    {
-                        Severity = WarningSeverity.Warning,
-                        Code = "QL_EXPRESSION_PARTIAL_RISK",
-                        Message = "Expression selector contains nested materialization that may require additional SQL commands.",
-                        Suggestion = "SQL preview is best-effort for this projection shape; child collection commands may be omitted offline.",
-                    });
-            }
-
             sw.Stop();
             var stageTimings = new EvaluationStageTimings(
                 contextResolutionTime,

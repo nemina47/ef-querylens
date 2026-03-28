@@ -692,8 +692,11 @@ public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
     }
 
     [Fact]
-    public async Task Evaluate_ExpressionSelectorNestedToList_EmitsPartialRiskWarning()
+    public async Task Evaluate_ExpressionSelectorNestedToList_NoPartialRiskWarning()
     {
+        // QL_EXPRESSION_PARTIAL_RISK was removed because the fake DbDataReader (HasRows=true,
+        // Read() returns one row) guarantees EF issues all split-query commands — including
+        // child-collection queries — so nothing is ever omitted offline.
         var result = await TranslateAsync(
             "db.ApplicationChecklists.AsNoTracking()" +
             ".Where(w => !w.IsDeleted && w.IsLatest)" +
@@ -707,7 +710,7 @@ public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.NotNull(result.Sql);
-        Assert.Contains(
+        Assert.DoesNotContain(
             result.Warnings,
             w => string.Equals(w.Code, "QL_EXPRESSION_PARTIAL_RISK", StringComparison.Ordinal));
     }
