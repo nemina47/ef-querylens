@@ -6,6 +6,15 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-03-28
+
+### Added
+- Rider: Alt+Enter intention actions (Copy SQL, Open SQL, Reanalyze) directly in hover popups via `EFQueryLensHoverIntentionAction`
+
+### Changed
+- Replaced `EFQueryLensDocumentationLinkHandler` with `EFQueryLensHoverIntentionAction` for hover popup action link handling
+- Integration tests added for Rider Alt+Enter actions and action server HTTP routing
+
 ## [1.0.6] - 2026-03-26
 
 ### Fixed
