@@ -26,6 +26,23 @@ public static partial class AssemblyResolver
         max: 120_000);
 
     /// <summary>
+    /// Walks up the directory tree from the given source file path and returns the directory
+    /// containing the nearest .csproj file, or null if none is found.
+    /// </summary>
+    public static string? TryGetProjectDirectory(string sourceFilePath)
+    {
+        var currentDir = Path.GetDirectoryName(Path.GetFullPath(sourceFilePath));
+        while (!string.IsNullOrEmpty(currentDir))
+        {
+            if (Directory.GetFiles(currentDir, "*.csproj")
+                .Any(f => !f.Contains("Backup", StringComparison.OrdinalIgnoreCase)))
+                return currentDir;
+            currentDir = Directory.GetParent(currentDir)?.FullName;
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Walks up the directory tree from the given source file path to find the nearest
     /// .csproj file, determines if it's executable or a class library, and resolves the
     /// correct assembly path accordingly.

@@ -9,7 +9,8 @@ namespace EFQueryLens.Lsp.Parsing;
 public static partial class LspSyntaxHelper
 {
     public static string? TryExtractLinqExpression(string sourceText, int line, int character,
-        out string? contextVariableName)
+        out string? contextVariableName,
+        IReadOnlyList<SyntaxNode>? additionalRoots = null)
     {
         contextVariableName = null;
 
@@ -63,7 +64,8 @@ public static partial class LspSyntaxHelper
                     finalInvocation,
                     position,
                     out var synthesizedExpression,
-                    out var synthesizedContextVariableName))
+                    out var synthesizedContextVariableName,
+                    additionalRoots))
             {
                 contextVariableName = synthesizedContextVariableName;
                 return synthesizedExpression;

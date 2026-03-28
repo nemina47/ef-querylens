@@ -12,7 +12,8 @@ public static partial class LspSyntaxHelper
         InvocationExpressionSyntax invocation,
         int cursorPosition,
         out string expression,
-        out string? contextVariableName)
+        out string? contextVariableName,
+        IReadOnlyList<SyntaxNode>? additionalRoots = null)
     {
         expression = string.Empty;
         contextVariableName = null;
@@ -29,8 +30,21 @@ public static partial class LspSyntaxHelper
             return false;
         }
 
-        var candidates = root.DescendantNodes()
-            .OfType<MethodDeclarationSyntax>()
+        // Search the current file first, then fall back to sibling project files.
+        // The sibling search covers the common pattern where the helper method is defined
+        // in a service class in a different file from the call site (e.g. Program.cs calls
+        // CustomerReadService.GetCustomerByIdAsync which lives in CustomerReadService.cs).
+        IEnumerable<MethodDeclarationSyntax> allDeclarations = root
+            .DescendantNodes()
+            .OfType<MethodDeclarationSyntax>();
+
+        if (additionalRoots is { Count: > 0 })
+        {
+            allDeclarations = allDeclarations.Concat(
+                additionalRoots.SelectMany(r => r.DescendantNodes().OfType<MethodDeclarationSyntax>()));
+        }
+
+        var candidates = allDeclarations
             .Where(m => string.Equals(m.Identifier.Text, helperName, StringComparison.Ordinal)
                 && m.ParameterList.Parameters.Count == arguments.Count)
             .ToArray();

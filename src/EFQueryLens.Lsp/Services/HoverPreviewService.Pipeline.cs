@@ -55,8 +55,9 @@ internal sealed partial class HoverPreviewService
 
         var sourceLine = line + 1;
 
-        var expression = LspSyntaxHelper.TryExtractLinqExpression(sourceText, line, character, out var contextVariableName);
-        log($"extract-linq line={line} char={character} found={!string.IsNullOrWhiteSpace(expression)} ctx={contextVariableName}");
+        var siblingRoots = ProjectSourceHelper.GetSiblingRoots(filePath);
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(sourceText, line, character, out var contextVariableName, siblingRoots);
+        log($"extract-linq line={line} char={character} found={!string.IsNullOrWhiteSpace(expression)} ctx={contextVariableName} siblingFiles={siblingRoots.Count}");
 
         if (string.IsNullOrWhiteSpace(expression) || string.IsNullOrWhiteSpace(contextVariableName))
         {

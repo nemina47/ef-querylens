@@ -1,4 +1,5 @@
 using EFQueryLens.Lsp.Parsing;
+using Microsoft.CodeAnalysis;
 
 namespace EFQueryLens.Lsp.Handlers;
 
@@ -40,7 +41,8 @@ internal sealed partial class HoverHandler
             return true;
         }
 
-        var expression = LspSyntaxHelper.TryExtractLinqExpression(sourceText, line, character, out var contextVariableName);
+        var siblingRoots = ProjectSourceHelper.GetSiblingRoots(filePath);
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(sourceText, line, character, out var contextVariableName, siblingRoots);
 
         if (string.IsNullOrWhiteSpace(expression) || string.IsNullOrWhiteSpace(contextVariableName))
         {
