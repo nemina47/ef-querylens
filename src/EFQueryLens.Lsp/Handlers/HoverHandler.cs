@@ -11,10 +11,8 @@ internal sealed partial class HoverHandler
     private readonly HoverPreviewService _hoverPreviewService;
     private readonly ConcurrentDictionary<string, CachedEntry> _hoverCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CachedEntry> _semanticHoverCache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, Lazy<Task<ComputedEntry>>> _inflightSemanticHover = new(StringComparer.OrdinalIgnoreCase);
     private int _hoverCacheTtlMs;
     private int _inQueueCacheTtlMs;
-    private int _hoverCancellationGraceMs;
     private int _hoverQueuedAdaptiveWaitMs;
     private int _structuredQueuedAdaptiveWaitMs;
     private bool _debugEnabled;
@@ -33,11 +31,6 @@ internal sealed partial class HoverHandler
             fallback: 3_000,
             min: 0,
             max: 30_000);
-        _hoverCancellationGraceMs = LspEnvironment.ReadInt(
-            "QUERYLENS_HOVER_CANCEL_GRACE_MS",
-            fallback: 350,
-            min: 0,
-            max: 5_000);
         _hoverQueuedAdaptiveWaitMs = LspEnvironment.ReadInt(
             "QUERYLENS_MARKDOWN_QUEUE_ADAPTIVE_WAIT_MS",
             fallback: 200,
@@ -81,11 +74,6 @@ internal sealed partial class HoverHandler
         if (configuration.HoverCacheTtlMs.HasValue)
         {
             _hoverCacheTtlMs = configuration.HoverCacheTtlMs.Value;
-        }
-
-        if (configuration.HoverCancelGraceMs.HasValue)
-        {
-            _hoverCancellationGraceMs = configuration.HoverCancelGraceMs.Value;
         }
 
         if (configuration.MarkdownQueueAdaptiveWaitMs.HasValue)

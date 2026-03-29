@@ -70,65 +70,17 @@ internal sealed partial class HoverHandler
         return await File.ReadAllTextAsync(filePath, cancellationToken);
     }
 
-    private static async Task<T> WaitWithCancellationAsync<T>(Task<T> task, CancellationToken cancellationToken)
+    /// <summary>
+    /// Atomically writes an <see cref="QueryTranslationStatus.InQueue"/> placeholder to the
+    /// primary cache using <c>TryAdd</c>. Returns <c>true</c> if this call won the race
+    /// and is responsible for starting the background compute task; <c>false</c> if another
+    /// concurrent hover already wrote the placeholder (no second task should be started).
+    /// </summary>
+    private bool TryCacheEntryInQueue(string cacheKey, ComputedEntry entry)
     {
-        if (!cancellationToken.CanBeCanceled)
-        {
-            return await task;
-        }
-
-        if (task.IsCompleted)
-        {
-            return await task;
-        }
-
-        var cancellationTaskSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var registration = cancellationToken.Register(
-            static state => ((TaskCompletionSource<bool>)state!).TrySetResult(true),
-            cancellationTaskSource);
-
-        var completed = await Task.WhenAny(task, cancellationTaskSource.Task);
-        if (completed != task)
-        {
-            throw new OperationCanceledException(cancellationToken);
-        }
-
-        return await task;
-    }
-
-    private static async Task<(bool Completed, T? Result)> TryGetResultWithinGraceAsync<T>(Task<T> task, int graceMilliseconds)
-    {
-        if (graceMilliseconds <= 0)
-        {
-            return (false, default);
-        }
-
-        if (task.IsCompleted)
-        {
-            try
-            {
-                return (true, await task);
-            }
-            catch
-            {
-                return (false, default);
-            }
-        }
-
-        var completed = await Task.WhenAny(task, Task.Delay(graceMilliseconds));
-        if (completed != task)
-        {
-            return (false, default);
-        }
-
-        try
-        {
-            return (true, await task);
-        }
-        catch
-        {
-            return (false, default);
-        }
+        if (_hoverCacheTtlMs <= 0) return false;
+        var cached = new CachedEntry(DateTime.UtcNow.Ticks, entry.Hover, entry.Structured, QueryTranslationStatus.InQueue);
+        return _hoverCache.TryAdd(cacheKey, cached);
     }
 
     private void CacheEntry(string cacheKey, ComputedEntry entry, SemanticHoverContext? semanticContext)
@@ -190,8 +142,6 @@ internal sealed partial class HoverHandler
     {
         _hoverCache.Clear();
         _semanticHoverCache.Clear();
-        _inflightSemanticHover.Clear();
-
         LogHoverDebug($"hover-cache-invalidated reason={reason}");
     }
 

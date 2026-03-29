@@ -122,7 +122,7 @@ internal sealed partial class HoverHandler
         return true;
     }
 
-    private static string NormalizeWhitespace(string value)
+    internal static string NormalizeWhitespace(string value)
     {
         var buffer = new char[value.Length];
         var index = 0;
@@ -149,9 +149,6 @@ internal sealed partial class HoverHandler
 
         return new string(buffer, 0, index).Trim();
     }
-
-    private static string BuildInFlightKey(string filePath, SemanticHoverContext semanticContext) =>
-        $"{Path.GetFullPath(filePath)}|{semanticContext.SemanticKey}|{semanticContext.EffectiveLine}|{semanticContext.EffectiveCharacter}";
 
     private sealed record SemanticHoverContext(string SemanticKey, int EffectiveLine, int EffectiveCharacter);
 }
