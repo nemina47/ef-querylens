@@ -41,6 +41,44 @@ internal sealed partial class QueryLensLanguageClient : ILanguageClient, ILangua
 
     internal static QueryLensLanguageClient? Current { get; private set; }
 
+    /// <summary>
+    /// Returns the current startup state of the language server, used to show
+    /// contextual messages in hover popups before the LSP is fully ready.
+    /// </summary>
+    internal static LspStartupStatus GetStartupStatus()
+    {
+        var client = Current;
+        if (client is null)
+            return LspStartupStatus.NotStarted;
+
+        Process? process;
+        JsonRpc? rpcChannel;
+        lock (Sync)
+        {
+            process = client.serverProcess;
+            rpcChannel = client.rpc;
+        }
+
+        if (rpcChannel != null)
+            return LspStartupStatus.Ready;
+
+        if (process != null)
+        {
+            try
+            {
+                if (!process.HasExited)
+                    return LspStartupStatus.Starting;
+            }
+            catch
+            {
+                return LspStartupStatus.Starting;
+            }
+        }
+
+        // Client constructed but ActivateAsync not yet called, or process exited without RPC.
+        return LspStartupStatus.NotStarted;
+    }
+
     public QueryLensLanguageClient()
     {
         lock (Sync)
@@ -162,6 +200,16 @@ internal sealed partial class QueryLensLanguageClient : ILanguageClient, ILangua
         Log("custom-message-rpc-attached");
         return Task.CompletedTask;
     }
+}
+
+internal enum LspStartupStatus
+{
+    /// <summary>The language client has not been created or activated yet.</summary>
+    NotStarted,
+    /// <summary>The LSP process has started but the JSON-RPC channel is not yet attached.</summary>
+    Starting,
+    /// <summary>The JSON-RPC channel is attached and the LSP is ready to receive requests.</summary>
+    Ready,
 }
 
 internal sealed class QueryLensSqlStatementDto

@@ -12,7 +12,7 @@ import {
     workspace,
     WorkspaceEdit,
 } from 'vscode';
-import { LanguageClient } from 'vscode-languageclient/node';
+import { LanguageClient, State } from 'vscode-languageclient/node';
 
 import { formatSql } from '../sql/formatting';
 import { QueryLensSqlDialect, QueryLensStructuredHoverResponse } from '../types';
@@ -228,7 +228,7 @@ export function createSqlActionHandlers(getClient: () => LanguageClient | undefi
             const character = coerceNonNegativeInt(characterInput, 0);
             const structured = await tryGetStructuredHover(client, uri.toString(), line, character);
             if (!structured) {
-                window.showWarningMessage('EF QueryLens structured hover response is unavailable.');
+                window.showWarningMessage(resolveUnavailableMessage(client));
                 return null;
             }
 
@@ -547,6 +547,16 @@ export function createSqlActionHandlers(getClient: () => LanguageClient | undefi
             window.showErrorMessage(formatUserMessage('QL1004_HOVER_REQUEST_FAILED', `Failed to retrieve SQL preview. ${message}`));
             return null;
         }
+    }
+
+    function resolveUnavailableMessage(client: LanguageClient): string {
+        if (client.state === State.Starting) {
+            return 'EF QueryLens is starting up \u2014 try again in a moment.';
+        }
+        if (client.state !== State.Running) {
+            return 'EF QueryLens is not running. Try reloading the window (Developer: Reload Window).';
+        }
+        return 'EF QueryLens could not retrieve a SQL preview at this position.';
     }
 
     async function tryGetStructuredHover(
