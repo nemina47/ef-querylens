@@ -46,6 +46,27 @@ internal static class __QueryLensOfflineCapture__
                 return false;
             }
 
+            // If this DbContext came from the pool it may already have our offline connection
+            // installed from a previous run.  Re-calling SetDbConnection when EF Core's
+            // internal open-count is > 0 throws "The instance of DbConnection is currently in
+            // use."  The SQL capture scope is AsyncLocal (per-run), so the existing offline
+            // connection will route commands to the current run's scope — no reinstall needed.
+            //
+            // IMPORTANT: check type IDENTITY, not just name.  Each Roslyn eval assembly lives
+            // in its own ALC with its own __QueryLensOfflineDbConnection__ type and its own
+            // __QueryLensSqlCaptureScope__.AsyncLocal instance.  A name-only match on a
+            // connection installed by a different ALC would route Record() calls to that ALC's
+            // (now-null) scope and silently drop all captured SQL.  Only skip reinstall when
+            // the installed connection is THIS assembly's type — same ALC, same capture scope.
+            var getConnMethod = extType.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(m => m.Name == "GetDbConnection" && m.GetParameters().Length == 1);
+            if (getConnMethod is not null)
+            {
+                var existingConn = getConnMethod.Invoke(null, new[] { database });
+                if (existingConn?.GetType() == typeof(__QueryLensOfflineDbConnection__))
+                    return true;
+            }
+
             var offlineConn = new __QueryLensOfflineDbConnection__();
             var paramCount = setMethod.GetParameters().Length;
             var args = paramCount >= 3
