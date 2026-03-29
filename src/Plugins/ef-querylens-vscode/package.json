@@ -4,7 +4,7 @@
   "description": "Preview your EF Core SQL in real time, without leaving your IDE.",
   "icon": "icon.png",
   "preview": false,
-  "version": "1.0.9",
+  "version": "1.0.10",
   "publisher": "EFQueryLens",
   "license": "MIT",
   "repository": {
