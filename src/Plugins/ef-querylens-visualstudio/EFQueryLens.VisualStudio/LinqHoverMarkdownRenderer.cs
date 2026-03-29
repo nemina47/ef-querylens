@@ -99,7 +99,7 @@ internal static partial class LinqHoverMarkdownRenderer
         };
 
         if (!response.Success
-            && status == 3
+            && status is 1 or 2 or 3
             && (!string.IsNullOrWhiteSpace(response.StatusMessage) || !string.IsNullOrWhiteSpace(response.ErrorMessage)))
         {
             var statusMessage = response.StatusMessage ?? response.ErrorMessage ?? "Translation failed.";
