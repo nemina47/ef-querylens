@@ -110,6 +110,13 @@ public static partial class LspSyntaxHelper
                 continue;
             }
 
+            // If the outermost chain is chained on the result of an await expression
+            // (e.g. "(await query.ToListAsync()).ToList()"), strip the outer in-memory
+            // part and keep only the awaited EF query.  The runner template already
+            // handles Task<T> via UnwrapTask; keeping the await would cause CS4032
+            // in the generated synchronous scaffold.
+            targetExpression = StripOuterAwaitChain(targetExpression);
+
             targetExpression = TryInlineLocalQueryRoot(targetExpression, outermostInvocation);
             targetExpression = StripTransparentQueryableCasts(targetExpression);
 

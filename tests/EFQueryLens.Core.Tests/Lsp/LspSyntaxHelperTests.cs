@@ -689,6 +689,115 @@ public class LspSyntaxHelperTests
     }
 
     [Fact]
+    public void FindAllLinqChains_AwaitedQueryWithInMemoryToList_StripsOuterInMemoryChain()
+    {
+        // Regression: (await efQuery.ToListAsync(ct)).ToList() caused CS4032 because
+        // the outer chain (larger span) was selected, placing `await` inside the
+        // synchronous Run scaffold.  After the fix, only the EF part is kept.
+        var source = """
+            var queryA = dbContext.Items.Where(x => x.Code.StartsWith("A"));
+            var queryB = dbContext.Items.Where(x => x.Code.StartsWith("B"));
+            return (await queryA.Concat(queryB).ToListAsync(ct)).ToList();
+            """;
+
+        var chains = LspSyntaxHelper.FindAllLinqChains(source);
+
+        // We should find chains for queryA, queryB, and the concat query.
+        // None of them should contain a bare `await` in the expression text.
+        Assert.All(chains, c => Assert.DoesNotContain("await", c.Expression, StringComparison.Ordinal));
+
+        // The concat chain should have been stripped of the outer in-memory .ToList()
+        // and inlined back to the dbContext root.
+        var concatChain = chains.FirstOrDefault(c =>
+            c.Expression.Contains("ToListAsync", StringComparison.Ordinal)
+            && c.Expression.Contains("Concat", StringComparison.Ordinal));
+        Assert.NotNull(concatChain);
+        Assert.Equal("dbContext", concatChain.ContextVariableName);
+        Assert.Contains("dbContext.Items", concatChain.Expression, StringComparison.Ordinal);
+        Assert.Contains("ToListAsync", concatChain.Expression, StringComparison.Ordinal);
+        // The outer in-memory .ToList() must have been stripped
+        Assert.DoesNotContain(".ToList()", concatChain.Expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryExtractLinqExpression_HoverOnAwaitKeyword_StripsOuterToListReturnsEfChain()
+    {
+        // Regression: hovering the `await` keyword on "(await query.ToListAsync()).ToList()"
+        // extracted the entire "(await ...).ToList()" as the expression, causing CS4032.
+        var source = """
+            var queryA = dbContext.Items.Where(x => x.Code.StartsWith("A"));
+            var queryB = dbContext.Items.Where(x => x.Code.StartsWith("B"));
+            return (await queryA.Concat(queryB).ToListAsync(ct)).ToList();
+            """;
+
+        var (line, character) = FindPosition(source, "await");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName);
+
+        Assert.NotNull(expression);
+        Assert.Equal("dbContext", contextVariableName);
+        Assert.Contains("dbContext.Items", expression, StringComparison.Ordinal);
+        Assert.Contains("ToListAsync", expression, StringComparison.Ordinal);
+        // The outer in-memory .ToList() must have been stripped
+        Assert.DoesNotContain("await", expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryExtractLinqExpression_HoverOnToListAsync_WhenWrappedInAwaitToList_ReturnsEfChain()
+    {
+        // Hovering on .ToListAsync or .Concat when the query is wrapped in
+        // (await ...).ToList() must also return the EF chain, not the outer wrapper.
+        var source = """
+            var queryA = dbContext.Items.Where(x => x.Code.StartsWith("A"));
+            var queryB = dbContext.Items.Where(x => x.Code.StartsWith("B"));
+            return (await queryA.Concat(queryB).ToListAsync(ct)).ToList();
+            """;
+
+        var (line, character) = FindPosition(source, "ToListAsync");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName);
+
+        Assert.NotNull(expression);
+        Assert.Equal("dbContext", contextVariableName);
+        Assert.Contains("ToListAsync", expression, StringComparison.Ordinal);
+        Assert.DoesNotContain("await", expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryExtractLinqExpression_SimpleAwaitedMaterialisation_UnchangedByStripping()
+    {
+        // Sanity-check: a plain `await db.Items.ToListAsync(ct)` (no outer chain)
+        // must be unaffected — StripOuterAwaitChain must not alter it.
+        var source = """
+            var items = await dbContext.Items
+                .Where(x => x.IsActive)
+                .ToListAsync(ct);
+            """;
+
+        var (line, character) = FindPosition(source, "ToListAsync");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName);
+
+        Assert.NotNull(expression);
+        Assert.Equal("dbContext", contextVariableName);
+        Assert.Contains("dbContext.Items", expression, StringComparison.Ordinal);
+        Assert.Contains("ToListAsync", expression, StringComparison.Ordinal);
+        Assert.DoesNotContain("await", expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FindAllLinqChains_StatementStartCoversDeclarationLine()
     {
         // "var x = await" lives before the expression start character on the same line.

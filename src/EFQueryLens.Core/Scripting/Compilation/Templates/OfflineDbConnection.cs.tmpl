@@ -1,5 +1,12 @@
 internal sealed class __QueryLensOfflineDbConnection__ : DbConnection
 {
+    private readonly Func<DbParameter>? _paramFactory;
+
+    public __QueryLensOfflineDbConnection__(Func<DbParameter>? paramFactory = null)
+    {
+        _paramFactory = paramFactory;
+    }
+
     public override string ConnectionString { get; set; } = string.Empty;
     public override string Database => "offline";
     public override string DataSource => "localhost";
@@ -9,11 +16,18 @@ internal sealed class __QueryLensOfflineDbConnection__ : DbConnection
     public override void Open() { }
     public override void Close() { }
     protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) => throw new InvalidOperationException("Offline mode: transactions not supported.");
-    protected override DbCommand CreateDbCommand() => new __QueryLensOfflineDbCommand__();
+    protected override DbCommand CreateDbCommand() => new __QueryLensOfflineDbCommand__(_paramFactory);
 
     private sealed class __QueryLensOfflineDbCommand__ : DbCommand
     {
+        private readonly Func<DbParameter>? _paramFactory;
         private readonly __QueryLensOfflineDbParameterCollection__ _parameters = new();
+
+        public __QueryLensOfflineDbCommand__(Func<DbParameter>? paramFactory = null)
+        {
+            _paramFactory = paramFactory;
+        }
+
         public override string CommandText { get; set; } = string.Empty;
         public override int CommandTimeout { get; set; }
         public override CommandType CommandType { get; set; }
@@ -24,7 +38,7 @@ internal sealed class __QueryLensOfflineDbConnection__ : DbConnection
         protected override DbTransaction? DbTransaction { get; set; }
         public override void Cancel() { }
         public override void Prepare() { }
-        protected override DbParameter CreateDbParameter() => new __QueryLensOfflineDbParameter__();
+        protected override DbParameter CreateDbParameter() => _paramFactory?.Invoke() ?? new __QueryLensOfflineDbParameter__();
         public override int ExecuteNonQuery() { RecordCurrentCommand(); return 0; }
         public override object? ExecuteScalar() { RecordCurrentCommand(); return null; }
         protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) { RecordCurrentCommand(); return new __QueryLensFakeDbDataReader__(); }

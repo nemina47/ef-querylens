@@ -25,6 +25,7 @@ public sealed partial class QueryEvaluator
                 "CS1061" or "CS1929" => "Extension method or member not in scope — check your using directives.",
                 "CS7036" => "Missing required argument — ensure all method parameters are provided.",
                 "CS0019" => "Operator cannot be applied to the operand types — check variable types match the expression.",
+                "CS1503" => TranslateCS1503(d),
                 _ => $"{d.Id}: {d.GetMessage()}",
             })
             .Distinct(StringComparer.Ordinal)
@@ -53,5 +54,39 @@ public sealed partial class QueryEvaluator
         var m = _cs0246Pattern.Match(d.GetMessage());
         var name = m.Success ? m.Groups[1].Value : "?";
         return $"Type '{name}' not found — add the required using directive or NuGet package reference.";
+    }
+
+    /// <summary>
+    /// Extracts the simple type name from a CS0246 diagnostic message, e.g.
+    /// "The type or namespace name 'CustomerRevenueDto' could not be found…" → "CustomerRevenueDto".
+    /// Returns <see langword="null"/> if the pattern does not match.
+    /// </summary>
+    internal static string? TryExtractTypeNameFromCS0246(Diagnostic d)
+    {
+        var m = _cs0246Pattern.Match(d.GetMessage());
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    // "Argument N: cannot convert from 'actualType' to 'expectedType'"
+    private static readonly Regex _cs1503Pattern =
+        new(@"cannot convert from '.+?' to '(.+?)'", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static string TranslateCS1503(Diagnostic d)
+    {
+        var m = _cs1503Pattern.Match(d.GetMessage());
+        var expected = m.Success ? m.Groups[1].Value : "?";
+        return $"Argument type mismatch — a captured local variable was stubbed as 'object' but '{expected}' is required. " +
+               "Ensure the variable is declared with a concrete type before the query.";
+    }
+
+    /// <summary>
+    /// Extracts the expected (target) type from a CS1503 diagnostic message, e.g.
+    /// "Argument 3: cannot convert from 'object' to 'string?'" → "string?".
+    /// Returns <see langword="null"/> if the pattern does not match.
+    /// </summary>
+    internal static string? TryExtractExpectedTypeFromCS1503(Diagnostic d)
+    {
+        var m = _cs1503Pattern.Match(d.GetMessage());
+        return m.Success ? m.Groups[1].Value : null;
     }
 }

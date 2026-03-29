@@ -68,7 +68,7 @@ public class LspClientConfigurationTests
               "settings": {
                 "efQueryLens": {
                   "enableLspHover": false,
-                  "hoverCancelGraceMs": 200
+                  "hoverCacheTtlMs": 200
                 }
               }
             }
@@ -77,7 +77,7 @@ public class LspClientConfigurationTests
         var config = LspClientConfiguration.FromConfigurationChangeRequest(token);
 
         Assert.False(config.EnableLspHover);
-        Assert.Equal(200, config.HoverCancelGraceMs);
+        Assert.Equal(200, config.HoverCacheTtlMs);
     }
 
     // ── Key aliasing: queryLens vs efQueryLens vs root ──────────────────────
@@ -205,9 +205,9 @@ public class LspClientConfigurationTests
     [Fact]
     public void ReadInt_FloatValue_RoundedToInt()
     {
-        var token = BuildSettings("\"hoverCancelGraceMs\": 150.7");
+        var token = BuildSettings("\"hoverProgressDelayMs\": 150.7");
         var config = LspClientConfiguration.FromInitializeRequest(token);
-        Assert.Equal(151, config.HoverCancelGraceMs);
+        Assert.Equal(151, config.HoverProgressDelayMs);
     }
 
     [Fact]
@@ -245,7 +245,6 @@ public class LspClientConfigurationTests
             "hoverProgressNotify": true,
             "hoverProgressDelayMs": 100,
             "hoverCacheTtlMs": 8000,
-            "hoverCancelGraceMs": 300,
             "markdownQueueAdaptiveWaitMs": 400,
             "structuredQueueAdaptiveWaitMs": 450,
             "warmupSuccessTtlMs": 60000,
@@ -259,7 +258,6 @@ public class LspClientConfigurationTests
         Assert.True(config.HoverProgressNotify);
         Assert.Equal(100, config.HoverProgressDelayMs);
         Assert.Equal(8000, config.HoverCacheTtlMs);
-        Assert.Equal(300, config.HoverCancelGraceMs);
         Assert.Equal(400, config.MarkdownQueueAdaptiveWaitMs);
         Assert.Equal(450, config.StructuredQueueAdaptiveWaitMs);
         Assert.Equal(60000, config.WarmupSuccessTtlMs);

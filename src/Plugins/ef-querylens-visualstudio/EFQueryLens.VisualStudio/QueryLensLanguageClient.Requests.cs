@@ -103,6 +103,104 @@ internal sealed partial class QueryLensLanguageClient
         return result;
     }
 
+    /// <summary>
+    /// Notifies the LSP server of a document being opened.
+    /// </summary>
+    internal static void NotifyDocumentOpened(string filePath, string sourceText)
+    {
+        if (Current?.rpc is not JsonRpc rpc)
+        {
+            return;
+        }
+
+        try
+        {
+            var uri = new Uri(filePath).AbsoluteUri;
+            _ = rpc.NotifyWithParameterObjectAsync(
+                "textDocument/didOpen",
+                new JObject
+                {
+                    ["textDocument"] = new JObject
+                    {
+                        ["uri"] = uri,
+                        ["languageId"] = "csharp",
+                        ["version"] = 1,
+                        ["text"] = sourceText,
+                    }
+                });
+        }
+        catch (Exception ex)
+        {
+            Log($"document-open-notify-failed path={Path.GetFileName(filePath)} type={ex.GetType().Name} message={ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Notifies the LSP server of document content changes.
+    /// </summary>
+    internal static void NotifyDocumentChanged(string filePath, string sourceText)
+    {
+        if (Current?.rpc is not JsonRpc rpc)
+        {
+            return;
+        }
+
+        try
+        {
+            var uri = new Uri(filePath).AbsoluteUri;
+            _ = rpc.NotifyWithParameterObjectAsync(
+                "textDocument/didChange",
+                new JObject
+                {
+                    ["textDocument"] = new JObject
+                    {
+                        ["uri"] = uri,
+                        ["version"] = 2,
+                    },
+                    ["contentChanges"] = new JArray
+                    {
+                        new JObject
+                        {
+                            ["text"] = sourceText,
+                        }
+                    }
+                });
+        }
+        catch (Exception ex)
+        {
+            Log($"document-change-notify-failed path={Path.GetFileName(filePath)} type={ex.GetType().Name} message={ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Notifies the LSP server of a document being closed.
+    /// </summary>
+    internal static void NotifyDocumentClosed(string filePath)
+    {
+        if (Current?.rpc is not JsonRpc rpc)
+        {
+            return;
+        }
+
+        try
+        {
+            var uri = new Uri(filePath).AbsoluteUri;
+            _ = rpc.NotifyWithParameterObjectAsync(
+                "textDocument/didClose",
+                new JObject
+                {
+                    ["textDocument"] = new JObject
+                    {
+                        ["uri"] = uri,
+                    }
+                });
+        }
+        catch (Exception ex)
+        {
+            Log($"document-close-notify-failed path={Path.GetFileName(filePath)} type={ex.GetType().Name} message={ex.Message}");
+        }
+    }
+
     internal static async Task<QueryLensStructuredHoverResponse?> TryGetStructuredHoverAsync(
         string filePath,
         int line,

@@ -169,7 +169,6 @@ private class EFQueryLensServerDescriptor(
     ): GeneralCommandLine {
         withEnvironment("QUERYLENS_CLIENT", "rider")
         withEnvironment("QUERYLENS_DEBUG", "1")
-        withEnvironment("QUERYLENS_HOVER_CANCEL_GRACE_MS", "1200")
         withEnvironment("QUERYLENS_MARKDOWN_QUEUE_ADAPTIVE_WAIT_MS", "0")
         withEnvironment("QUERYLENS_STRUCTURED_QUEUE_ADAPTIVE_WAIT_MS", "0")
         withEnvironment("QUERYLENS_HOVER_PROGRESS_NOTIFY", "1")

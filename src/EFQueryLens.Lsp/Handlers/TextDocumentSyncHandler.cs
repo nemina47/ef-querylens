@@ -30,7 +30,9 @@ internal sealed class TextDocumentSyncHandler
             return;
         }
 
-        DocumentManager.UpdateDocument(request.TextDocument.Uri.ToString(), text);
+        var uriString = request.TextDocument.Uri.ToString();
+        DocumentManager.UpdateDocument(uriString, text);
+        _prewarm?.DebounceWarmDocument(UriToFilePath(uriString), text);
     }
 
     public void DidClose(DidCloseTextDocumentParams request)

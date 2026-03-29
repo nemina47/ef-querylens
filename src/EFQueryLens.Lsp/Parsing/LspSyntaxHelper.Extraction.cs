@@ -90,6 +90,13 @@ public static partial class LspSyntaxHelper
             targetExpression = outerChain;
         }
 
+        // If the outermost chain is chained on the result of an await expression
+        // (e.g. "(await query.ToListAsync()).ToList()"), strip the outer in-memory
+        // part and keep only the awaited EF query.  The runner template already
+        // handles Task<T> via UnwrapTask; keeping the await would cause CS4032
+        // in the generated synchronous scaffold.
+        targetExpression = StripOuterAwaitChain(targetExpression);
+
         // Inline local IQueryable variables for non-terminal chains too, so
         // expressions like auditTrailQuery.ApplyPaging(...).ToListAsync(...) are
         // rooted back to dbContext.* and keep DbContext discovery deterministic.

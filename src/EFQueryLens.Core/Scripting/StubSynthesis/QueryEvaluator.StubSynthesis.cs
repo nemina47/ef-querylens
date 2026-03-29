@@ -92,7 +92,10 @@ public sealed partial class QueryEvaluator
             "uint" or "UInt32" or "System.UInt32" => $"uint {varName} = 0u;",
             "ulong" or "UInt64" or "System.UInt64" => $"ulong {varName} = 0ul;",
             "bool" or "Boolean" or "System.Boolean" => $"bool {varName} = false;",
-            "string" or "String" or "System.String" => $"string {varName} = \"\";",
+            // Include nullable reference-type variants — the CLR makes no distinction
+            // for reference types, and 'string ""' satisfies both 'string' and 'string?'.
+            "string" or "String" or "System.String"
+                or "string?" or "String?" or "System.String?" => $"string {varName} = \"\";",
             "char" or "Char" or "System.Char" => $"char {varName} = '\\0';",
             "decimal" or "Decimal" or "System.Decimal" => $"decimal {varName} = 0m;",
             "double" or "Double" or "System.Double" => $"double {varName} = 0.0;",

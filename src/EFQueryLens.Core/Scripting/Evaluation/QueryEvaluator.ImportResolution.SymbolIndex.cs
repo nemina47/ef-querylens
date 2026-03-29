@@ -66,6 +66,28 @@ public sealed partial class QueryEvaluator
         }
     }
 
+    /// <summary>
+    /// Returns the distinct namespaces of all types in <paramref name="knownTypes"/> whose
+    /// simple name (last segment of the fully-qualified name) matches <paramref name="simpleName"/>.
+    /// Used to synthesise <c>using</c> directives when CS0246 fires because a DTO or result type
+    /// lives in the same namespace as the calling class and therefore has no explicit import.
+    /// </summary>
+    internal static IEnumerable<string> FindNamespacesForSimpleName(
+        string simpleName,
+        IReadOnlySet<string> knownTypes)
+    {
+        var suffix = "." + simpleName;
+        return knownTypes
+            .Where(fqn => fqn.EndsWith(suffix, StringComparison.Ordinal))
+            .Select(fqn =>
+            {
+                var lastDot = fqn.LastIndexOf('.');
+                return lastDot > 0 ? fqn[..lastDot] : null;
+            })
+            .Where(ns => ns is not null)
+            .Distinct(StringComparer.Ordinal)!;
+    }
+
     private static bool IsResolvableNamespace(string n, IReadOnlySet<string> ns) => ns.Contains(n);
 
     private static bool IsResolvableType(string n, IReadOnlySet<string> types) => types.Contains(n);

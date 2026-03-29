@@ -26,12 +26,21 @@ public sealed partial class QueryEvaluator
         TranslationRequest request,
         IReadOnlySet<string> knownNamespaces,
         IReadOnlySet<string> knownTypes,
-        IReadOnlyCollection<string> synthesizedUsingStaticTypes)
+        IReadOnlyCollection<string> synthesizedUsingStaticTypes,
+        IReadOnlyCollection<string> synthesizedUsingNamespaces)
     {
         foreach (var import in request.AdditionalImports)
         {
             if (IsValidUsingName(import) && IsResolvableNamespace(import, knownNamespaces))
                 sb.AppendLine($"using {import};");
+        }
+
+        foreach (var ns in synthesizedUsingNamespaces
+                     .Where(n => IsValidUsingName(n) && IsResolvableNamespace(n, knownNamespaces))
+                     .Distinct(StringComparer.Ordinal)
+                     .Order(StringComparer.Ordinal))
+        {
+            sb.AppendLine($"using {ns};");
         }
 
         foreach (var kvp in request.UsingAliases

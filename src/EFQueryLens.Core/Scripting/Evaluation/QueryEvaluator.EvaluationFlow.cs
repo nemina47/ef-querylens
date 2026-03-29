@@ -129,6 +129,7 @@ public sealed partial class QueryEvaluator
                 var workingExpression = request.Expression;
                 var stubs = new List<string>();
                 var synthesizedUsingStaticTypes = new HashSet<string>(StringComparer.Ordinal);
+                var synthesizedUsingNamespaces = new HashSet<string>(StringComparer.Ordinal);
                 var includeGridifyFallbackExtensions = false;
                 var maxRetries = 5;
                 CSharpCompilation compilation;
@@ -147,13 +148,14 @@ public sealed partial class QueryEvaluator
                         knownNamespaces,
                         knownTypes,
                         synthesizedUsingStaticTypes,
+                        synthesizedUsingNamespaces,
                         includeGridifyFallbackExtensions);
                     compilation = BuildCompilation(src, refs);
                     var errors = compilation.GetDiagnostics()
                         .Where(d => d.Severity == DiagnosticSeverity.Error)
                         .ToList();
 
-                    var hardErrors = errors.Where(e => e.Id is not ("CS0103" or "CS1061" or "CS1929" or "CS7036" or "CS0019" or "CS8122" or "CS0246" or "CS0234" or "CS0400")).ToList();
+                    var hardErrors = errors.Where(e => e.Id is not ("CS0103" or "CS1061" or "CS1929" or "CS7036" or "CS0019" or "CS8122" or "CS0246" or "CS0234" or "CS0400" or "CS1503")).ToList();
                     if (hardErrors.Count > 0)
                     {
                         return Failure(
@@ -191,6 +193,68 @@ public sealed partial class QueryEvaluator
                             continue;
 
                         stubs.Add(BuildStubDeclaration(n!, rootId, workingRequest, dbContextType));
+                        changed = true;
+                    }
+
+                    // CS0246 / CS0234: type or namespace not found. The type likely lives in a
+                    // namespace that the source file doesn't need to import explicitly (e.g. a DTO
+                    // in the same namespace as the calling class). Locate it in the loaded
+                    // assemblies and synthesise a using directive automatically.
+                    // Use the diagnostic message text (same regex as FormatSoftDiagnostics) to
+                    // extract the simple type name — more reliable than AST span lookup.
+                    //
+                    // Two cases:
+                    //  • Top-level type   → parent is a namespace → emit "using Ns;"
+                    //  • Nested type      → parent is a class     → emit "using static EnclosingType;"
+                    foreach (var typeName in errors
+                        .Where(d => d.Id is "CS0246" or "CS0234")
+                        .Select(d => TryExtractTypeNameFromCS0246(d))
+                        .Where(n => !string.IsNullOrWhiteSpace(n))
+                        .Distinct(StringComparer.Ordinal))
+                    {
+                        foreach (var parent in FindNamespacesForSimpleName(typeName!, knownTypes))
+                        {
+                            if (IsResolvableNamespace(parent, knownNamespaces))
+                            {
+                                if (synthesizedUsingNamespaces.Add(parent))
+                                    changed = true;
+                            }
+                            else if (IsResolvableType(parent, knownTypes))
+                            {
+                                // Nested type — bring it into scope with "using static EnclosingType"
+                                if (synthesizedUsingStaticTypes.Add(parent))
+                                    changed = true;
+                            }
+                        }
+                    }
+
+                    // CS1503: argument type mismatch — a stub was generated as 'object' because
+                    // no type could be inferred (e.g. a pattern string passed to EF.Functions.Like).
+                    // Extract the expected type from the diagnostic message and re-generate the
+                    // stub with the correct type so overload resolution succeeds on retry.
+                    foreach (var cs1503 in errors.Where(e => e.Id == "CS1503"))
+                    {
+                        var argName = TryExtractSimpleIdentifierAtDiagnosticLocation(cs1503);
+                        if (argName is null)
+                            continue;
+
+                        var expectedType = TryExtractExpectedTypeFromCS1503(cs1503);
+                        if (string.IsNullOrWhiteSpace(expectedType))
+                            continue;
+
+                        // Only retypestub if we actually have a stub for this identifier.
+                        var oldStub = stubs.FirstOrDefault(s =>
+                            s.Contains($" {argName} ", StringComparison.Ordinal)
+                            || s.Contains($" {argName};", StringComparison.Ordinal));
+                        if (oldStub is null)
+                            continue;
+
+                        var typedStub = BuildStubFromTypeName(expectedType, argName);
+                        if (string.Equals(oldStub, typedStub, StringComparison.Ordinal))
+                            continue;
+
+                        stubs.Remove(oldStub);
+                        stubs.Add(typedStub);
                         changed = true;
                     }
 
@@ -395,6 +459,27 @@ public sealed partial class QueryEvaluator
         var token = root.FindToken(diagnostic.Location.SourceSpan.Start);
         return token.IsKind(SyntaxKind.IdentifierToken)
             ? token.ValueText
+            : null;
+    }
+
+    /// <summary>
+    /// Returns the identifier name at the diagnostic location only when the AST node
+    /// is a bare <see cref="IdentifierNameSyntax"/> (i.e. a simple variable reference,
+    /// not a member access or method invocation). Used for CS1503 re-stub logic: a
+    /// compound expression like <c>someObj.Pattern</c> at the error site would require
+    /// changing the stub for <c>someObj</c>, which could be wrong if it is used with a
+    /// different type elsewhere in the expression.
+    /// </summary>
+    private static string? TryExtractSimpleIdentifierAtDiagnosticLocation(Diagnostic diagnostic)
+    {
+        if (!diagnostic.Location.IsInSource || diagnostic.Location.SourceTree is null)
+            return null;
+
+        var root = diagnostic.Location.SourceTree.GetRoot();
+        var node = root.FindNode(diagnostic.Location.SourceSpan, getInnermostNodeForTie: true);
+
+        return node is IdentifierNameSyntax identifier
+            ? identifier.Identifier.ValueText
             : null;
     }
 }

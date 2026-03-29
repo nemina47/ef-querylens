@@ -40,9 +40,16 @@
 
   <Target Name="CopySampleAppsToTestOutput" AfterTargets="Build">
     <PropertyGroup>
-      <SampleMySqlAppOutputDir>..\..\samples\SampleMySqlApp\bin\$(Configuration)\$(TargetFramework)\</SampleMySqlAppOutputDir>
-      <SampleSqlServerAppOutputDir>..\..\samples\SampleSqlServerApp\bin\$(Configuration)\$(TargetFramework)\</SampleSqlServerAppOutputDir>
+      <SampleMySqlAppOutputDir Condition="Exists('..\..\samples\SampleMySqlApp\bin\$(Configuration)\net10.0\SampleMySqlApp.dll')">..\..\samples\SampleMySqlApp\bin\$(Configuration)\net10.0\</SampleMySqlAppOutputDir>
+      <SampleMySqlAppOutputDir Condition="'$(SampleMySqlAppOutputDir)' == '' and Exists('..\..\samples\SampleMySqlApp\bin\$(Configuration)\net9.0\SampleMySqlApp.dll')">..\..\samples\SampleMySqlApp\bin\$(Configuration)\net9.0\</SampleMySqlAppOutputDir>
+
+      <SampleSqlServerAppOutputDir Condition="Exists('..\..\samples\SampleSqlServerApp\bin\$(Configuration)\net10.0\SampleSqlServerApp.dll')">..\..\samples\SampleSqlServerApp\bin\$(Configuration)\net10.0\</SampleSqlServerAppOutputDir>
+      <SampleSqlServerAppOutputDir Condition="'$(SampleSqlServerAppOutputDir)' == '' and Exists('..\..\samples\SampleSqlServerApp\bin\$(Configuration)\net9.0\SampleSqlServerApp.dll')">..\..\samples\SampleSqlServerApp\bin\$(Configuration)\net9.0\</SampleSqlServerAppOutputDir>
     </PropertyGroup>
+
+    <Error Condition="'$(SampleMySqlAppOutputDir)' == ''" Text="Could not locate SampleMySqlApp build output under samples/SampleMySqlApp/bin/$(Configuration)/(net10.0|net9.0)." />
+    <Error Condition="'$(SampleSqlServerAppOutputDir)' == ''" Text="Could not locate SampleSqlServerApp build output under samples/SampleSqlServerApp/bin/$(Configuration)/(net10.0|net9.0)." />
+
     <ItemGroup>
       <!-- Exclude Microsoft.CodeAnalysis* DLLs: EF Core Design brings in an older
            Roslyn version as a transitive dependency, which would overwrite the newer

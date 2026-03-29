@@ -61,14 +61,31 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
             documentUri = new Uri(unavailableDocument.FilePath).AbsoluteUri;
         }
 
+        var startupStatus = QueryLensLanguageClient.GetStartupStatus();
+        var (statusCode, statusMessage, errorMessage) = startupStatus switch
+        {
+            LspStartupStatus.Starting =>
+                (2, // QueryTranslationStatus.Starting
+                 "EF QueryLens is starting up \u2014 hover again in a moment.",
+                 "Language server is initializing."),
+            LspStartupStatus.NotStarted =>
+                (2,
+                 "EF QueryLens is loading \u2014 open a C\u266f file and hover again shortly.",
+                 "Language server has not activated yet."),
+            _ =>
+                (3, // QueryTranslationStatus.DaemonUnavailable
+                 "EF QueryLens is unavailable. Check that the extension installed correctly and try reloading.",
+                 "EF QueryLens is unavailable."),
+        };
+
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
         var content = LinqHoverMarkdownRenderer.CreateFromStructured(
             new QueryLensStructuredHoverResponse
             {
                 Success = false,
-                Status = 3,
-                StatusMessage = "EF QueryLens structured hover response is unavailable. Ensure daemon/LSP are running and retry.",
-                ErrorMessage = "EF QueryLens structured hover response is unavailable.",
+                Status = statusCode,
+                StatusMessage = statusMessage,
+                ErrorMessage = errorMessage,
                 CommandCount = 0,
                 Statements = [],
                 Warnings = [],

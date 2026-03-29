@@ -5,21 +5,32 @@ namespace EFQueryLens.Lsp.Handlers;
 
 internal sealed partial class HoverHandler
 {
+    /// <summary>
+    /// Builds the primary hover cache key.
+    ///
+    /// The key is scoped by <b>assembly fingerprint</b> (path + size + last-write timestamp)
+    /// rather than a hash of the full source text. This means:
+    /// <list type="bullet">
+    ///   <item>Edits anywhere in the file do <em>not</em> bust cached hover entries.</item>
+    ///   <item>A rebuild (new .dll on disk) automatically invalidates all entries because
+    ///         the fingerprint changes.</item>
+    /// </list>
+    /// </summary>
     private string BuildHoverCacheKey(
         string filePath,
-        string sourceText,
         int requestLine,
         int requestCharacter,
         SemanticHoverContext? semanticContext)
     {
-        var sourceHash = StringComparer.Ordinal.GetHashCode(sourceText);
+        var fingerprint = AssemblyResolver.TryGetAssemblyFingerprint(filePath)
+                          ?? $"no-assembly|{Path.GetFullPath(filePath)}";
 
         if (semanticContext is not null)
         {
-            return $"{Path.GetFullPath(filePath)}|semantic|{semanticContext.SemanticKey}|{semanticContext.EffectiveLine}|{semanticContext.EffectiveCharacter}|{sourceHash}";
+            return $"{fingerprint}|semantic|{semanticContext.SemanticKey}|{semanticContext.EffectiveLine}|{semanticContext.EffectiveCharacter}";
         }
 
-        return $"{Path.GetFullPath(filePath)}|cursor|{requestLine}|{requestCharacter}|{sourceHash}";
+        return $"{fingerprint}|cursor|{requestLine}|{requestCharacter}";
     }
 
     private static bool TryResolveSemanticHoverContext(
@@ -30,12 +41,23 @@ internal sealed partial class HoverHandler
         out SemanticHoverContext? semanticContext)
     {
         semanticContext = null;
-        var projectKey = ProjectKeyHelper.GetProjectKey(filePath);
+
+        // Resolve the assembly fingerprint and DbContext type once — both are needed
+        // to build a semantic key that can be matched by the prewarm service (Phase 4).
+        var fingerprint = AssemblyResolver.TryGetAssemblyFingerprint(filePath)
+                          ?? $"no-assembly|{Path.GetFullPath(filePath)}";
+
+        var targetAssembly = AssemblyResolver.TryGetTargetAssembly(filePath);
+        var dbContextType = (!string.IsNullOrWhiteSpace(targetAssembly)
+                             && !targetAssembly.StartsWith("DEBUG_FAIL", StringComparison.Ordinal))
+            ? AssemblyResolver.TryExtractDbContextTypeFromFactory(targetAssembly)
+            : null;
 
         if (TryFindContainingChain(sourceText, line, character, out var containingChain))
         {
+            dbContextType ??= LspSyntaxHelper.TryResolveDbContextTypeName(sourceText, containingChain.ContextVariableName);
             semanticContext = new SemanticHoverContext(
-                SemanticKey: $"{projectKey}|{containingChain.ContextVariableName.Trim()}|{NormalizeWhitespace(containingChain.Expression)}",
+                SemanticKey: $"{fingerprint}|{dbContextType ?? string.Empty}|{NormalizeWhitespace(containingChain.Expression)}",
                 EffectiveLine: containingChain.Line,
                 EffectiveCharacter: containingChain.Character);
             return true;
@@ -49,8 +71,9 @@ internal sealed partial class HoverHandler
             return false;
         }
 
+        dbContextType ??= LspSyntaxHelper.TryResolveDbContextTypeName(sourceText, contextVariableName);
         semanticContext = new SemanticHoverContext(
-            SemanticKey: $"{projectKey}|{contextVariableName.Trim()}|{NormalizeWhitespace(expression)}",
+            SemanticKey: $"{fingerprint}|{dbContextType ?? string.Empty}|{NormalizeWhitespace(expression)}",
             EffectiveLine: line,
             EffectiveCharacter: character);
         return true;
@@ -99,7 +122,7 @@ internal sealed partial class HoverHandler
         return true;
     }
 
-    private static string NormalizeWhitespace(string value)
+    internal static string NormalizeWhitespace(string value)
     {
         var buffer = new char[value.Length];
         var index = 0;
@@ -126,9 +149,6 @@ internal sealed partial class HoverHandler
 
         return new string(buffer, 0, index).Trim();
     }
-
-    private static string BuildInFlightKey(string filePath, SemanticHoverContext semanticContext) =>
-        $"{Path.GetFullPath(filePath)}|{semanticContext.SemanticKey}|{semanticContext.EffectiveLine}|{semanticContext.EffectiveCharacter}";
 
     private sealed record SemanticHoverContext(string SemanticKey, int EffectiveLine, int EffectiveCharacter);
 }

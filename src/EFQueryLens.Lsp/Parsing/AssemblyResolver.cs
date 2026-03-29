@@ -26,6 +26,36 @@ public static partial class AssemblyResolver
         max: 120_000);
 
     /// <summary>
+    /// Returns a fingerprint string for the compiled assembly associated with the given
+    /// source file path. The fingerprint encodes the assembly path, file size, and
+    /// last-write timestamp — identical to the format used by <c>QueryLensEngine</c> for
+    /// its ALC cache, so both layers invalidate on the same rebuild event.
+    ///
+    /// Returns <c>null</c> when no assembly can be located for the source file, or when
+    /// the assembly path starts with <c>DEBUG_FAIL</c> (unresolvable project layout).
+    /// </summary>
+    public static string? TryGetAssemblyFingerprint(string sourceFilePath)
+    {
+        var assemblyPath = TryGetTargetAssembly(sourceFilePath);
+        if (string.IsNullOrWhiteSpace(assemblyPath)
+            || assemblyPath.StartsWith("DEBUG_FAIL", StringComparison.Ordinal)
+            || !File.Exists(assemblyPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            var info = new FileInfo(assemblyPath);
+            return $"{Path.GetFullPath(assemblyPath)}|{info.Length}|{info.LastWriteTimeUtc.Ticks}";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Walks up the directory tree from the given source file path and returns the directory
     /// containing the nearest .csproj file, or null if none is found.
     /// </summary>

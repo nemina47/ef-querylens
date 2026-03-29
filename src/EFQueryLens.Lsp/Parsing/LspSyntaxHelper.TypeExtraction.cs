@@ -169,6 +169,9 @@ public static partial class LspSyntaxHelper
                 _ => null,
             },
 
+            // $"..." is always System.String
+            InterpolatedStringExpressionSyntax => "string",
+
             // TypeName.Property — heuristic: PascalCase receiver is likely a type
             MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax receiver }
                 when IsProbablyTypeName(receiver.Identifier.ValueText)

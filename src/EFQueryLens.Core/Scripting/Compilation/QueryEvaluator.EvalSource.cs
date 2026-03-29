@@ -15,12 +15,13 @@ public sealed partial class QueryEvaluator
         IReadOnlySet<string> knownNamespaces,
         IReadOnlySet<string> knownTypes,
         IReadOnlyCollection<string> synthesizedUsingStaticTypes,
+        IReadOnlyCollection<string> synthesizedUsingNamespaces,
         bool includeGridifyFallbackExtensions)
     {
         var sb = new StringBuilder();
 
         AppendBaseUsings(sb);
-        AppendRequestUsings(sb, request, knownNamespaces, knownTypes, synthesizedUsingStaticTypes);
+        AppendRequestUsings(sb, request, knownNamespaces, knownTypes, synthesizedUsingStaticTypes, synthesizedUsingNamespaces);
         sb.AppendLine();
         sb.Append(EvalSourceTemplateCatalog.CapturedTypes);
         sb.AppendLine();

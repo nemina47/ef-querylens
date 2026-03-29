@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using EFQueryLens.Core;
 using EFQueryLens.Core.Contracts;
 using EFQueryLens.Lsp.Services;
@@ -27,152 +26,49 @@ internal sealed partial class HoverHandler
         var effectiveCharacter = context.EffectiveCharacter;
         var cacheKey = context.CacheKey;
 
-        if (TryGetCachedStructured(cacheKey, out var cachedResult))
+        if (TryGetCachedEntry(cacheKey, out var cachedEntry))
         {
-            LogHoverDebug($"structured-hover-cache-hit line={effectiveLine} char={effectiveCharacter}");
-            return cachedResult;
+            LogHoverDebug($"structured-hover-cache-hit status={cachedEntry!.Status} line={effectiveLine} char={effectiveCharacter}");
+            return cachedEntry.Structured;
         }
 
         if (semanticContext is not null
-            && _hoverCacheTtlMs > 0
-            && _semanticHoverCache.TryGetValue(semanticContext.SemanticKey, out var semEntry)
-            && !IsExpired(semEntry)
-            && semEntry.Structured is not null)
+            && TryGetSemanticCachedEntry(semanticContext.SemanticKey, out var semEntry))
         {
             LogHoverDebug($"structured-hover-semantic-cache-hit line={effectiveLine} char={effectiveCharacter}");
-            _hoverCache.TryAdd(cacheKey, semEntry);
-            return semEntry.Structured;
+            _hoverCache.TryAdd(cacheKey, semEntry!);
+            return semEntry!.Structured;
         }
 
-        if (semanticContext is not null)
+        // Cache-disabled mode: compute immediately so structured hover can still
+        // return SQL/status when hoverCacheTtlMs is configured to 0.
+        if (_hoverCacheTtlMs <= 0)
         {
-            var inFlightKey = BuildInFlightKey(filePath, semanticContext);
-            // Share the same inflight task as HandleAsync — one engine call serves both.
-            var lazyTask = _inflightSemanticHover.GetOrAdd(
-                inFlightKey,
-                _ => new Lazy<Task<ComputedEntry>>(
-                    () => ComputeAndCacheCombinedAsync(
-                        inFlightKey,
-                        cacheKey,
-                        filePath,
-                        sourceText,
-                        semanticContext),
-                    LazyThreadSafetyMode.ExecutionAndPublication));
-
-            try
-            {
-                var sharedTask = lazyTask.Value;
-                var sharedResult = await WaitWithCancellationAsync(sharedTask, cancellationToken);
-                CacheEntry(cacheKey, sharedResult, semanticContext);
-                return sharedResult.Structured;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                var sharedTask = lazyTask.Value;
-                var (completed, salvagedResult) = await TryGetResultWithinGraceAsync(sharedTask, _hoverCancellationGraceMs);
-                if (completed)
-                {
-                    CacheEntry(cacheKey, salvagedResult, semanticContext);
-                    LogHoverDebug($"structured-hover-cancel-salvaged line={effectiveLine} char={effectiveCharacter}");
-                    return salvagedResult.Structured;
-                }
-
-                if (_hoverCacheTtlMs > 0
-                    && _semanticHoverCache.TryGetValue(semanticContext.SemanticKey, out var semEntryAfterCancel)
-                    && !IsExpired(semEntryAfterCancel)
-                    && semEntryAfterCancel.Structured is not null)
-                {
-                    _hoverCache.TryAdd(cacheKey, semEntryAfterCancel);
-                    return semEntryAfterCancel.Structured;
-                }
-
-                var fallbackStructured = await TryBuildCanceledStatusFallbackStructuredAsync(
-                    filePath,
-                    sourceText,
-                    effectiveLine,
-                    effectiveCharacter);
-                if (fallbackStructured is not null)
-                {
-                    LogHoverDebug($"structured-hover-cancel-fallback-hit line={effectiveLine} char={effectiveCharacter}");
-                    return fallbackStructured;
-                }
-
-                return null;
-            }
-        }
-
-        var sw = Stopwatch.StartNew();
-        ComputedEntry computed;
-        try
-        {
-            computed = await ComputeCombinedAsync(
+            var computed = await ComputeCombinedAsync(
                 filePath,
                 sourceText,
                 effectiveLine,
                 effectiveCharacter,
                 cancellationToken);
+
+            return computed.Structured;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+
+        // Cache miss — return InQueue immediately and compute in background.
+        // BackgroundComputeAndCacheAsync (defined in MarkdownHover.cs) handles both
+        // hover and structured formats in a single engine call.
+        var inQueueEntry = new ComputedEntry(BuildInQueueHover(), BuildInQueueStructured(), QueryTranslationStatus.InQueue);
+        if (TryCacheEntryInQueue(cacheKey, inQueueEntry))
         {
-            LogHoverDebug($"structured-hover-canceled line={effectiveLine} char={effectiveCharacter}");
-
-            var fallbackStructured = await TryBuildCanceledStatusFallbackStructuredAsync(
-                filePath,
-                sourceText,
-                effectiveLine,
-                effectiveCharacter);
-            if (fallbackStructured is not null)
-            {
-                LogHoverDebug($"structured-hover-cancel-fallback-hit line={effectiveLine} char={effectiveCharacter}");
-                return fallbackStructured;
-            }
-
-            return null;
+            LogHoverDebug($"structured-hover-cache-miss-queued line={effectiveLine} char={effectiveCharacter}");
+            _ = Task.Run(() => BackgroundComputeAndCacheAsync(
+                cacheKey, filePath, sourceText, effectiveLine, effectiveCharacter, semanticContext));
         }
-
-        sw.Stop();
-        LogHoverDebug($"structured-hover-compute-finished line={effectiveLine} char={effectiveCharacter} elapsedMs={sw.ElapsedMilliseconds} hasResult={computed.Structured is not null}");
-        CacheEntry(cacheKey, computed, semanticContext);
-        return computed.Structured;
-    }
-
-    private async Task<QueryLensStructuredHoverResult?> TryBuildCanceledStatusFallbackStructuredAsync(
-        string filePath,
-        string sourceText,
-        int line,
-        int character)
-    {
-        using var fallbackCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
-        try
+        else
         {
-            var fallback = await _hoverPreviewService.BuildStructuredAsync(
-                filePath,
-                sourceText,
-                line,
-                character,
-                fallbackCts.Token);
-
-            if (fallback.Success)
-            {
-                return fallback;
-            }
-
-            if (fallback.Status is QueryTranslationStatus.Starting
-                or QueryTranslationStatus.InQueue
-                or QueryTranslationStatus.DaemonUnavailable)
-            {
-                return fallback;
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Ignore fallback timeout and keep the primary cancellation behavior.
-        }
-        catch (Exception ex)
-        {
-            LogHoverDebug($"structured-hover-cancel-fallback-failed line={line} char={character} type={ex.GetType().Name} message={ex.Message}");
+            LogHoverDebug($"structured-hover-cache-miss-joined line={effectiveLine} char={effectiveCharacter}");
         }
 
-        return null;
+        return inQueueEntry.Structured;
     }
 }

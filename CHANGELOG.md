@@ -6,6 +6,11 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+### Fixed
+- Hovering `await` on a query materialisation (e.g. `(await queryA.Concat(queryB).ToListAsync(ct)).ToList()`) no longer produces CS4032 ("The 'await' operator can only be used within an async method"). The extractor now strips any in-memory operations chained after an `await` result and forwards only the EF LINQ chain to the eval engine.
+- VS extension: added Professional and Enterprise edition installation targets (was Community-only, blocking install on VS Professional/Enterprise)
+- VS extension: widened `.NET 10.0 Runtime` prerequisite version range from `[18.4.11602.120,19.0)` to `[18.4.11602.120,)` so the extension installs on VS 2026 where the component version exceeds 19.0
+
 ## [1.0.9] - 2026-03-28
 
 ### Fixed

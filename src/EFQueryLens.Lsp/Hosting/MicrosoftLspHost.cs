@@ -1,6 +1,5 @@
 using EFQueryLens.Core.Contracts;
 using EFQueryLens.Lsp;
-using EFQueryLens.Lsp.Engine;
 using EFQueryLens.Lsp.Handlers;
 using EFQueryLens.Lsp.Services;
 using StreamJsonRpc;
@@ -15,11 +14,11 @@ internal static class MicrosoftLspHost
         if (debugEnabled)
             Console.Error.WriteLine("[QL-LSP] host-run debug=true");
 
-        var engineControl = engine as IEngineControl;
-        var prewarm = engineControl is not null ? new TranslationPrewarmService(engineControl) : null;
-
         var documentManager = new DocumentManager();
-        var hoverHandler = new HoverHandler(documentManager, new HoverPreviewService(engine, debugEnabled));
+        var hoverPreviewService = new HoverPreviewService(engine, debugEnabled);
+        var hoverHandler = new HoverHandler(documentManager, hoverPreviewService);
+        var prewarm = new TranslationPrewarmService(hoverPreviewService, hoverHandler.StorePrewarmedEntry);
+
         var lspHandler = new LanguageServerHandler(
             hover: hoverHandler,
             warmup: new WarmupHandler(documentManager, engine),

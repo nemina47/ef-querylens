@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using EFQueryLens.Core;
 using EFQueryLens.Core.Contracts;
 using EFQueryLens.Lsp.Services;
@@ -27,165 +26,50 @@ internal sealed partial class HoverHandler
         var effectiveCharacter = context.EffectiveCharacter;
         var cacheKey = context.CacheKey;
 
-        if (TryGetCachedHover(cacheKey, out var cachedHover))
+        if (TryGetCachedEntry(cacheKey, out var cachedEntry))
         {
-            LogHoverDebug($"hover-cache-hit line={effectiveLine} char={effectiveCharacter}");
-            return cachedHover;
+            LogHoverDebug($"hover-cache-hit status={cachedEntry!.Status} line={effectiveLine} char={effectiveCharacter}");
+            return cachedEntry.Hover;
         }
 
         if (semanticContext is not null
-            && _hoverCacheTtlMs > 0
-            && _semanticHoverCache.TryGetValue(semanticContext.SemanticKey, out var semEntry)
-            && !IsExpired(semEntry)
-            && semEntry.Hover is not null)
+            && TryGetSemanticCachedEntry(semanticContext.SemanticKey, out var semEntry))
         {
             LogHoverDebug($"hover-semantic-cache-hit line={effectiveLine} char={effectiveCharacter}");
-            _hoverCache.TryAdd(cacheKey, semEntry);
-            return semEntry.Hover;
+            _hoverCache.TryAdd(cacheKey, semEntry!);
+            return semEntry!.Hover;
         }
 
-        if (semanticContext is not null)
+        // Cache-disabled mode: compute immediately so users do not get a perpetual
+        // "computing" placeholder when hoverCacheTtlMs is configured to 0.
+        if (_hoverCacheTtlMs <= 0)
         {
-            var inFlightKey = BuildInFlightKey(filePath, semanticContext);
-            var lazyTask = _inflightSemanticHover.GetOrAdd(
-                inFlightKey,
-                _ => new Lazy<Task<ComputedEntry>>(
-                    () => ComputeAndCacheCombinedAsync(
-                        inFlightKey,
-                        cacheKey,
-                        filePath,
-                        sourceText,
-                        semanticContext),
-                    LazyThreadSafetyMode.ExecutionAndPublication));
-
-            if (lazyTask.IsValueCreated)
-            {
-                LogHoverDebug($"hover-inflight-join line={effectiveLine} char={effectiveCharacter}");
-            }
-            else
-            {
-                LogHoverDebug($"hover-inflight-start line={effectiveLine} char={effectiveCharacter}");
-            }
-
-            try
-            {
-                var sharedTask = lazyTask.Value;
-                var sharedResult = await WaitWithCancellationAsync(sharedTask, cancellationToken);
-                CacheEntry(cacheKey, sharedResult, semanticContext);
-                return sharedResult.Hover;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                var sharedTask = lazyTask.Value;
-                var (completed, salvagedResult) = await TryGetResultWithinGraceAsync(sharedTask, _hoverCancellationGraceMs);
-                if (completed)
-                {
-                    CacheEntry(cacheKey, salvagedResult, semanticContext);
-                    LogHoverDebug(
-                        $"hover-cancel-salvaged line={effectiveLine} char={effectiveCharacter} " +
-                        $"graceMs={_hoverCancellationGraceMs}");
-                    return salvagedResult.Hover;
-                }
-
-                if (_hoverCacheTtlMs > 0
-                    && _semanticHoverCache.TryGetValue(semanticContext.SemanticKey, out var semEntryAfterCancel)
-                    && !IsExpired(semEntryAfterCancel))
-                {
-                    _hoverCache.TryAdd(cacheKey, semEntryAfterCancel);
-                    LogHoverDebug($"hover-cancel-cache-hit line={effectiveLine} char={effectiveCharacter}");
-                    return semEntryAfterCancel.Hover;
-                }
-
-                var fallbackHover = await TryBuildCanceledStatusFallbackHoverAsync(
-                    filePath,
-                    sourceText,
-                    effectiveLine,
-                    effectiveCharacter);
-                if (fallbackHover is not null)
-                {
-                    LogHoverDebug($"hover-cancel-fallback-hit line={effectiveLine} char={effectiveCharacter}");
-                    return fallbackHover;
-                }
-
-                LogHoverDebug($"hover-canceled line={effectiveLine} char={effectiveCharacter} reason=request-cancelled");
-                return null;
-            }
-        }
-
-        var sw = Stopwatch.StartNew();
-        ComputedEntry computed;
-        try
-        {
-            computed = await ComputeCombinedAsync(
+            var computed = await ComputeCombinedAsync(
                 filePath,
                 sourceText,
                 effectiveLine,
                 effectiveCharacter,
                 cancellationToken);
+
+            return computed.Hover;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+
+        // Cache miss — return InQueue immediately and compute in background.
+        // TryCacheEntryInQueue uses TryAdd so only one concurrent hover wins the race
+        // and starts the background task; others read the InQueue entry next hover.
+        var inQueueEntry = new ComputedEntry(BuildInQueueHover(), BuildInQueueStructured(), QueryTranslationStatus.InQueue);
+        if (TryCacheEntryInQueue(cacheKey, inQueueEntry))
         {
-            LogHoverDebug($"hover-canceled line={effectiveLine} char={effectiveCharacter}");
-
-            var fallbackHover = await TryBuildCanceledStatusFallbackHoverAsync(
-                filePath,
-                sourceText,
-                effectiveLine,
-                effectiveCharacter);
-            if (fallbackHover is not null)
-            {
-                LogHoverDebug($"hover-cancel-fallback-hit line={effectiveLine} char={effectiveCharacter}");
-                return fallbackHover;
-            }
-
-            return null;
+            LogHoverDebug($"hover-cache-miss-queued line={effectiveLine} char={effectiveCharacter}");
+            _ = Task.Run(() => BackgroundComputeAndCacheAsync(
+                cacheKey, filePath, sourceText, effectiveLine, effectiveCharacter, semanticContext));
         }
-        sw.Stop();
-
-        LogHoverDebug($"hover-compute-finished line={effectiveLine} char={effectiveCharacter} elapsedMs={sw.ElapsedMilliseconds} hasResult={computed.Hover is not null}");
-        CacheEntry(cacheKey, computed, semanticContext);
-        return computed.Hover;
-    }
-
-    // Shared inflight delegate: computes both hover and structured in a single engine call.
-    // Both HandleAsync and HandleStructuredAsync use _inflightSemanticHover to join this task.
-    private async Task<ComputedEntry> ComputeAndCacheCombinedAsync(
-        string inFlightKey,
-        string cacheKey,
-        string filePath,
-        string sourceText,
-        SemanticHoverContext semanticContext)
-    {
-        var sw = Stopwatch.StartNew();
-        try
+        else
         {
-            var computed = await ComputeCombinedAsync(
-                filePath,
-                sourceText,
-                semanticContext.EffectiveLine,
-                semanticContext.EffectiveCharacter,
-                CancellationToken.None);
+            LogHoverDebug($"hover-cache-miss-joined line={effectiveLine} char={effectiveCharacter}");
+        }
 
-            sw.Stop();
-            LogHoverDebug(
-                $"hover-compute-finished line={semanticContext.EffectiveLine} char={semanticContext.EffectiveCharacter} " +
-                $"elapsedMs={sw.ElapsedMilliseconds} hasResult={computed.Hover is not null}");
-
-            CacheEntry(cacheKey, computed, semanticContext);
-            return computed;
-        }
-        catch (Exception ex)
-        {
-            sw.Stop();
-            LogHoverDebug(
-                $"hover-compute-failed line={semanticContext.EffectiveLine} char={semanticContext.EffectiveCharacter} " +
-                $"elapsedMs={sw.ElapsedMilliseconds} type={ex.GetType().Name} message={ex.Message}");
-            throw;
-        }
-        finally
-        {
-            _inflightSemanticHover.TryRemove(inFlightKey, out _);
-        }
+        return inQueueEntry.Hover;
     }
 
     private async Task<ComputedEntry> ComputeCombinedAsync(
@@ -222,6 +106,16 @@ internal sealed partial class HoverHandler
                 cancellationToken);
         }
 
+        return BuildComputedFromCombined(combined);
+    }
+
+    /// <summary>
+    /// Converts a <see cref="CombinedHoverResult"/> into a <see cref="ComputedEntry"/> by
+    /// applying the "Could not extract" normalisation rules.  Shared by
+    /// <see cref="ComputeCombinedAsync"/> and <see cref="StorePrewarmedEntry"/>.
+    /// </summary>
+    private static ComputedEntry BuildComputedFromCombined(CombinedHoverResult combined)
+    {
         Hover? hover = null;
         if (combined.Markdown.Success
             || !combined.Markdown.Output.StartsWith("Could not extract a LINQ query expression", StringComparison.OrdinalIgnoreCase))
@@ -243,45 +137,57 @@ internal sealed partial class HoverHandler
         return new ComputedEntry(hover, structured, combined.Markdown.Status);
     }
 
-    private async Task<Hover?> TryBuildCanceledStatusFallbackHoverAsync(
+    /// <summary>
+    /// Runs <see cref="ComputeCombinedAsync"/> on a background thread and writes the result
+    /// into the hover cache, replacing the <see cref="QueryTranslationStatus.InQueue"/>
+    /// placeholder that was stored when the hover request first missed the cache.
+    ///
+    /// On failure the placeholder is evicted so the next hover retries computation cleanly.
+    /// </summary>
+    private async Task BackgroundComputeAndCacheAsync(
+        string cacheKey,
         string filePath,
         string sourceText,
         int line,
-        int character)
+        int character,
+        SemanticHoverContext? semanticContext)
     {
-        using var fallbackCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
         try
         {
-            var fallback = await _hoverPreviewService.BuildMarkdownAsync(
-                filePath,
-                sourceText,
-                line,
-                character,
-                fallbackCts.Token);
-
-            if (!fallback.Success)
-            {
-                return null;
-            }
-
-            if (fallback.Status is QueryTranslationStatus.Starting
-                or QueryTranslationStatus.InQueue
-                or QueryTranslationStatus.DaemonUnavailable)
-            {
-                return CreateMarkdownHover(fallback.Output);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Ignore fallback timeout and keep the primary cancellation behavior.
+            var computed = await ComputeCombinedAsync(filePath, sourceText, line, character, CancellationToken.None);
+            CacheEntry(cacheKey, computed, semanticContext);
+            LogHoverDebug($"bg-compute-finished key={cacheKey} status={computed.Status}");
         }
         catch (Exception ex)
         {
-            LogHoverDebug($"hover-cancel-fallback-failed line={line} char={character} type={ex.GetType().Name} message={ex.Message}");
+            // Evict the InQueue placeholder so the next hover re-triggers computation
+            // rather than showing "computing..." indefinitely.
+            _hoverCache.TryRemove(cacheKey, out _);
+            LogHoverDebug($"bg-compute-failed key={cacheKey} type={ex.GetType().Name} message={ex.Message}");
         }
-
-        return null;
     }
+
+    private static Hover BuildInQueueHover() =>
+        CreateMarkdownHover("**EF QueryLens** \u2014 computing SQL\u2026 hover again in a moment.");
+
+    internal static QueryLensStructuredHoverResult BuildInQueueStructured() =>
+        new(
+            Success: false,
+            ErrorMessage: null,
+            Statements: [],
+            CommandCount: 0,
+            SourceExpression: null,
+            ExecutedExpression: null,
+            DbContextType: null,
+            ProviderName: null,
+            SourceFile: null,
+            SourceLine: 0,
+            Warnings: [],
+            EnrichedSql: null,
+            Mode: null,
+            Status: QueryTranslationStatus.InQueue,
+            StatusMessage: "Computing SQL \u2014 hover again in a moment.",
+            AvgTranslationMs: 0);
 
     private static Hover CreateMarkdownHover(string markdown)
     {

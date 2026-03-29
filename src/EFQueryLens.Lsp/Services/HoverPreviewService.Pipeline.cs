@@ -74,6 +74,7 @@ internal sealed partial class HoverPreviewService
 
         var usingContext = LspSyntaxHelper.ExtractUsingContext(sourceText);
         var localVariableTypes = LspSyntaxHelper.ExtractLocalVariableTypesAtPosition(sourceText, line, character);
+        log($"extract-local-types line={line} char={character} count={localVariableTypes.Count} vars={string.Join(",", localVariableTypes.Keys)}");
         // Factory declaration is authoritative (T in IQueryLensDbContextFactory<T> is always concrete).
         // Fall back to the declared type of the context variable for projects without a factory.
         var dbContextTypeName = AssemblyResolver.TryExtractDbContextTypeFromFactory(targetAssembly)

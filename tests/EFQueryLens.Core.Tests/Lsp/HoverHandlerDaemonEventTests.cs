@@ -87,6 +87,9 @@ public class HoverHandlerDaemonEventTests
             hover,
             structuredResult,
             QueryTranslationStatus.Ready);
+
+        // Note: CachedEntry also has a Status field (Phase 2), but CacheEntry is invoked
+        // via the ComputedEntry path which sets Status internally — no change needed here.
         Assert.NotNull(computedEntry);
 
         var cacheEntryMethod = typeof(HoverHandler).GetMethod(
