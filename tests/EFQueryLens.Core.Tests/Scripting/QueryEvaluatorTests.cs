@@ -175,6 +175,44 @@ public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
         Assert.Contains("provider package", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Evaluate_SqlServerSample_PagingWithMathVariables_DoesNotSurfaceCs0122()
+    {
+        // Regression: Microsoft.Data.SqlClient exposes internal native interop types
+        // (e.g. SNIHandle) that Roslyn flags as CS0122 when included as metadata refs.
+        // These must not block translation — the evaluator must treat them as non-blocking
+        // metadata artifacts and proceed to emit and run the generated assembly.
+        //
+        // This test specifically targets the SQL Server ALC where SqlClient assemblies are
+        // present, and uses the paging expression pattern that triggered the original report.
+        using var sqlAlcCtx = new ProjectAssemblyContext(GetSampleSqlServerAppDll());
+        var evaluator = new QueryEvaluator();
+
+        var result = await evaluator.EvaluateAsync(
+            sqlAlcCtx,
+            new TranslationRequest
+            {
+                AssemblyPath = sqlAlcCtx.AssemblyPath,
+                Expression = "db.Orders.OrderByDescending(o => o.CreatedUtc).ThenByDescending(o => o.Id).Skip((page - 1) * pageSize).Take(pageSize).Select(o => o.Id)",
+                DbContextTypeName = "SampleSqlServerApp.Infrastructure.Persistence.SqlServerAppDbContext",
+                LocalVariableTypes = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["page"]     = "Math",
+                    ["pageSize"] = "Math",
+                },
+            });
+
+        // CS0122 must never surface as the failure reason regardless of package alignment.
+        Assert.DoesNotContain("CS0122", result.ErrorMessage ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain("SNIHandle", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+        if (!result.Success)
+        {
+            // Acceptable only if it's the known EF Core runtime version drift, not a compile error.
+            Assert.Contains("Method not found", result.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
     /// <summary>
     /// Verifies that the evaluator can resolve and use <c>SqlServerReportingDbContext</c>
     /// independently of <c>SqlServerAppDbContext</c> — the core multi-DbContext scenario.

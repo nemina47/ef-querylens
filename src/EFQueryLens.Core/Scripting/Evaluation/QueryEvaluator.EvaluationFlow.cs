@@ -155,7 +155,13 @@ public sealed partial class QueryEvaluator
                         .Where(d => d.Severity == DiagnosticSeverity.Error)
                         .ToList();
 
-                    var hardErrors = errors.Where(e => e.Id is not ("CS0103" or "CS1061" or "CS1929" or "CS7036" or "CS0019" or "CS8122" or "CS0246" or "CS0234" or "CS0400" or "CS1503")).ToList();
+                    var hardErrors = errors.Where(e => e.Id is not ("CS0103" or "CS1061" or "CS1929" or "CS7036" or "CS0019" or "CS8122" or "CS0246" or "CS0234" or "CS0400" or "CS1503"
+                        // CS0122: type/member inaccessible due to protection level.
+                        // Caused by internal types in indirect metadata dependencies
+                        // (e.g. Microsoft.Data.SqlClient native interop types like SNIHandle).
+                        // These are metadata artifacts — the ALC loads assemblies at IL level
+                        // where CLR access rules govern, not C# compiler visibility.
+                        or "CS0122")).ToList();
                     if (hardErrors.Count > 0)
                     {
                         return Failure(
@@ -319,6 +325,12 @@ public sealed partial class QueryEvaluator
 
                     if (!changed)
                     {
+                        // If the only remaining errors are metadata accessibility errors
+                        // (CS0122 from internal types in indirect assembly dependencies),
+                        // retrying will never help — proceed to emit.
+                        if (errors.All(e => e.Id == "CS0122"))
+                            break;
+
                         return Failure(
                             $"Compilation error: {FormatSoftDiagnostics(errors)}",
                             sw.Elapsed, dbContextType, alcCtx.LoadedAssemblies);
