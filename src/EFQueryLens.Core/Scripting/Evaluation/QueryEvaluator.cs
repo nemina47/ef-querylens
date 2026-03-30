@@ -132,7 +132,23 @@ public sealed partial class QueryEvaluator
             return (cached.Namespaces, cached.Types);
         }
 
-        var result = BuildKnownNamespaceAndTypeIndex(compilationAssemblies);
+        // Filter the same assemblies excluded from metadata refs so knownTypes/knownNamespaces
+        // stay consistent with what the Roslyn compiler actually sees. Without this, Roslyn
+        // assemblies (loaded by the LSP process) appear in knownNamespaces but not in metadata
+        // refs, causing the compile-retry loop to synthesize 'using Microsoft.CodeAnalysis.*'
+        // directives that then fail with CS0234.
+        var filteredAssemblies = compilationAssemblies
+            .Where(a =>
+            {
+                var loc = a.Location;
+                if (string.IsNullOrEmpty(loc)) return false;
+                var normalizedLoc = loc.Replace('\\', '/');
+                if (normalizedLoc.Contains("/runtimes/", StringComparison.OrdinalIgnoreCase)) return false;
+                var name = a.GetName().Name;
+                return !ShouldSkipMetadataReferenceAssembly(name);
+            })
+            .ToList();
+        var result = BuildKnownNamespaceAndTypeIndex(filteredAssemblies);
         _namespaceTypeIndexCache[assemblySetHash] = new NamespaceTypeIndexEntry(
             result.Namespaces,
             result.Types,

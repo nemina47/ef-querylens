@@ -174,6 +174,11 @@ public sealed partial class QueryEvaluator
 
                     if (maxRetries-- <= 0)
                     {
+                        // Always-on failure log: emit raw diagnostic set so production issues
+                        // can be diagnosed from LSP output without needing QUERYLENS_DEBUG.
+                        Console.Error.WriteLine(
+                            $"[QL-Eval] compile-failed retries-exhausted errorCount={errors.Count} " +
+                            $"diagnostics={string.Join("; ", errors.Take(10).Select(e => $"{e.Id}:{e.GetMessage()}"))}");
                         return Failure(
                             $"Compilation error: {FormatSoftDiagnostics(errors)}",
                             sw.Elapsed, dbContextType, alcCtx.LoadedAssemblies);
