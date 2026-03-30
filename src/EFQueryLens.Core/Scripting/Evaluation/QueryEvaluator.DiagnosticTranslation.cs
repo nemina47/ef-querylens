@@ -38,9 +38,12 @@ public sealed partial class QueryEvaluator
     private static readonly Regex _cs0103Pattern =
         new(@"The name '(.+?)' does not exist", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    // "The type or namespace name 'X' could not be found (are you missing a using directive or an assembly reference?)"
-    private static readonly Regex _cs0246Pattern =
-        new(@"The type or namespace name '(.+?)' could not be found", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    // Matches both:
+    //  - "The type or namespace name 'X' could not be found ..." (CS0246/CS0400)
+    //  - "The type or namespace name 'X' does not exist in the namespace 'Y' ..." (CS0234)
+    private static readonly Regex _typeOrNamespaceNamePattern =
+        new(@"The type or namespace name '(.+?)' (could not be found|does not exist)",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static string TranslateCS0103(Diagnostic d)
     {
@@ -51,8 +54,10 @@ public sealed partial class QueryEvaluator
 
     private static string TranslateCS0246(Diagnostic d)
     {
-        var m = _cs0246Pattern.Match(d.GetMessage());
-        var name = m.Success ? m.Groups[1].Value : "?";
+        var name = TryExtractTypeNameFromCS0246(d);
+        if (string.IsNullOrWhiteSpace(name))
+            return $"{d.Id}: {d.GetMessage()}";
+
         return $"Type '{name}' not found — add the required using directive or NuGet package reference.";
     }
 
@@ -63,7 +68,7 @@ public sealed partial class QueryEvaluator
     /// </summary>
     internal static string? TryExtractTypeNameFromCS0246(Diagnostic d)
     {
-        var m = _cs0246Pattern.Match(d.GetMessage());
+        var m = _typeOrNamespaceNamePattern.Match(d.GetMessage());
         return m.Success ? m.Groups[1].Value : null;
     }
 
