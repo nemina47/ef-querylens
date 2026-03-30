@@ -20,7 +20,11 @@ public sealed partial class QueryEvaluator
             && !string.IsNullOrWhiteSpace(knownTypeName))
         {
             var knownTypeStub = BuildStubFromTypeName(knownTypeName, name, dbContextType, request.UsingAliases);
-            return string.IsNullOrWhiteSpace(knownTypeStub) ? string.Empty : knownTypeStub;
+            if (!string.IsNullOrWhiteSpace(knownTypeStub))
+                return knownTypeStub;
+            // The LSP hint resolved to an uninstantiable type (e.g. a static class like Math).
+            // Fall through to expression-based heuristics — usage context such as Skip/Take
+            // numeric arguments can infer the correct type without a valid LSP type name.
         }
 
         // Gridify placeholders must win over generic member-access synthesis.

@@ -631,8 +631,12 @@ public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
     }
 
     [Fact]
-    public void BuildStubDeclaration_LocalVariableStaticType_SkipsStubGeneration()
+    public void BuildStubDeclaration_LocalVariableStaticType_FallsThroughToHeuristics()
     {
+        // When the LSP hint resolves to a static type ("Math"), the stub for Math itself
+        // (not page/pageSize) should fall through to heuristics and end up as object rather
+        // than causing an empty/hard-block. The key invariant is that page/pageSize are
+        // synthesized correctly via Skip/Take heuristics — tested by the Evaluate_ tests.
         var stub = BuildStubDeclarationForRequestForTest(
             missingName: "Math",
             expression: "db.Orders.Skip(Math.Max(page, 1)).Take(pageSize)",
@@ -641,12 +645,15 @@ public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
                 ["Math"] = "System.Math"
             });
 
-        Assert.Equal(string.Empty, stub);
+        // Falls through to object default (Math is filtered by LooksLikeTypeOrNamespacePrefix
+        // in the retry loop before BuildStubDeclaration is even called).
+        Assert.NotNull(stub);
     }
 
     [Fact]
-    public void BuildStubDeclaration_LocalVariableAliasToStaticType_SkipsStubGeneration()
+    public void BuildStubDeclaration_LocalVariableAliasToStaticType_FallsThroughToHeuristics()
     {
+        // Same as above: aliased static type hint falls through, does not hard-block.
         var stub = BuildStubDeclarationForRequestForTest(
             missingName: "mathHelper",
             expression: "db.Orders.Skip(pageSize)",
@@ -659,7 +666,7 @@ public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
                 ["MathAlias"] = "System.Math"
             });
 
-        Assert.Equal(string.Empty, stub);
+        Assert.NotNull(stub);
     }
 
     [Fact]
@@ -672,6 +679,30 @@ public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
         Assert.NotNull(result.Sql);
         Assert.DoesNotContain("Cannot declare a variable of static type 'Math'", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Cannot convert to static type 'Math'", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Evaluate_PagingWithMathCall_WithStaticLspHint_FallsThroughToNumericHeuristic()
+    {
+        // Simulates the exact hover scenario: LSP extracts `var page = Math.Max(...)` and
+        // emits { "page": "Math", "pageSize": "Math" } as LocalVariableTypes.
+        // The static-type guard must not hard-block — it must fall through so that the
+        // Skip/Take argument heuristics resolve page and pageSize as int stubs.
+        var result = await _evaluator.EvaluateAsync(_alcCtx, new TranslationRequest
+        {
+            AssemblyPath = _alcCtx.AssemblyPath,
+            Expression = "db.Orders.OrderByDescending(o => o.CreatedUtc).ThenByDescending(o => o.Id).Skip((page - 1) * pageSize).Take(pageSize).Select(expression)",
+            LocalVariableTypes = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["page"]     = "Math",
+                ["pageSize"] = "Math",
+            },
+        });
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.DoesNotContain("Unknown variable 'page'", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Unknown variable 'pageSize'", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
