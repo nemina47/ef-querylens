@@ -49,6 +49,12 @@ public static partial class LspSyntaxHelper
             return LooksLikeDbContextRoot(rootName);
         }
 
+        if (parsed is QueryExpressionSyntax queryExpression)
+        {
+            var rootName = TryExtractRootContextVariable(queryExpression);
+            return LooksLikeDbContextRoot(rootName);
+        }
+
         return false;
     }
 
@@ -208,6 +214,71 @@ public static partial class LspSyntaxHelper
                 statementStart.Line,    // wider start: "var x = await" included
                 statementStart.Character,
                 expressionEnd.Line,     // tight end: stops at expression, not if-body
+                expressionEnd.Character));
+        }
+
+        foreach (var queryExpression in root.DescendantNodes().OfType<QueryExpressionSyntax>())
+        {
+            // Statement already has a terminal/member-invocation candidate; keep the
+            // existing outermost invocation selection to avoid duplicate badges.
+            var containingStmt = queryExpression.Ancestors().OfType<StatementSyntax>().FirstOrDefault();
+            var stmtKey = containingStmt?.Span.Start ?? queryExpression.Span.Start;
+            if (bestPerStatement.ContainsKey(stmtKey))
+            {
+                continue;
+            }
+
+            if (IsInsideLambda(queryExpression))
+            {
+                continue;
+            }
+
+            var targetExpression = StripTransparentQueryableCasts(queryExpression);
+            var contextVariableName = TryExtractRootContextVariable(targetExpression)
+                ?? targetExpression.DescendantNodes()
+                    .OfType<IdentifierNameSyntax>()
+                    .Select(i => i.Identifier.Text)
+                    .FirstOrDefault();
+
+            if (string.IsNullOrWhiteSpace(contextVariableName)
+                || !LooksLikeDbContextRoot(contextVariableName))
+            {
+                continue;
+            }
+
+            if (!TryExtractFirstMemberAfterRoot(targetExpression, out var dbSetMemberName)
+                || string.IsNullOrWhiteSpace(dbSetMemberName))
+            {
+                dbSetMemberName = contextVariableName;
+            }
+
+            var expressionText = targetExpression.ToString();
+            var firstToken = queryExpression.GetFirstToken();
+            var anchorLineSpan = tree.GetLineSpan(firstToken.Span);
+            var anchorStart = anchorLineSpan.StartLinePosition;
+            var anchorEnd = anchorLineSpan.EndLinePosition;
+
+            var expressionLineSpan = tree.GetLineSpan(queryExpression.Span);
+            var expressionEnd = expressionLineSpan.EndLinePosition;
+
+            var statementLineSpan = containingStmt != null
+                ? tree.GetLineSpan(containingStmt.Span)
+                : expressionLineSpan;
+            var statementStart = statementLineSpan.StartLinePosition;
+
+            results.Add(new LinqChainInfo(
+                expressionText,
+                contextVariableName,
+                dbSetMemberName,
+                anchorStart.Line,
+                anchorStart.Character,
+                anchorEnd.Line,
+                anchorEnd.Character,
+                statementStart.Line,
+                0,
+                statementStart.Line,
+                statementStart.Character,
+                expressionEnd.Line,
                 expressionEnd.Character));
         }
 

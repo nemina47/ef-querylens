@@ -816,6 +816,80 @@ public class LspSyntaxHelperTests
         Assert.Equal(0, chain.StatementStartCharacter);
     }
 
+    [Fact]
+    public void TryExtractLinqExpression_QueryExpression_FromWhereSelect_ExtractsExpressionAndContext()
+    {
+        var source = """
+            var result = await (from u in dbContext.Users
+                                where u.IsActive
+                                select u)
+                .ToListAsync(ct);
+            """;
+
+        var (line, character) = FindPosition(source, "where u.IsActive");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName);
+
+        Assert.NotNull(expression);
+        Assert.Equal("dbContext", contextVariableName);
+        Assert.Contains("from u in dbContext.Users", expression, StringComparison.Ordinal);
+        Assert.Contains("where u.IsActive", expression, StringComparison.Ordinal);
+        Assert.Contains("ToListAsync", expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryExtractLinqExpression_QueryExpression_WithJoin_ExtractsContext()
+    {
+        var source = """
+            var result = await (from u in dbContext.Users
+                                join r in dbContext.Roles on u.RoleId equals r.Id
+                                select new { u.Id, r.Name })
+                .ToListAsync(ct);
+            """;
+
+        var (line, character) = FindPosition(source, "join r in dbContext.Roles");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName);
+
+        Assert.NotNull(expression);
+        Assert.Equal("dbContext", contextVariableName);
+        Assert.Contains("join r in dbContext.Roles", expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FindAllLinqChains_QueryExpressionWithoutTerminal_ReturnsCandidate()
+    {
+        var source = """
+            var query = from u in dbContext.Users
+                        where u.IsActive
+                        select u;
+            """;
+
+        var chains = LspSyntaxHelper.FindAllLinqChains(source);
+
+        var chain = Assert.Single(chains);
+        Assert.Equal("dbContext", chain.ContextVariableName);
+        Assert.Equal("Users", chain.DbSetMemberName);
+        Assert.Contains("from u in dbContext.Users", chain.Expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void IsLikelyQueryPreviewCandidate_QueryExpression_ReturnsTrue()
+    {
+        var candidate = LspSyntaxHelper.IsLikelyQueryPreviewCandidate(
+            "from u in dbContext.Users where u.IsActive select u");
+
+        Assert.True(candidate);
+    }
+
     private static (int line, int character) FindPosition(string source, string marker)
     {
         var index = source.IndexOf(marker, StringComparison.Ordinal);

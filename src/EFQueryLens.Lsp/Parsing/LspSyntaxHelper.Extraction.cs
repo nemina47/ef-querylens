@@ -29,12 +29,16 @@ public static partial class LspSyntaxHelper
         // Find the node at the cursor position
         var node = root.FindToken(position).Parent;
 
-        // Walk up until we find an InvocationExpression (like .Where() or .ToList())
-        // or a MemberAccessExpression (like db.Orders)
+        // Walk up until we find an InvocationExpression (like .Where() or .ToList()),
+        // a MemberAccessExpression (like db.Orders), or a query-expression root
+        // (from ... in ... select ...).
         var invocation = node?.FirstAncestorOrSelf<InvocationExpressionSyntax>();
         var memberAccess = node?.FirstAncestorOrSelf<MemberAccessExpressionSyntax>();
+        var queryExpression = node?.FirstAncestorOrSelf<QueryExpressionSyntax>();
 
-        ExpressionSyntax? targetExpression = invocation ?? (ExpressionSyntax?)memberAccess;
+        ExpressionSyntax? targetExpression = invocation
+            ?? (ExpressionSyntax?)memberAccess
+            ?? queryExpression;
 
         if (targetExpression == null)
             return null;

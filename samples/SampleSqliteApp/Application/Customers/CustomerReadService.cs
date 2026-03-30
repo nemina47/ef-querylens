@@ -101,6 +101,23 @@ public sealed class CustomerReadService
                 o.CreatedUtc));
     }
 
+    public async Task<IReadOnlyList<OrderSummaryDto>> GetCustomerOrdersQueryExpressionAsync(
+        Guid customerId,
+        OrderStatus? status = null,
+        CancellationToken ct = default)
+    {
+        return await (from o in _db.Orders
+            where !o.IsDeleted && o.Customer.CustomerId == customerId
+            where !status.HasValue || o.Status == status.Value
+            orderby o.CreatedUtc descending
+            select new OrderSummaryDto(
+                o.Id,
+                o.Customer.Name,
+                o.Total,
+                o.Status,
+                o.CreatedUtc)).ToListAsync(ct);
+    }
+
     // ── Aggregation ──────────────────────────────────────────────────────────
 
     /// <summary>

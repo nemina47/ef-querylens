@@ -1,4 +1,5 @@
 using SampleSqlServerApp.Application.Abstractions;
+using Microsoft.EntityFrameworkCore;
 
 namespace SampleSqlServerApp.Application.Orders;
 
@@ -25,5 +26,23 @@ public sealed class OrderQueries
                 o.Customer.Name,
                 o.Total,
                 o.CreatedUtc));
+    }
+
+    public async Task<IReadOnlyList<OrderSummaryDto>> BuildRecentOrdersQueryExpressionAsync(
+        DateTime utcNow,
+        int lookbackDays = 30,
+        CancellationToken ct = default)
+    {
+        var safeLookbackDays = Math.Clamp(lookbackDays, 1, 365);
+        var fromUtc = utcNow.Date.AddDays(-safeLookbackDays);
+
+        return await (from o in _db.Orders
+            where o.IsNotDeleted && o.CreatedUtc >= fromUtc
+            orderby o.CreatedUtc descending
+            select new OrderSummaryDto(
+                o.Id,
+                o.Customer.Name,
+                o.Total,
+                o.CreatedUtc)).ToListAsync(ct);
     }
 }

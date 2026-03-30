@@ -29,6 +29,10 @@ public static partial class LspSyntaxHelper
                     current = parenthesized.Expression;
                     continue;
 
+                case QueryExpressionSyntax queryExpression:
+                    current = queryExpression.FromClause.Expression;
+                    continue;
+
                 case IdentifierNameSyntax identifier:
                     return identifier.Identifier.Text;
 
@@ -75,6 +79,10 @@ public static partial class LspSyntaxHelper
 
                 case ParenthesizedExpressionSyntax parenthesized:
                     current = parenthesized.Expression;
+                    continue;
+
+                case QueryExpressionSyntax queryExpression:
+                    current = queryExpression.FromClause.Expression;
                     continue;
 
                 case CastExpressionSyntax cast:
