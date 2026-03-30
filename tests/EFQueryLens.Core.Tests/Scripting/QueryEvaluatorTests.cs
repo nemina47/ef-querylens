@@ -176,15 +176,13 @@ public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
     }
 
     [Fact]
-    public async Task Evaluate_SqlServerSample_PagingWithMathVariables_DoesNotSurfaceCs0122()
+    public async Task Evaluate_SqlServerSample_PagingWithExpressionVariable_SucceedsOrMethodNotFound()
     {
-        // Regression: Microsoft.Data.SqlClient exposes internal native interop types
-        // (e.g. SNIHandle) that Roslyn flags as CS0122 when included as metadata refs.
-        // These must not block translation — the evaluator must treat them as non-blocking
-        // metadata artifacts and proceed to emit and run the generated assembly.
+        // Regression: SqlClient runtime RID assets may leak internal metadata types
+        // (for example SNIHandle) into Roslyn reference graphs. This must never surface
+        // as CS0122/emit failure for the paging + Select(expression) hover scenario.
         //
-        // This test specifically targets the SQL Server ALC where SqlClient assemblies are
-        // present, and uses the paging expression pattern that triggered the original report.
+        // Keep this aligned with the user-reported expression shape to catch regressions.
         using var sqlAlcCtx = new ProjectAssemblyContext(GetSampleSqlServerAppDll());
         var evaluator = new QueryEvaluator();
 
@@ -193,22 +191,26 @@ public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
             new TranslationRequest
             {
                 AssemblyPath = sqlAlcCtx.AssemblyPath,
-                Expression = "db.Orders.OrderByDescending(o => o.CreatedUtc).ThenByDescending(o => o.Id).Skip((page - 1) * pageSize).Take(pageSize).Select(o => o.Id)",
+                Expression = "db.Orders.OrderByDescending(o => o.CreatedUtc).ThenByDescending(o => o.Id).Skip((page - 1) * pageSize).Take(pageSize).Select(expression)",
                 DbContextTypeName = "SampleSqlServerApp.Infrastructure.Persistence.SqlServerAppDbContext",
                 LocalVariableTypes = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    ["page"]     = "Math",
-                    ["pageSize"] = "Math",
+                    ["page"] = "int",
+                    ["pageSize"] = "int",
+                    ["expression"] = "System.Linq.Expressions.Expression<System.Func<SampleSqlServerApp.Domain.Entities.Order, int>>",
                 },
             });
 
-        // CS0122 must never surface as the failure reason regardless of package alignment.
-        Assert.DoesNotContain("CS0122", result.ErrorMessage ?? string.Empty, StringComparison.Ordinal);
-        Assert.DoesNotContain("SNIHandle", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-
-        if (!result.Success)
+        if (result.Success)
         {
-            // Acceptable only if it's the known EF Core runtime version drift, not a compile error.
+            Assert.NotEmpty(result.Commands);
+        }
+        else
+        {
+            Assert.DoesNotContain("CS0122", result.ErrorMessage ?? string.Empty, StringComparison.Ordinal);
+            Assert.DoesNotContain("SNIHandle", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Emit error", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Compilation error", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Method not found", result.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
         }
     }

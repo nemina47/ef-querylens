@@ -49,6 +49,14 @@ public sealed partial class QueryEvaluator
                 if (string.IsNullOrEmpty(loc) || !seen.Add(loc))
                     continue;
 
+                // Skip RID-specific runtime assets (runtimes/<rid>/...).
+                // For Roslyn compilation, these can introduce duplicate/alternate
+                // metadata graphs that surface internal provider implementation types
+                // (for example SqlClient SNI internals) as CS0122 errors.
+                var normalizedLoc = loc.Replace('\\', '/');
+                if (normalizedLoc.Contains("/runtimes/", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
                 var name = asm.GetName().Name;
 
                 // Keep System.Linq.Queryable aligned with the major version of
