@@ -24,7 +24,7 @@ namespace SampleSqlServerApp.Infrastructure.Persistence
         private static DbContextOptions<TContext> CreateSqlServerOptions<TContext>()
             where TContext : DbContext
         {
-            var connectionString = "Name=MainConnection";
+            var connectionString = "Server=ef_querylens_offline;Database=ef_querylens_offline;User Id=ef_querylens_offline;Password=ef_querylens_offline;TrustServerCertificate=True";
             return new DbContextOptionsBuilder<TContext>()
                 .UseSqlServer(connectionString,
                     sqlServer => sqlServer.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
