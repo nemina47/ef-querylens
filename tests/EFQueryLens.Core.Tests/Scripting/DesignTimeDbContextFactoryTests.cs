@@ -194,4 +194,114 @@ public class DesignTimeDbContextFactoryTests
         public FakeContextC CreateOfflineContext() =>
             throw new InvalidOperationException("CreateOfflineContext intentionally thrown by ThrowingFactoryC");
     }
+
+    // ─── IDesignTimeDbContextFactory<T> tests ───────────────────────────
+
+    [Fact]
+    public void TryCreateEfDesignTimeFactory_WhenImplemented_ReturnsContext()
+    {
+        var result = DesignTimeDbContextFactory.TryCreateEfDesignTimeFactory(
+            typeof(FakeContextA),
+            [typeof(EfDesignTimeFactoryA).Assembly],
+            null,
+            out var failureReason);
+
+        Assert.NotNull(result);
+        Assert.IsType<FakeContextA>(result);
+        Assert.True(string.IsNullOrWhiteSpace(failureReason));
+    }
+
+    [Fact]
+    public void TryCreateEfDesignTimeFactory_WhenNotImplemented_ReturnsNull()
+    {
+        var result = DesignTimeDbContextFactory.TryCreateEfDesignTimeFactory(
+            typeof(FakeContextUnregistered),
+            [typeof(DesignTimeDbContextFactoryTests).Assembly],
+            null,
+            out _);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void TryCreateEfDesignTimeFactory_WithRequiredAssemblyPath_WhenMatches_ReturnsContext()
+    {
+        var thisAssembly = typeof(DesignTimeDbContextFactoryTests).Assembly;
+        var result = DesignTimeDbContextFactory.TryCreateEfDesignTimeFactory(
+            typeof(FakeContextA),
+            [thisAssembly],
+            thisAssembly.Location,
+            out var failureReason);
+
+        Assert.NotNull(result);
+        Assert.IsType<FakeContextA>(result);
+        Assert.True(string.IsNullOrWhiteSpace(failureReason));
+    }
+
+    [Fact]
+    public void TryCreateEfDesignTimeFactory_WithRequiredAssemblyPath_WhenMismatches_ReturnsNullWithReason()
+    {
+        var result = DesignTimeDbContextFactory.TryCreateEfDesignTimeFactory(
+            typeof(FakeContextA),
+            [typeof(EfDesignTimeFactoryA).Assembly],
+            @"C:\does\not\exist\other.dll",
+            out var failureReason);
+
+        Assert.Null(result);
+        Assert.False(string.IsNullOrWhiteSpace(failureReason));
+    }
+
+    [Fact]
+    public void TryCreateEfDesignTimeFactory_WhenCreateDbContextThrows_ReturnsNullWithReason()
+    {
+        var result = DesignTimeDbContextFactory.TryCreateEfDesignTimeFactory(
+            typeof(FakeContextC),
+            [typeof(ThrowingEfDesignTimeFactoryC).Assembly],
+            null,
+            out var failureReason);
+
+        Assert.Null(result);
+        Assert.False(string.IsNullOrWhiteSpace(failureReason));
+        Assert.Contains("ThrowingEfDesignTimeFactoryC", failureReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TryCreateEfDesignTimeFactory_TwoArgOverload_WhenImplemented_ReturnsContext()
+    {
+        var result = DesignTimeDbContextFactory.TryCreateEfDesignTimeFactory(
+            typeof(FakeContextA),
+            [typeof(EfDesignTimeFactoryA).Assembly]);
+
+        Assert.NotNull(result);
+        Assert.IsType<FakeContextA>(result);
+    }
+
+    [Fact]
+    public void TryCreateEfDesignTimeFactory_WithEmptyAssemblyList_ReturnsNull()
+    {
+        var result = DesignTimeDbContextFactory.TryCreateEfDesignTimeFactory(
+            typeof(FakeContextA),
+            Enumerable.Empty<Assembly>(),
+            null,
+            out var failureReason);
+
+        Assert.Null(result);
+        Assert.True(string.IsNullOrWhiteSpace(failureReason));
+    }
+
+    // EF Core IDesignTimeDbContextFactory implementations for testing.
+    // Uses the fake interface defined in FakeEfDesignTimeDbContextFactoryInterface.cs.
+    private sealed class EfDesignTimeFactoryA
+        : Microsoft.EntityFrameworkCore.Design.IDesignTimeDbContextFactory<FakeContextA>
+    {
+        public FakeContextA CreateDbContext(string[] args) => new();
+    }
+
+    private sealed class ThrowingEfDesignTimeFactoryC
+        : Microsoft.EntityFrameworkCore.Design.IDesignTimeDbContextFactory<FakeContextC>
+    {
+        public FakeContextC CreateDbContext(string[] args) =>
+            throw new InvalidOperationException(
+                "CreateDbContext intentionally thrown by ThrowingEfDesignTimeFactoryC");
+    }
 }

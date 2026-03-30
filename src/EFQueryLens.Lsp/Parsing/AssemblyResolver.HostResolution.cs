@@ -43,6 +43,7 @@ public static partial class AssemblyResolver
         if (string.IsNullOrEmpty(dir))
             return null;
 
+        // First pass: look for QueryLens-native factory (takes priority).
         foreach (var file in EnumerateProjectSourceFiles(dir))
         {
             try
@@ -60,13 +61,31 @@ public static partial class AssemblyResolver
             catch { /* ignore unreadable files */ }
         }
 
+        // Second pass: fall back to EF Core's IDesignTimeDbContextFactory.
+        foreach (var file in EnumerateProjectSourceFiles(dir))
+        {
+            try
+            {
+                var text = File.ReadAllText(file);
+                var match = Regex.Match(
+                    text,
+                    @"IDesignTimeDbContextFactory\s*<\s*([\w.]+)\s*>",
+                    RegexOptions.None,
+                    TimeSpan.FromSeconds(1));
+
+                if (match.Success)
+                    return match.Groups[1].Value.Trim();
+            }
+            catch { /* ignore unreadable files */ }
+        }
+
         return null;
     }
 
     /// <summary>
     /// Returns true if the project directory contains a source file with an
-    /// IQueryLensDbContextFactory implementation — i.e. the user explicitly set
-    /// this project up as the QueryLens host.
+    /// IQueryLensDbContextFactory or IDesignTimeDbContextFactory implementation —
+    /// i.e. the user explicitly set this project up as the QueryLens host.
     /// </summary>
     private static bool HasQueryLensFactory(string projectDir)
     {
@@ -75,7 +94,8 @@ public static partial class AssemblyResolver
             try
             {
                 var text = File.ReadAllText(file);
-                if (text.Contains("IQueryLensDbContextFactory<", StringComparison.Ordinal))
+                if (text.Contains("IQueryLensDbContextFactory<", StringComparison.Ordinal) ||
+                    text.Contains("IDesignTimeDbContextFactory<", StringComparison.Ordinal))
                     return true;
             }
             catch
