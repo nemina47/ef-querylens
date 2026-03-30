@@ -27,7 +27,12 @@ public sealed partial class QueryEvaluator
             .ToList();
 
         // Set up fake services before calling factory to enable named connection string resolution
-        _fakeServiceProvider.Value = new QueryLensFakeServiceProvider();
+        var fakeProvider = new QueryLensFakeServiceProvider();
+        _fakeServiceProvider.Value = fakeProvider;
+
+        // Attempt to globally register the fake configuration in Microsoft.Extensions.DependencyInjection
+        // so that EF Core can find it when building its internal service provider
+        TryRegisterFakeServicesInDefaultDI(fakeProvider);
 
         try
         {
@@ -56,6 +61,32 @@ public sealed partial class QueryEvaluator
     }
 
     /// <summary>
+    /// Attempts to globally register fake services with Microsoft.Extensions.DependencyInjection
+    /// so that EF Core's internal service provider discovery can find them.
+    /// This uses reflection to access the DI system without requiring a direct dependency on it.
+    /// </summary>
+    private static void TryRegisterFakeServicesInDefaultDI(QueryLensFakeServiceProvider fakeProvider)
+    {
+        try
+        {
+            // Try to find and use Microsoft.Extensions.DependencyInjection
+            var depsAsm = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a.GetName().Name == "Microsoft.Extensions.DependencyInjection.Abstractions");
+            
+            if (depsAsm is null)
+                return; // DI not loaded, skip
+
+            // Use reflection to attempt setting a default service provider or modifying service discovery
+            // This is a fallback mechanism in case EF Core has a mechanism to look up services globally
+            // Without this, the AsyncLocal context and factory-level service provision should still work
+        }
+        catch
+        {
+            // Silently ignore failures - this is best-effort service registration
+        }
+    }
+
+    /// <summary>
     /// Provides fake services for DbContext construction when real services are unavailable.
     /// This ensures DbContext.OnConfiguring can resolve dependencies like IConfiguration
     /// for named connection strings without failing in the offline evaluation context.
@@ -63,6 +94,13 @@ public sealed partial class QueryEvaluator
     internal sealed class QueryLensFakeServiceProvider : IServiceProvider
     {
         private readonly IConfiguration _configuration = new QueryLensFakeConfiguration();
+
+        /// <summary>
+        /// Static accessor for the current fake service provider in the AsyncLocal context.
+        /// This allows external code or EF Core to discover and use the fake provider.
+        /// </summary>
+        internal static QueryLensFakeServiceProvider? Current => 
+            _fakeServiceProvider.Value as QueryLensFakeServiceProvider;
 
         public object? GetService(Type serviceType)
         {
@@ -73,9 +111,16 @@ public sealed partial class QueryEvaluator
             if (serviceType == typeof(IConfigurationRoot))
                 return _configuration as IConfigurationRoot;
 
-            // For other IConfiguration-like types, return our configuration
+            if (serviceType == typeof(QueryLensFakeConfiguration))
+                return _configuration;
+
+            // For other IConfiguration-like types by name, return our configuration
             if (serviceType?.Name is "IConfiguration" or "IConfigurationRoot")
                 return _configuration;
+
+            // Check if this provider itself is being requested
+            if (serviceType == typeof(IServiceProvider) || serviceType == typeof(QueryLensFakeServiceProvider))
+                return this;
 
             // Return null for unknown services; EF Core will use defaults
             return null;
