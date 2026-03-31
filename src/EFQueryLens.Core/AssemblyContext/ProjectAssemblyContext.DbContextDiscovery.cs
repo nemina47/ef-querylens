@@ -71,7 +71,10 @@ public sealed partial class ProjectAssemblyContext
     ///   ("SampleApp.AppDbContext"). Pass null to auto-discover when exactly
     ///   one DbContext exists in the assembly.
     /// </param>
-    /// <param name="expressionHint"></param>
+    /// <param name="expressionHint">
+    ///   Optional query-expression hint used to disambiguate DbContext candidates
+    ///   based on the first accessed DbSet-like property.
+    /// </param>
     /// <exception cref="InvalidOperationException">
     ///   No DbContext found; multiple found with null typeName; or no match
     ///   for the provided typeName.
@@ -84,11 +87,12 @@ public sealed partial class ProjectAssemblyContext
         EnsureNotDisposed();
 
         var all = FindDbContextTypes();
+        var assemblyFileName = Path.GetFileName(AssemblyPath);
 
         if (all.Count == 0)
             throw new DbContextDiscoveryException(
                 DbContextDiscoveryFailureKind.NoDbContextFound,
-                $"No DbContext subclass found in '{Path.GetFileName(AssemblyPath)}'.");
+                $"No DbContext subclass found in '{assemblyFileName}'.");
 
         var dbSetName = expressionHint is null ? null : ExtractFirstPropertyAccess(expressionHint);
         var expressionMatches = string.IsNullOrWhiteSpace(dbSetName)
@@ -107,7 +111,7 @@ public sealed partial class ProjectAssemblyContext
 
             throw new DbContextDiscoveryException(
                 DbContextDiscoveryFailureKind.ConflictingDbContextHints,
-                $"Conflicting DbContext hints for '{Path.GetFileName(AssemblyPath)}': declared='{declaredMatches[0].FullName}', factory='{factoryMatches[0].FullName}'. " +
+                $"Conflicting DbContext hints for '{assemblyFileName}': declared='{declaredMatches[0].FullName}', factory='{factoryMatches[0].FullName}'. " +
                 "Rebuild the selected host project or specify a concrete DbContext explicitly.");
         }
 
@@ -148,7 +152,7 @@ public sealed partial class ProjectAssemblyContext
 
                 throw new DbContextDiscoveryException(
                     DbContextDiscoveryFailureKind.MultipleDbContextsFound,
-                    $"Multiple DbContext types match '{typeName}' in '{Path.GetFileName(AssemblyPath)}': " +
+                    $"Multiple DbContext types match '{typeName}' in '{assemblyFileName}': " +
                     $"{string.Join(", ", explicitMatches.Select(t => t.FullName))}. Specify a concrete fully qualified DbContext type name.");
             }
         }
@@ -169,7 +173,7 @@ public sealed partial class ProjectAssemblyContext
 
             throw new DbContextDiscoveryException(
                 DbContextDiscoveryFailureKind.MultipleDbContextsFound,
-                $"Multiple DbContext types match declared hint '{resolutionSnapshot?.DeclaredTypeName}' in '{Path.GetFileName(AssemblyPath)}': " +
+                $"Multiple DbContext types match declared hint '{resolutionSnapshot?.DeclaredTypeName}' in '{assemblyFileName}': " +
                 $"{string.Join(", ", declaredMatches.Select(t => t.FullName))}. Specify a concrete fully qualified DbContext type name.");
         }
 
@@ -183,7 +187,7 @@ public sealed partial class ProjectAssemblyContext
 
             throw new DbContextDiscoveryException(
                 DbContextDiscoveryFailureKind.MultipleDbContextsFound,
-                $"Multiple QueryLens factory DbContext candidates found in '{Path.GetFileName(AssemblyPath)}': " +
+                $"Multiple QueryLens factory DbContext candidates found in '{assemblyFileName}': " +
                 $"{string.Join(", ", factoryCandidateMatches.Select(t => t.FullName))}. " +
                 "Hover a query that references a DbSet unique to the intended DbContext or specify a concrete DbContext type.");
         }
@@ -201,13 +205,7 @@ public sealed partial class ProjectAssemblyContext
             }
 
             // Fallback: filter out obvious test/utility DbContexts.
-            var filtered = all.Where(t =>
-            {
-                var name = t.Name;
-                return !name.Contains("Test", StringComparison.OrdinalIgnoreCase) &&
-                       !name.Contains("Empty", StringComparison.OrdinalIgnoreCase) &&
-                       !name.Contains("Mock", StringComparison.OrdinalIgnoreCase);
-            }).ToList();
+            var filtered = FilterOutUtilityDbContexts(all);
 
             if (filtered.Count == 1)
                 return filtered[0];
@@ -215,14 +213,27 @@ public sealed partial class ProjectAssemblyContext
             var candidates = filtered.Count > 1 ? filtered : all;
             throw new DbContextDiscoveryException(
                 DbContextDiscoveryFailureKind.MultipleDbContextsFound,
-                $"Multiple DbContext types found in '{Path.GetFileName(AssemblyPath)}': " +
+                $"Multiple DbContext types found in '{assemblyFileName}': " +
                 $"{string.Join(", ", candidates.Select(t => t.FullName))}. " +
                 "Specify --context to disambiguate.");
         }
 
         throw new InvalidOperationException(
-            $"DbContext type '{typeName}' not found in '{Path.GetFileName(AssemblyPath)}'. " +
+            $"DbContext type '{typeName}' not found in '{assemblyFileName}'. " +
             $"Available: {string.Join(", ", all.Select(t => t.FullName))}");
+    }
+
+    private static List<Type> FilterOutUtilityDbContexts(IReadOnlyList<Type> candidates)
+    {
+        return candidates
+            .Where(static t =>
+            {
+                var name = t.Name;
+                return !name.Contains("Test", StringComparison.OrdinalIgnoreCase)
+                    && !name.Contains("Empty", StringComparison.OrdinalIgnoreCase)
+                    && !name.Contains("Mock", StringComparison.OrdinalIgnoreCase);
+            })
+            .ToList();
     }
 
     /// <summary>

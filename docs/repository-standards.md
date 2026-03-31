@@ -46,6 +46,22 @@ Initial enforcement is warning-first. Analyzer and code-style diagnostics should
 - Stage B: block on new violations in selected pilot areas.
 - Stage C: selective hard-fail for high-value reliability and maintainability rules.
 
+### Pilot Checklist (Src)
+
+Use this checklist during the warning-first pilot in the following hotspot files:
+
+- `src/EFQueryLens.Core/AssemblyContext/ProjectAssemblyContext.DbContextDiscovery.cs`
+- `src/EFQueryLens.Core/Scripting/Evaluation/QueryEvaluator.EvaluationFlow.cs`
+- `src/EFQueryLens.Lsp/Parsing/AssemblyResolver.HostResolution.cs`
+
+Checklist for pilot PRs:
+
+- Keep behavior stable: refactor for readability/maintainability first, feature changes separately.
+- Reduce branching depth and long-method complexity by extracting named helpers.
+- Keep exception messages actionable and consistent.
+- Add intent comments where algorithmic flow is non-obvious.
+- Address analyzer warnings in touched lines when practical; do not suppress without rationale.
+
 ## Documentation Standards
 
 - Update `README.md` for changes that affect installation, supported scenarios, or user-facing features.
