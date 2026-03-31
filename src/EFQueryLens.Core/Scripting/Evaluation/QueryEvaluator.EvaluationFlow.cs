@@ -199,179 +199,19 @@ public sealed partial class QueryEvaluator
                         LogDebug($"  diagnostic id={err.Id} msg={err.GetMessage()}");
                     }
 
-                    var missingNames = errors
-                        .Where(d => d.Id == "CS0103")
-                        .Select(TryExtractMissingIdentifierFromDiagnostic)
-                        .Where(n => n is not null)
-                        .Distinct()
-                        .Where(n => !string.IsNullOrWhiteSpace(n)
-                                    && !LooksLikeTypeOrNamespacePrefix(n, workingRequest.Expression, workingRequest.UsingAliases))
-                        .ToList();
-
-                    var changed = false;
-
-                    LogDebug($"compile-retry cs0103-missing-names={string.Join(",", missingNames)}");
-
-                    var rootId = TryExtractRootIdentifier(workingRequest.Expression);
-                    foreach (var n in missingNames)
-                    {
-                        if (stubs.Any(s => s.Contains($" {n} ") || s.Contains($" {n};")))
-                            continue;
-
-                        var stub = BuildStubDeclaration(n!, rootId, workingRequest, dbContextType);
-                        if (string.IsNullOrWhiteSpace(stub))
-                            continue;
-
-                        LogDebug($"compile-retry stub-added name={n} stub={stub.Trim()}");
-                        stubs.Add(stub);
-                        changed = true;
-                    }
-
-                    // CS0246 / CS0234: type or namespace not found. The type likely lives in a
-                    // namespace that the source file doesn't need to import explicitly (e.g. a DTO
-                    // in the same namespace as the calling class). Locate it in the loaded
-                    // assemblies and synthesise a using directive automatically.
-                    // Use the diagnostic message text (same regex as FormatSoftDiagnostics) to
-                    // extract the simple type name — more reliable than AST span lookup.
-                    //
-                    // Two cases:
-                    //  • Top-level type   → parent is a namespace → emit "using Ns;"
-                    //  • Nested type      → parent is a class     → emit "using static EnclosingType;"
-                    var cs0246Types = errors
-                        .Where(d => d.Id is "CS0246" or "CS0234")
-                        .Select(d => TryExtractTypeNameFromCS0246(d))
-                        .Where(n => !string.IsNullOrWhiteSpace(n))
-                        .Distinct(StringComparer.Ordinal)
-                        .ToList();
-
-                    LogDebug($"compile-retry cs0246-types={string.Join(",", cs0246Types)}");
-
-                    foreach (var typeName in cs0246Types)
-                    {
-                        var parents = FindNamespacesForSimpleName(typeName!, knownTypes).ToList();
-                        LogDebug($"compile-retry type-lookup name={typeName} found-parents={string.Join(",", parents)}");
-
-                        if (parents.Count == 0)
-                        {
-                            LogDebug($"compile-retry type-not-in-known-types name={typeName}");
-                        }
-
-                        foreach (var parent in parents)
-                        {
-                            if (IsResolvableNamespace(parent, knownNamespaces))
-                            {
-                                if (synthesizedUsingNamespaces.Add(parent))
-                                {
-                                    LogDebug($"compile-retry using-namespace added={parent}");
-                                    changed = true;
-                                }
-                            }
-                            else if (IsResolvableType(parent, knownTypes))
-                            {
-                                // Nested type — bring it into scope with "using static EnclosingType"
-                                if (synthesizedUsingStaticTypes.Add(parent))
-                                {
-                                    LogDebug($"compile-retry using-static added={parent}");
-                                    changed = true;
-                                }
-                            }
-                        }
-                    }
-
-                    // CS1503: argument type mismatch — a stub was generated as 'object' because
-                    // no type could be inferred (e.g. a pattern string passed to EF.Functions.Like).
-                    // Extract the expected type from the diagnostic message and re-generate the
-                    // stub with the correct type so overload resolution succeeds on retry.
-                    foreach (var cs1503 in errors.Where(e => e.Id == "CS1503"))
-                    {
-                        var argName = TryExtractSimpleIdentifierAtDiagnosticLocation(cs1503);
-                        if (argName is null)
-                            continue;
-
-                        var expectedType = TryExtractExpectedTypeFromCS1503(cs1503);
-                        if (string.IsNullOrWhiteSpace(expectedType))
-                            continue;
-
-                        // Only retypestub if we actually have a stub for this identifier.
-                        var oldStub = stubs.FirstOrDefault(s =>
-                            s.Contains($" {argName} ", StringComparison.Ordinal)
-                            || s.Contains($" {argName};", StringComparison.Ordinal));
-                        if (oldStub is null)
-                            continue;
-
-                        var typedStub = BuildStubFromTypeName(expectedType, argName, dbContextType, workingRequest.UsingAliases);
-                        if (string.IsNullOrWhiteSpace(typedStub))
-                        {
-                            stubs.Remove(oldStub);
-                            changed = true;
-                            continue;
-                        }
-
-                        if (string.Equals(oldStub, typedStub, StringComparison.Ordinal))
-                            continue;
-
-                        stubs.Remove(oldStub);
-                        stubs.Add(typedStub);
-                        changed = true;
-                    }
-
-                    if (TryNormalizeRootContextHopFromErrors(
-                            errors,
-                            compilation,
-                            workingRequest.Expression,
-                            dbContextType,
-                            out var normalizedExpression)
-                        && !string.Equals(normalizedExpression, workingExpression, StringComparison.Ordinal))
-                    {
-                        workingExpression = normalizedExpression;
-                        changed = true;
-                    }
-
-                    if (TryNormalizePatternTernaryComparisonFromErrors(
-                            errors,
-                            workingExpression,
-                            out var ternaryNormalizedExpression)
-                        && !string.Equals(ternaryNormalizedExpression, workingExpression, StringComparison.Ordinal))
-                    {
-                        workingExpression = ternaryNormalizedExpression;
-                        changed = true;
-                    }
-
-                    if (TryNormalizeUnsupportedPatternMatchingFromErrors(
-                            errors,
-                            workingExpression,
-                            out var patternNormalizedExpression)
-                        && !string.Equals(patternNormalizedExpression, workingExpression, StringComparison.Ordinal))
-                    {
-                        workingExpression = patternNormalizedExpression;
-                        changed = true;
-                    }
-
-                    if (TryNormalizeInaccessibleProjectionTypeFromErrors(
-                            errors,
-                            workingExpression,
-                            out var inaccessibleProjectionNormalizedExpression)
-                        && !string.Equals(inaccessibleProjectionNormalizedExpression, workingExpression, StringComparison.Ordinal))
-                    {
-                        workingExpression = inaccessibleProjectionNormalizedExpression;
-                        changed = true;
-                    }
-
-                    foreach (var import in InferMissingExtensionStaticImports(errors, compilation, compilationAssemblies))
-                    {
-                        if (synthesizedUsingStaticTypes.Add(import))
-                        {
-                            changed = true;
-                        }
-                    }
-
-                        if (TryApplyGridifyFallbackFromErrors(
-                            errors,
-                            stubs,
-                            ref includeGridifyFallbackExtensions))
-                    {
-                        changed = true;
-                    }
+                    var changed = ApplyCompileRetryAdjustments(
+                        errors,
+                        compilation,
+                        compilationAssemblies,
+                        knownNamespaces,
+                        knownTypes,
+                        dbContextType,
+                        workingRequest,
+                        stubs,
+                        synthesizedUsingStaticTypes,
+                        synthesizedUsingNamespaces,
+                        ref workingExpression,
+                        ref includeGridifyFallbackExtensions);
 
                     if (!changed)
                     {
@@ -568,6 +408,197 @@ public sealed partial class QueryEvaluator
         }
 
         return (capturedCommands, warnings, null, runnerExecutionWatch.Elapsed);
+    }
+
+    private bool ApplyCompileRetryAdjustments(
+        IReadOnlyList<Diagnostic> errors,
+        CSharpCompilation compilation,
+        IReadOnlyList<Assembly> compilationAssemblies,
+        IReadOnlySet<string> knownNamespaces,
+        IReadOnlySet<string> knownTypes,
+        Type dbContextType,
+        TranslationRequest workingRequest,
+        List<string> stubs,
+        ISet<string> synthesizedUsingStaticTypes,
+        ISet<string> synthesizedUsingNamespaces,
+        ref string workingExpression,
+        ref bool includeGridifyFallbackExtensions)
+    {
+        var changed = false;
+
+        var missingNames = errors
+            .Where(d => d.Id == "CS0103")
+            .Select(TryExtractMissingIdentifierFromDiagnostic)
+            .Where(n => n is not null)
+            .Distinct()
+            .Where(n => !string.IsNullOrWhiteSpace(n)
+                        && !LooksLikeTypeOrNamespacePrefix(n, workingRequest.Expression, workingRequest.UsingAliases))
+            .ToList();
+
+        LogDebug($"compile-retry cs0103-missing-names={string.Join(",", missingNames)}");
+
+        var rootId = TryExtractRootIdentifier(workingRequest.Expression);
+        foreach (var n in missingNames)
+        {
+            if (stubs.Any(s => s.Contains($" {n} ") || s.Contains($" {n};")))
+                continue;
+
+            var stub = BuildStubDeclaration(n!, rootId, workingRequest, dbContextType);
+            if (string.IsNullOrWhiteSpace(stub))
+                continue;
+
+            LogDebug($"compile-retry stub-added name={n} stub={stub.Trim()}");
+            stubs.Add(stub);
+            changed = true;
+        }
+
+        // CS0246 / CS0234: type or namespace not found. The type likely lives in a
+        // namespace that the source file doesn't need to import explicitly (e.g. a DTO
+        // in the same namespace as the calling class). Locate it in the loaded
+        // assemblies and synthesise a using directive automatically.
+        // Use the diagnostic message text (same regex as FormatSoftDiagnostics) to
+        // extract the simple type name — more reliable than AST span lookup.
+        //
+        // Two cases:
+        //  • Top-level type   → parent is a namespace → emit "using Ns;"
+        //  • Nested type      → parent is a class     → emit "using static EnclosingType;"
+        var cs0246Types = errors
+            .Where(d => d.Id is "CS0246" or "CS0234")
+            .Select(d => TryExtractTypeNameFromCS0246(d))
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        LogDebug($"compile-retry cs0246-types={string.Join(",", cs0246Types)}");
+
+        foreach (var typeName in cs0246Types)
+        {
+            var parents = FindNamespacesForSimpleName(typeName!, knownTypes).ToList();
+            LogDebug($"compile-retry type-lookup name={typeName} found-parents={string.Join(",", parents)}");
+
+            if (parents.Count == 0)
+            {
+                LogDebug($"compile-retry type-not-in-known-types name={typeName}");
+            }
+
+            foreach (var parent in parents)
+            {
+                if (IsResolvableNamespace(parent, knownNamespaces))
+                {
+                    if (synthesizedUsingNamespaces.Add(parent))
+                    {
+                        LogDebug($"compile-retry using-namespace added={parent}");
+                        changed = true;
+                    }
+                }
+                else if (IsResolvableType(parent, knownTypes))
+                {
+                    // Nested type — bring it into scope with "using static EnclosingType"
+                    if (synthesizedUsingStaticTypes.Add(parent))
+                    {
+                        LogDebug($"compile-retry using-static added={parent}");
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        // CS1503: argument type mismatch — a stub was generated as 'object' because
+        // no type could be inferred (e.g. a pattern string passed to EF.Functions.Like).
+        // Extract the expected type from the diagnostic message and re-generate the
+        // stub with the correct type so overload resolution succeeds on retry.
+        foreach (var cs1503 in errors.Where(e => e.Id == "CS1503"))
+        {
+            var argName = TryExtractSimpleIdentifierAtDiagnosticLocation(cs1503);
+            if (argName is null)
+                continue;
+
+            var expectedType = TryExtractExpectedTypeFromCS1503(cs1503);
+            if (string.IsNullOrWhiteSpace(expectedType))
+                continue;
+
+            // Only retypestub if we actually have a stub for this identifier.
+            var oldStub = stubs.FirstOrDefault(s =>
+                s.Contains($" {argName} ", StringComparison.Ordinal)
+                || s.Contains($" {argName};", StringComparison.Ordinal));
+            if (oldStub is null)
+                continue;
+
+            var typedStub = BuildStubFromTypeName(expectedType, argName, dbContextType, workingRequest.UsingAliases);
+            if (string.IsNullOrWhiteSpace(typedStub))
+            {
+                stubs.Remove(oldStub);
+                changed = true;
+                continue;
+            }
+
+            if (string.Equals(oldStub, typedStub, StringComparison.Ordinal))
+                continue;
+
+            stubs.Remove(oldStub);
+            stubs.Add(typedStub);
+            changed = true;
+        }
+
+        if (TryNormalizeRootContextHopFromErrors(
+                errors,
+                compilation,
+                workingRequest.Expression,
+                dbContextType,
+                out var normalizedExpression)
+            && !string.Equals(normalizedExpression, workingExpression, StringComparison.Ordinal))
+        {
+            workingExpression = normalizedExpression;
+            changed = true;
+        }
+
+        if (TryNormalizePatternTernaryComparisonFromErrors(
+                errors,
+                workingExpression,
+                out var ternaryNormalizedExpression)
+            && !string.Equals(ternaryNormalizedExpression, workingExpression, StringComparison.Ordinal))
+        {
+            workingExpression = ternaryNormalizedExpression;
+            changed = true;
+        }
+
+        if (TryNormalizeUnsupportedPatternMatchingFromErrors(
+                errors,
+                workingExpression,
+                out var patternNormalizedExpression)
+            && !string.Equals(patternNormalizedExpression, workingExpression, StringComparison.Ordinal))
+        {
+            workingExpression = patternNormalizedExpression;
+            changed = true;
+        }
+
+        if (TryNormalizeInaccessibleProjectionTypeFromErrors(
+                errors,
+                workingExpression,
+                out var inaccessibleProjectionNormalizedExpression)
+            && !string.Equals(inaccessibleProjectionNormalizedExpression, workingExpression, StringComparison.Ordinal))
+        {
+            workingExpression = inaccessibleProjectionNormalizedExpression;
+            changed = true;
+        }
+
+        foreach (var import in InferMissingExtensionStaticImports(errors, compilation, compilationAssemblies))
+        {
+            if (synthesizedUsingStaticTypes.Add(import))
+            {
+                changed = true;
+            }
+        }
+
+        if (TryApplyGridifyFallbackFromErrors(
+                errors,
+                stubs,
+                ref includeGridifyFallbackExtensions))
+        {
+            changed = true;
+        }
+
+        return changed;
     }
 
     private static Type ResolveDbContextTypeWithSiblingRetry(
