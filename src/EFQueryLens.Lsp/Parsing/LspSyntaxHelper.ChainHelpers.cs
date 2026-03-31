@@ -7,16 +7,6 @@ namespace EFQueryLens.Lsp.Parsing;
 
 public static partial class LspSyntaxHelper
 {
-    private static readonly HashSet<string> KnownDbContextRootNames =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            "db",
-            "_db",
-            "context",
-            "dbContext",
-            "_dbContext",
-        };
-
     private static string? TryExtractRootContextVariable(ExpressionSyntax expression)
     {
         var current = expression;
