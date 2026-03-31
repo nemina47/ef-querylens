@@ -104,59 +104,121 @@ public sealed partial class ProjectAssemblyContext
         var factoryMatches = MatchDbContextCandidates(all, resolutionSnapshot?.FactoryTypeName);
         var factoryCandidateMatches = MatchDbContextCandidates(all, resolutionSnapshot?.FactoryCandidateTypeNames);
 
-        if (factoryMatches.Count == 1 && declaredMatches.Count == 1 && factoryMatches[0] != declaredMatches[0])
-        {
-            if (expressionMatches.Count == 1 && (expressionMatches[0] == factoryMatches[0] || expressionMatches[0] == declaredMatches[0]))
-                return expressionMatches[0];
+        var resolved = TryResolveDeclaredFactoryConflict(
+            expressionMatches,
+            declaredMatches,
+            factoryMatches,
+            assemblyFileName);
+        if (resolved is not null)
+            return resolved;
 
+        resolved = TryResolveFactoryHint(expressionMatches, factoryMatches, dbSetName);
+        if (resolved is not null)
+            return resolved;
+
+        resolved = TryResolveExplicitHint(typeName, expressionMatches, explicitMatches, assemblyFileName, dbSetName);
+        if (resolved is not null)
+            return resolved;
+
+        resolved = TryResolveDeclaredHint(expressionMatches, declaredMatches, factoryCandidateMatches, resolutionSnapshot, assemblyFileName);
+        if (resolved is not null)
+            return resolved;
+
+        resolved = TryResolveFactoryCandidateHint(expressionMatches, factoryCandidateMatches, assemblyFileName);
+        if (resolved is not null)
+            return resolved;
+
+        if (typeName is null)
+            return ResolveAutoDiscovery(all, expressionMatches, assemblyFileName);
+
+        throw new InvalidOperationException(
+            $"DbContext type '{typeName}' not found in '{assemblyFileName}'. " +
+            $"Available: {string.Join(", ", all.Select(t => t.FullName))}");
+    }
+
+    private static Type? TryResolveDeclaredFactoryConflict(
+        IReadOnlyList<Type> expressionMatches,
+        IReadOnlyList<Type> declaredMatches,
+        IReadOnlyList<Type> factoryMatches,
+        string assemblyFileName)
+    {
+        if (factoryMatches.Count != 1 || declaredMatches.Count != 1 || factoryMatches[0] == declaredMatches[0])
+            return null;
+
+        if (expressionMatches.Count == 1 && (expressionMatches[0] == factoryMatches[0] || expressionMatches[0] == declaredMatches[0]))
+            return expressionMatches[0];
+
+        throw new DbContextDiscoveryException(
+            DbContextDiscoveryFailureKind.ConflictingDbContextHints,
+            $"Conflicting DbContext hints for '{assemblyFileName}': declared='{declaredMatches[0].FullName}', factory='{factoryMatches[0].FullName}'. " +
+            "Rebuild the selected host project or specify a concrete DbContext explicitly.");
+    }
+
+    private static Type? TryResolveFactoryHint(
+        IReadOnlyList<Type> expressionMatches,
+        IReadOnlyList<Type> factoryMatches,
+        string? dbSetName)
+    {
+        if (factoryMatches.Count != 1)
+            return null;
+
+        var factoryMatch = factoryMatches[0];
+        if (expressionMatches.Count == 1 && expressionMatches[0] != factoryMatch)
+        {
             throw new DbContextDiscoveryException(
                 DbContextDiscoveryFailureKind.ConflictingDbContextHints,
-                $"Conflicting DbContext hints for '{assemblyFileName}': declared='{declaredMatches[0].FullName}', factory='{factoryMatches[0].FullName}'. " +
-                "Rebuild the selected host project or specify a concrete DbContext explicitly.");
+                $"Resolved DbContext '{factoryMatch.FullName}' from QueryLens factory, but expression root '{dbSetName}' belongs to '{expressionMatches[0].FullName}'. " +
+                "Check the selected host assembly and QueryLens factory configuration.");
         }
 
-        if (factoryMatches.Count == 1)
+        return factoryMatch;
+    }
+
+    private static Type? TryResolveExplicitHint(
+        string? typeName,
+        IReadOnlyList<Type> expressionMatches,
+        IReadOnlyList<Type> explicitMatches,
+        string assemblyFileName,
+        string? dbSetName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+            return null;
+
+        if (explicitMatches.Count == 1)
         {
-            var factoryMatch = factoryMatches[0];
-            if (expressionMatches.Count == 1 && expressionMatches[0] != factoryMatch)
+            var explicitMatch = explicitMatches[0];
+            if (expressionMatches.Count == 1 && expressionMatches[0] != explicitMatch)
             {
                 throw new DbContextDiscoveryException(
                     DbContextDiscoveryFailureKind.ConflictingDbContextHints,
-                    $"Resolved DbContext '{factoryMatch.FullName}' from QueryLens factory, but expression root '{dbSetName}' belongs to '{expressionMatches[0].FullName}'. " +
-                    "Check the selected host assembly and QueryLens factory configuration.");
+                    $"Requested DbContext '{explicitMatch.FullName}' does not expose '{dbSetName}', which matches '{expressionMatches[0].FullName}'. " +
+                    "Specify the concrete DbContext that owns the queried DbSet.");
             }
 
-            return factoryMatch;
+            return explicitMatch;
         }
 
-        if (!string.IsNullOrWhiteSpace(typeName))
+        if (explicitMatches.Count > 1)
         {
-            if (explicitMatches.Count == 1)
-            {
-                var explicitMatch = explicitMatches[0];
-                if (expressionMatches.Count == 1 && expressionMatches[0] != explicitMatch)
-                {
-                    throw new DbContextDiscoveryException(
-                        DbContextDiscoveryFailureKind.ConflictingDbContextHints,
-                        $"Requested DbContext '{explicitMatch.FullName}' does not expose '{dbSetName}', which matches '{expressionMatches[0].FullName}'. " +
-                        "Specify the concrete DbContext that owns the queried DbSet.");
-                }
+            if (expressionMatches.Count == 1 && explicitMatches.Contains(expressionMatches[0]))
+                return expressionMatches[0];
 
-                return explicitMatch;
-            }
-
-            if (explicitMatches.Count > 1)
-            {
-                if (expressionMatches.Count == 1 && explicitMatches.Contains(expressionMatches[0]))
-                    return expressionMatches[0];
-
-                throw new DbContextDiscoveryException(
-                    DbContextDiscoveryFailureKind.MultipleDbContextsFound,
-                    $"Multiple DbContext types match '{typeName}' in '{assemblyFileName}': " +
-                    $"{string.Join(", ", explicitMatches.Select(t => t.FullName))}. Specify a concrete fully qualified DbContext type name.");
-            }
+            throw new DbContextDiscoveryException(
+                DbContextDiscoveryFailureKind.MultipleDbContextsFound,
+                $"Multiple DbContext types match '{typeName}' in '{assemblyFileName}': " +
+                $"{string.Join(", ", explicitMatches.Select(t => t.FullName))}. Specify a concrete fully qualified DbContext type name.");
         }
 
+        return null;
+    }
+
+    private static Type? TryResolveDeclaredHint(
+        IReadOnlyList<Type> expressionMatches,
+        IReadOnlyList<Type> declaredMatches,
+        IReadOnlyList<Type> factoryCandidateMatches,
+        DbContextResolutionSnapshot? resolutionSnapshot,
+        string assemblyFileName)
+    {
         if (declaredMatches.Count == 1)
         {
             var declaredMatch = declaredMatches[0];
@@ -177,6 +239,14 @@ public sealed partial class ProjectAssemblyContext
                 $"{string.Join(", ", declaredMatches.Select(t => t.FullName))}. Specify a concrete fully qualified DbContext type name.");
         }
 
+        return null;
+    }
+
+    private static Type? TryResolveFactoryCandidateHint(
+        IReadOnlyList<Type> expressionMatches,
+        IReadOnlyList<Type> factoryCandidateMatches,
+        string assemblyFileName)
+    {
         if (factoryCandidateMatches.Count == 1)
             return factoryCandidateMatches[0];
 
@@ -192,35 +262,34 @@ public sealed partial class ProjectAssemblyContext
                 "Hover a query that references a DbSet unique to the intended DbContext or specify a concrete DbContext type.");
         }
 
-        if (typeName is null)
-        {
-            if (all.Count == 1)
-                return all[0];
+        return null;
+    }
 
-            // Auto-disambiguate using the LINQ expression root property when exactly one
-            // DbContext owns the referenced DbSet/IQueryable property.
-            if (expressionMatches.Count == 1)
-            {
-                return expressionMatches[0];
-            }
+    private static Type ResolveAutoDiscovery(
+        IReadOnlyList<Type> all,
+        IReadOnlyList<Type> expressionMatches,
+        string assemblyFileName)
+    {
+        if (all.Count == 1)
+            return all[0];
 
-            // Fallback: filter out obvious test/utility DbContexts.
-            var filtered = FilterOutUtilityDbContexts(all);
+        // Auto-disambiguate using the LINQ expression root property when exactly one
+        // DbContext owns the referenced DbSet/IQueryable property.
+        if (expressionMatches.Count == 1)
+            return expressionMatches[0];
 
-            if (filtered.Count == 1)
-                return filtered[0];
+        // Fallback: filter out obvious test/utility DbContexts.
+        var filtered = FilterOutUtilityDbContexts(all);
 
-            var candidates = filtered.Count > 1 ? filtered : all;
-            throw new DbContextDiscoveryException(
-                DbContextDiscoveryFailureKind.MultipleDbContextsFound,
-                $"Multiple DbContext types found in '{assemblyFileName}': " +
-                $"{string.Join(", ", candidates.Select(t => t.FullName))}. " +
-                "Specify --context to disambiguate.");
-        }
+        if (filtered.Count == 1)
+            return filtered[0];
 
-        throw new InvalidOperationException(
-            $"DbContext type '{typeName}' not found in '{assemblyFileName}'. " +
-            $"Available: {string.Join(", ", all.Select(t => t.FullName))}");
+        var candidates = filtered.Count > 1 ? filtered : all;
+        throw new DbContextDiscoveryException(
+            DbContextDiscoveryFailureKind.MultipleDbContextsFound,
+            $"Multiple DbContext types found in '{assemblyFileName}': " +
+            $"{string.Join(", ", candidates.Select(t => t.FullName))}. " +
+            "Specify --context to disambiguate.");
     }
 
     private static List<Type> FilterOutUtilityDbContexts(IReadOnlyList<Type> candidates)
