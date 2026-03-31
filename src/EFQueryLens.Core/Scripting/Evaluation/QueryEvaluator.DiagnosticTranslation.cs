@@ -34,20 +34,18 @@ public sealed partial class QueryEvaluator
         return string.Join("; ", messages);
     }
 
-    // "The name 'identifier' does not exist in the current context"
-    private static readonly Regex _cs0103Pattern =
-        new(@"The name '(.+?)' does not exist", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"The name '(.+?)' does not exist", RegexOptions.CultureInvariant)]
+    private static partial Regex Cs0103Pattern();
 
     // Matches both:
     //  - "The type or namespace name 'X' could not be found ..." (CS0246/CS0400)
     //  - "The type or namespace name 'X' does not exist in the namespace 'Y' ..." (CS0234)
-    private static readonly Regex _typeOrNamespaceNamePattern =
-        new(@"The type or namespace name '(.+?)' (could not be found|does not exist)",
-            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"The type or namespace name '(.+?)' (could not be found|does not exist)", RegexOptions.CultureInvariant)]
+    private static partial Regex TypeOrNamespaceNamePattern();
 
     private static string TranslateCS0103(Diagnostic d)
     {
-        var m = _cs0103Pattern.Match(d.GetMessage());
+        var m = Cs0103Pattern().Match(d.GetMessage());
         var name = m.Success ? m.Groups[1].Value : "?";
         return $"Unknown variable '{name}'. Add a local before the query, e.g.: var {name} = default;";
     }
@@ -68,17 +66,17 @@ public sealed partial class QueryEvaluator
     /// </summary>
     internal static string? TryExtractTypeNameFromCS0246(Diagnostic d)
     {
-        var m = _typeOrNamespaceNamePattern.Match(d.GetMessage());
+        var m = TypeOrNamespaceNamePattern().Match(d.GetMessage());
         return m.Success ? m.Groups[1].Value : null;
     }
 
     // "Argument N: cannot convert from 'actualType' to 'expectedType'"
-    private static readonly Regex _cs1503Pattern =
-        new(@"cannot convert from '.+?' to '(.+?)'", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"cannot convert from '.+?' to '(.+?)'", RegexOptions.CultureInvariant)]
+    private static partial Regex Cs1503Pattern();
 
     private static string TranslateCS1503(Diagnostic d)
     {
-        var m = _cs1503Pattern.Match(d.GetMessage());
+        var m = Cs1503Pattern().Match(d.GetMessage());
         var expected = m.Success ? m.Groups[1].Value : "?";
         return $"Argument type mismatch — a captured local variable was stubbed as 'object' but '{expected}' is required. " +
                "Ensure the variable is declared with a concrete type before the query.";
@@ -91,7 +89,7 @@ public sealed partial class QueryEvaluator
     /// </summary>
     internal static string? TryExtractExpectedTypeFromCS1503(Diagnostic d)
     {
-        var m = _cs1503Pattern.Match(d.GetMessage());
+        var m = Cs1503Pattern().Match(d.GetMessage());
         return m.Success ? m.Groups[1].Value : null;
     }
 }

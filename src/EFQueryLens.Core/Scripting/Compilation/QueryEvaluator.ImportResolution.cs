@@ -9,6 +9,12 @@ namespace EFQueryLens.Core.Scripting.Evaluation;
 
 public sealed partial class QueryEvaluator
 {
+    [GeneratedRegex(@"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(")]
+    private static partial Regex TopLevelInvocationRegex();
+
+    [GeneratedRegex(@"\.\s*Find(Async)?\s*\(", RegexOptions.IgnoreCase)]
+    private static partial Regex FindInvocationRegex();
+
     private sealed record MissingExtensionRequest(
         string MethodName,
         HashSet<string> ReceiverTypeNames,
@@ -501,8 +507,7 @@ public sealed partial class QueryEvaluator
 
     private static bool IsUnsupportedTopLevelMethodInvocation(string expression, string ctxVar)
     {
-        var m = Regex.Match(expression,
-            @"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(");
+        var m = TopLevelInvocationRegex().Match(expression);
         if (!m.Success)
             return false;
 
@@ -516,6 +521,6 @@ public sealed partial class QueryEvaluator
     }
 
     private static bool ContainsFindInvocation(string expression) =>
-        Regex.IsMatch(expression, @"\.\s*Find(Async)?\s*\(", RegexOptions.IgnoreCase);
+        FindInvocationRegex().IsMatch(expression);
 
 }

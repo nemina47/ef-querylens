@@ -5,6 +5,9 @@ namespace EFQueryLens.Core.Scripting.Evaluation;
 
 public sealed partial class QueryEvaluator
 {
+    [GeneratedRegex(@"([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*(Find(?:Async)?)\s*\(", RegexOptions.IgnoreCase)]
+    private static partial Regex FindCallPattern();
+
     /// <summary>
     /// Detects <c>DbSet.Find()</c> / <c>FindAsync()</c> calls in the expression and rewrites the
     /// key arguments to <c>default(PKType)</c> values sourced from the EF Core model.
@@ -13,9 +16,7 @@ public sealed partial class QueryEvaluator
     private static string? TryRewriteFindExpression(string expression, object dbInstance)
     {
         // Match: <DbSetPropertyName>.Find( or <DbSetPropertyName>.FindAsync(
-        var match = Regex.Match(expression,
-            @"([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*(Find(?:Async)?)\s*\(",
-            RegexOptions.IgnoreCase);
+        var match = FindCallPattern().Match(expression);
         if (!match.Success)
             return null;
 

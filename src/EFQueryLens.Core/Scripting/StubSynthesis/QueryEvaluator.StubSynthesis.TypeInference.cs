@@ -7,6 +7,9 @@ namespace EFQueryLens.Core.Scripting.Evaluation;
 
 public sealed partial class QueryEvaluator
 {
+    [GeneratedRegex(@"^\s*[A-Za-z_][A-Za-z0-9_]*\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)")]
+    private static partial Regex QuerySourcePropertyRegex();
+
     /// <summary>
     /// Filters out internal/provider types that should not be used as stub types.
     /// Examples: Microsoft.Data.SqlClient.SNIHandle, Npgsql internals, etc.
@@ -60,7 +63,7 @@ public sealed partial class QueryEvaluator
     private static Type? InferSelectEntityType(string v, string expr, Type ctx)
     {
         if (!Regex.IsMatch(expr, $@"\.\s*Select\s*\(\s*{Regex.Escape(v)}\s*\)")) return null;
-        var m = Regex.Match(expr, @"^\s*[A-Za-z_][A-Za-z0-9_]*\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)");
+        var m = QuerySourcePropertyRegex().Match(expr);
         if (!m.Success) return null;
         var prop = ctx.GetProperty(m.Groups[1].Value);
         var selType = prop?.PropertyType.IsGenericType == true
@@ -71,7 +74,7 @@ public sealed partial class QueryEvaluator
     private static Type? InferWhereEntityType(string v, string expr, Type ctx)
     {
         if (!Regex.IsMatch(expr, $@"\.\s*Where\s*\(\s*{Regex.Escape(v)}\s*\)")) return null;
-        var m = Regex.Match(expr, @"^\s*[A-Za-z_][A-Za-z0-9_]*\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)");
+        var m = QuerySourcePropertyRegex().Match(expr);
         if (!m.Success) return null;
         var prop = ctx.GetProperty(m.Groups[1].Value);
         var whereType = prop?.PropertyType.IsGenericType == true

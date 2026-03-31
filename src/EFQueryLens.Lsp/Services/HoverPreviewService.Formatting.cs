@@ -3,12 +3,37 @@ using SQL.Formatter;
 using SQL.Formatter.Core;
 using SQL.Formatter.Language;
 using System.Text;
+using System.Text.RegularExpressions;
 using EFQueryLens.Core.Contracts;
 
 namespace EFQueryLens.Lsp.Services;
 
 internal sealed partial class HoverPreviewService
 {
+    [GeneratedRegex(@"\s+FROM\s+", RegexOptions.IgnoreCase)]
+    private static partial Regex FromClauseRegex();
+
+    [GeneratedRegex(@"\s+WHERE\s+", RegexOptions.IgnoreCase)]
+    private static partial Regex WhereClauseRegex();
+
+    [GeneratedRegex(@"\s+GROUP BY\s+", RegexOptions.IgnoreCase)]
+    private static partial Regex GroupByClauseRegex();
+
+    [GeneratedRegex(@"\s+ORDER BY\s+", RegexOptions.IgnoreCase)]
+    private static partial Regex OrderByClauseRegex();
+
+    [GeneratedRegex(@"\s+LEFT OUTER JOIN\s+", RegexOptions.IgnoreCase)]
+    private static partial Regex LeftOuterJoinRegex();
+
+    [GeneratedRegex(@"\s+RIGHT OUTER JOIN\s+", RegexOptions.IgnoreCase)]
+    private static partial Regex RightOuterJoinRegex();
+
+    [GeneratedRegex(@"\s+INNER JOIN\s+", RegexOptions.IgnoreCase)]
+    private static partial Regex InnerJoinRegex();
+
+    [GeneratedRegex(@"\s+JOIN\s+", RegexOptions.IgnoreCase)]
+    private static partial Regex JoinRegex();
+
     private static IReadOnlyList<QueryLensSqlStatement> BuildFormattedStatements(
         IReadOnlyList<QuerySqlCommand> commands,
         string? providerName)
@@ -233,14 +258,14 @@ internal sealed partial class HoverPreviewService
         {
             // Fallback: simple clause-break regex so hover still shows something readable.
             var s = sql.Trim();
-            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+FROM\s+", "\nFROM ", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+WHERE\s+", "\nWHERE ", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+GROUP BY\s+", "\nGROUP BY ", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+ORDER BY\s+", "\nORDER BY ", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+LEFT OUTER JOIN\s+", "\n  LEFT OUTER JOIN ", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+RIGHT OUTER JOIN\s+", "\n  RIGHT OUTER JOIN ", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+INNER JOIN\s+", "\n  INNER JOIN ", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+JOIN\s+", "\n  JOIN ", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            s = FromClauseRegex().Replace(s, "\nFROM ");
+            s = WhereClauseRegex().Replace(s, "\nWHERE ");
+            s = GroupByClauseRegex().Replace(s, "\nGROUP BY ");
+            s = OrderByClauseRegex().Replace(s, "\nORDER BY ");
+            s = LeftOuterJoinRegex().Replace(s, "\n  LEFT OUTER JOIN ");
+            s = RightOuterJoinRegex().Replace(s, "\n  RIGHT OUTER JOIN ");
+            s = InnerJoinRegex().Replace(s, "\n  INNER JOIN ");
+            s = JoinRegex().Replace(s, "\n  JOIN ");
             return s.Trim();
         }
     }

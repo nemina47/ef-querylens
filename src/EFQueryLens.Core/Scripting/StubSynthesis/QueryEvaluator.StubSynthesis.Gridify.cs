@@ -7,13 +7,15 @@ namespace EFQueryLens.Core.Scripting.Evaluation;
 
 public sealed partial class QueryEvaluator
 {
-    private static readonly Regex SGridifyQueryStubRegex = new(
+    [GeneratedRegex(
         "^global::Gridify\\.IGridifyQuery\\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*new\\s+global::Gridify\\.GridifyQuery\\(\\);\\s*$",
-        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        RegexOptions.CultureInvariant)]
+    private static partial Regex GridifyQueryStubRegex();
 
-    private static readonly Regex SGridifyMapperStubRegex = new(
+    [GeneratedRegex(
         "^global::Gridify\\.IGridifyMapper<.+>\\?\\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*null;\\s*$",
-        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        RegexOptions.CultureInvariant)]
+    private static partial Regex GridifyMapperStubRegex();
 
     private static bool TryBuildGridifyStubDeclaration(
         string variableName,
@@ -201,7 +203,7 @@ public sealed partial class QueryEvaluator
         {
             var current = stubs[i];
 
-            var queryMatch = SGridifyQueryStubRegex.Match(current);
+            var queryMatch = GridifyQueryStubRegex().Match(current);
             if (queryMatch.Success)
             {
                 var variable = queryMatch.Groups["name"].Value;
@@ -210,7 +212,7 @@ public sealed partial class QueryEvaluator
                 continue;
             }
 
-            var mapperMatch = SGridifyMapperStubRegex.Match(current);
+            var mapperMatch = GridifyMapperStubRegex().Match(current);
             if (mapperMatch.Success)
             {
                 var variable = mapperMatch.Groups["name"].Value;
