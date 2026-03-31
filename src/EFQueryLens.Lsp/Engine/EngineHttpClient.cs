@@ -66,6 +66,13 @@ internal sealed class EngineHttpClient : IQueryLensEngine, IEngineControl
         return await PostJsonAsync<ModelInspectionRequest, ModelSnapshot>("/inspect-model", request, ct);
     }
 
+    public async Task<FactoryGenerationResult> GenerateFactoryAsync(
+        FactoryGenerationRequest request,
+        CancellationToken ct = default)
+    {
+        return await PostJsonAsync<FactoryGenerationRequest, FactoryGenerationResult>("/generate-factory", request, ct);
+    }
+
     // --- IEngineControl ---
 
     public async Task PingAsync(CancellationToken ct = default)

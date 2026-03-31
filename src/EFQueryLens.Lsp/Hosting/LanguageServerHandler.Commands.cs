@@ -51,6 +51,13 @@ internal sealed partial class LanguageServerHandler
         };
     }
 
+    [JsonRpcMethod("efquerylens/generateFactory", UseSingleObjectParameterDeserialization = true)]
+    public Task<JObject> GenerateFactoryAsync(JObject request, CancellationToken ct)
+    {
+        if (_debugEnabled) Console.Error.WriteLine("[QL-LSP] request method=efquerylens/generateFactory");
+        return _generateFactory.HandleAsync(request, ct);
+    }
+
     [JsonRpcMethod("workspace/executeCommand", UseSingleObjectParameterDeserialization = true)]
     public async Task<JToken?> ExecuteCommandAsync(JObject request, CancellationToken ct)
     {
@@ -223,6 +230,16 @@ internal sealed partial class LanguageServerHandler
 
             await RecalculatePreviewAsync(req, ct);
             return new JObject { ["success"] = true };
+        }
+
+        if (command.Equals("efquerylens.generatefactory", StringComparison.OrdinalIgnoreCase))
+        {
+            var arguments = request["arguments"] as JArray;
+            var payload = arguments?.Count > 0 ? arguments[0] as JObject : null;
+            if (payload is null)
+                return new JObject { ["success"] = false, ["message"] = "Missing payload." };
+
+            return await _generateFactory.HandleAsync(payload, ct);
         }
 
         return new JObject

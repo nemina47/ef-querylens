@@ -141,9 +141,10 @@ public sealed partial class QueryEvaluator
         {
             get
             {
-                // Return dummy connection strings for connection string lookups
+                // Return dummy connection strings for any connection string lookup,
+                // including the canonical Name=_querylens used by generated factories.
                 if (key?.StartsWith("ConnectionStrings:", StringComparison.OrdinalIgnoreCase) == true)
-                    return "Server=localhost;Database=__querylens__;Encrypt=false;TrustServerCertificate=true;";
+                    return "Server=__querylens_offline__;Database=__querylens_offline__;TrustServerCertificate=true;";
 
                 // Return null for other keys so EF Core uses its defaults
                 return null;

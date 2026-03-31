@@ -24,6 +24,14 @@ export type QueryLensStructuredHoverResponse = {
     LastTranslationMs: number;
 };
 
+export type FactoryGenerationResponse = {
+    success: boolean;
+    message?: string | null;
+    content?: string | null;
+    suggestedFileName?: string | null;
+    dbContextTypeFullName?: string | null;
+};
+
 export type QueryLensSettings = {
     maxCodeLensPerDocument: number;
     codeLensDebounceMs: number;

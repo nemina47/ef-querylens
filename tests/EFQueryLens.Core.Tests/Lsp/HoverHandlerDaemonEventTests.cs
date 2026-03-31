@@ -131,5 +131,8 @@ public class HoverHandlerDaemonEventTests
             {
                 DbContextType = string.Empty,
             });
+
+        public Task<FactoryGenerationResult> GenerateFactoryAsync(FactoryGenerationRequest request, CancellationToken ct = default)
+            => Task.FromException<FactoryGenerationResult>(new NotSupportedException());
     }
 }

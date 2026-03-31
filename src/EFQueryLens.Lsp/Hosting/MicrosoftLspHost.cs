@@ -24,6 +24,7 @@ internal static class MicrosoftLspHost
             warmup: new WarmupHandler(documentManager, engine),
             daemonControl: new DaemonControlHandler(engine),
             textSync: new TextDocumentSyncHandler(documentManager, prewarm),
+            generateFactory: new GenerateFactoryHandler(engine),
             debugEnabled: debugEnabled);
 
         using var stdin = Console.OpenStandardInput();

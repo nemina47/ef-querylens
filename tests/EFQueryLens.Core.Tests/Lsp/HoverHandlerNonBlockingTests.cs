@@ -217,6 +217,9 @@ public class HoverHandlerNonBlockingTests
 
         public Task<ModelSnapshot> InspectModelAsync(ModelInspectionRequest request, CancellationToken ct = default)
             => Task.FromResult(new ModelSnapshot { DbContextType = string.Empty });
+
+        public Task<FactoryGenerationResult> GenerateFactoryAsync(FactoryGenerationRequest request, CancellationToken ct = default)
+            => Task.FromException<FactoryGenerationResult>(new NotSupportedException());
     }
 
     private sealed class NoOpQueryLensEngine : IQueryLensEngine
@@ -228,5 +231,8 @@ public class HoverHandlerNonBlockingTests
 
         public Task<ModelSnapshot> InspectModelAsync(ModelInspectionRequest request, CancellationToken ct = default)
             => Task.FromResult(new ModelSnapshot { DbContextType = string.Empty });
+
+        public Task<FactoryGenerationResult> GenerateFactoryAsync(FactoryGenerationRequest request, CancellationToken ct = default)
+            => Task.FromException<FactoryGenerationResult>(new NotSupportedException());
     }
 }

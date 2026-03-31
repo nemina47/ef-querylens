@@ -175,6 +175,16 @@ internal static class Program
             return Results.Ok(snapshot);
         });
 
+        // POST /generate-factory
+        // Returns generated QueryLensDbContextFactory source and suggested file name.
+        app.MapPost("/generate-factory", async (FactoryGenerationRequest request) =>
+        {
+            lastActivity = DateTime.UtcNow;
+            var result = await engine.GenerateFactoryAsync(request, CancellationToken.None);
+            lastActivity = DateTime.UtcNow;
+            return Results.Ok(result);
+        });
+
         // POST /invalidate
         app.MapPost("/invalidate", () =>
         {

@@ -197,5 +197,8 @@ public class HoverCacheKeyTests
 
         public Task<ModelSnapshot> InspectModelAsync(ModelInspectionRequest request, CancellationToken ct = default)
             => Task.FromResult(new ModelSnapshot { DbContextType = string.Empty });
+
+        public Task<FactoryGenerationResult> GenerateFactoryAsync(FactoryGenerationRequest request, CancellationToken ct = default)
+            => Task.FromException<FactoryGenerationResult>(new NotSupportedException());
     }
 }

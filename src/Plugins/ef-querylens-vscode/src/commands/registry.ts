@@ -2,12 +2,17 @@ import {
     commands,
     Disposable,
     OutputChannel,
+    Position,
+    Uri,
     window,
+    workspace,
+    WorkspaceEdit,
+    ViewColumn,
 } from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 
 import { SqlActionHandlers } from './sqlActions';
-import { QueryLensSettings } from '../types';
+import { FactoryGenerationResponse, QueryLensSettings } from '../types';
 import { formatLogMessage, formatUserMessage } from '../utils/errors';
 
 export type QueryLensCommandRegistryOptions = {
@@ -17,6 +22,44 @@ export type QueryLensCommandRegistryOptions = {
     outputChannel: OutputChannel | undefined;
     logOutput: (message: string) => void;
 };
+
+// Tracks which assembly paths have already prompted the user so we don't spam.
+const _noFactoryNotifiedPaths = new Set<string>();
+
+/**
+ * Shows a one-time "Generate Factory File" notification when QueryLens fails
+ * because no factory was found for the given assembly path / DbContext type.
+ * Call this from the hover/structured-hover response handler when the error
+ * message indicates a missing factory.
+ */
+export function notifyNoFactoryFound(
+    assemblyPath: string,
+    dbContextTypeName: string | null | undefined,
+    getClient: () => LanguageClient | undefined
+): void {
+    if (_noFactoryNotifiedPaths.has(assemblyPath)) {
+        return;
+    }
+    _noFactoryNotifiedPaths.add(assemblyPath);
+
+    const label = dbContextTypeName
+        ? dbContextTypeName.split('.').pop() ?? dbContextTypeName
+        : 'DbContext';
+
+    window.showWarningMessage(
+        `EF QueryLens: No factory found for ${label}. Generate one now?`,
+        'Generate File',
+        'Dismiss'
+    ).then(choice => {
+        if (choice === 'Generate File') {
+            commands.executeCommand(
+                'efquerylens.generateFactory',
+                assemblyPath,
+                dbContextTypeName ?? undefined
+            );
+        }
+    });
+}
 
 export function registerQueryLensCommands(options: QueryLensCommandRegistryOptions): Disposable[] {
     const {
@@ -91,6 +134,66 @@ export function registerQueryLensCommands(options: QueryLensCommandRegistryOptio
         }
     );
 
+    const generateFactoryCommand = commands.registerCommand(
+        'efquerylens.generateFactory',
+        async (assemblyPathInput: unknown, dbContextTypeNameInput: unknown) => {
+            const client = getClient();
+            if (!client) {
+                window.showWarningMessage(formatUserMessage('QL1005_DAEMON_RESTART_NOT_READY', 'Language client is not initialized yet.'));
+                return;
+            }
+
+            const assemblyPath = typeof assemblyPathInput === 'string' ? assemblyPathInput : undefined;
+            const dbContextTypeName = typeof dbContextTypeNameInput === 'string' ? dbContextTypeNameInput : undefined;
+
+            if (!assemblyPath) {
+                window.showWarningMessage('EF QueryLens: Cannot generate factory — assembly path is unknown.');
+                return;
+            }
+
+            try {
+                const response = await client.sendRequest<FactoryGenerationResponse>(
+                    'efquerylens/generateFactory',
+                    { assemblyPath, dbContextTypeName }
+                );
+
+                if (!response?.success || !response.content || !response.suggestedFileName) {
+                    const msg = response?.message ?? 'Factory generation failed.';
+                    window.showErrorMessage(`EF QueryLens: ${msg}`);
+                    return;
+                }
+
+                // Ask user where to save (default: next to the assembly).
+                const assemblyDir = Uri.file(assemblyPath.replace(/[/\\][^/\\]+$/, ''));
+                const defaultUri = Uri.joinPath(assemblyDir, response.suggestedFileName);
+
+                const saveUri = await window.showSaveDialog({
+                    defaultUri,
+                    filters: { 'C# Source': ['cs'] },
+                    title: 'Save QueryLens Factory File',
+                });
+
+                if (!saveUri) {
+                    return; // User cancelled
+                }
+
+                const edit = new WorkspaceEdit();
+                edit.createFile(saveUri, { overwrite: true, ignoreIfExists: false });
+                edit.insert(saveUri, new Position(0, 0), response.content);
+                await workspace.applyEdit(edit);
+
+                const doc = await workspace.openTextDocument(saveUri);
+                await window.showTextDocument(doc, { viewColumn: ViewColumn.Beside });
+                window.showInformationMessage(
+                    `EF QueryLens: Factory file created — rebuild your project to activate it.`
+                );
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                window.showErrorMessage(`EF QueryLens: Factory generation failed. ${message}`);
+            }
+        }
+    );
+
     const restartCommand = commands.registerCommand(
         'efquerylens.restart',
         async () => {
@@ -125,6 +228,7 @@ export function registerQueryLensCommands(options: QueryLensCommandRegistryOptio
         openSqlEditorCommand,
         openOutputCommand,
         restartCommand,
+        generateFactoryCommand,
     ];
 }
 

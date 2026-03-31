@@ -23,6 +23,9 @@ internal sealed class FakeQueryLensEngine : IQueryLensEngine
         CancellationToken ct = default) =>
         Task.FromResult(new ModelSnapshot { DbContextType = "FakeContext" });
 
+    public Task<FactoryGenerationResult> GenerateFactoryAsync(FactoryGenerationRequest request, CancellationToken ct = default)
+        => Task.FromException<FactoryGenerationResult>(new NotSupportedException());
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
@@ -44,6 +47,9 @@ internal sealed class FakeEngineControl : IQueryLensEngine, IEngineControl
         ModelInspectionRequest request,
         CancellationToken ct = default) =>
         Task.FromResult(new ModelSnapshot { DbContextType = "FakeContext" });
+
+    public Task<FactoryGenerationResult> GenerateFactoryAsync(FactoryGenerationRequest request, CancellationToken ct = default)
+        => Task.FromException<FactoryGenerationResult>(new NotSupportedException());
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 

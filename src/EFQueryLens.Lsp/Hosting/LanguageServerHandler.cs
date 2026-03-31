@@ -19,6 +19,7 @@ internal sealed partial class LanguageServerHandler
     private readonly WarmupHandler _warmup;
     private readonly DaemonControlHandler _daemonControl;
     private readonly TextDocumentSyncHandler _textSync;
+    private readonly GenerateFactoryHandler _generateFactory;
     private bool _debugEnabled;
     private bool _hoverProgressEnabled;
     private int _hoverProgressDelayMs;
@@ -36,12 +37,14 @@ internal sealed partial class LanguageServerHandler
         WarmupHandler warmup,
         DaemonControlHandler daemonControl,
         TextDocumentSyncHandler textSync,
+        GenerateFactoryHandler generateFactory,
         bool debugEnabled = false)
     {
         _hover = hover;
         _warmup = warmup;
         _daemonControl = daemonControl;
         _textSync = textSync;
+        _generateFactory = generateFactory;
         _debugEnabled = debugEnabled;
         _hoverProgressEnabled = LspEnvironment.ReadBool(
             "QUERYLENS_HOVER_PROGRESS_NOTIFY",
@@ -149,7 +152,8 @@ internal sealed partial class LanguageServerHandler
                         "efquerylens.showsqlpopup",
                         "efquerylens.opensqleditor",
                         "efquerylens.copysql",
-                        "efquerylens.reanalyze")
+                        "efquerylens.reanalyze",
+                        "efquerylens.generatefactory")
                 },
             },
         };

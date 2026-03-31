@@ -19,7 +19,7 @@ import { readSettings } from './config/settings';
 import {
     enableTrustedHoverCommands,
 } from './hover/markdown';
-import { registerQueryLensCommands } from './commands/registry';
+import { notifyNoFactoryFound, registerQueryLensCommands } from './commands/registry';
 import { createSqlActionHandlers } from './commands/sqlActions';
 import { QueryLensSettings } from './types';
 
@@ -124,7 +124,11 @@ export function activate(context: ExtensionContext) {
         clientOptions
     );
 
-    const sqlActions = createSqlActionHandlers(() => client);
+    const sqlActions = createSqlActionHandlers(
+        () => client,
+        (assemblyPath, dbContextTypeName) =>
+            notifyNoFactoryFound(assemblyPath, dbContextTypeName, () => client)
+    );
     const commandDisposables = registerQueryLensCommands({
         getSettings: () => currentSettings,
         sqlActions,

@@ -66,6 +66,10 @@
       {
         "command": "efquerylens.openOutput",
         "title": "EF QueryLens: Open Output"
+      },
+      {
+        "command": "efquerylens.generateFactory",
+        "title": "EF QueryLens: Generate Factory File"
       }
     ],
     "configuration": {

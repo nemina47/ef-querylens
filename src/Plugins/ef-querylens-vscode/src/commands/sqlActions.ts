@@ -38,7 +38,10 @@ export type SqlActionHandlers = {
     ): Promise<void>;
 };
 
-export function createSqlActionHandlers(getClient: () => LanguageClient | undefined): SqlActionHandlers {
+export function createSqlActionHandlers(
+    getClient: () => LanguageClient | undefined,
+    onNoFactoryError?: (assemblyPath: string, dbContextTypeName: string | null | undefined) => void
+): SqlActionHandlers {
     let sqlPreviewPanel: WebviewPanel | undefined;
 
     async function showSqlPopupFromLens(
@@ -251,6 +254,12 @@ export function createSqlActionHandlers(getClient: () => LanguageClient | undefi
 
             if (!structured.Success) {
                 const message = structured.ErrorMessage ?? 'No SQL preview available at this location.';
+                if (onNoFactoryError
+                    && message.includes('IQueryLensDbContextFactory')
+                    && structured.DbContextType
+                    && uri.fsPath) {
+                    onNoFactoryError(uri.fsPath, structured.DbContextType);
+                }
                 window.showInformationMessage(formatUserMessage('QL1003_HOVER_EMPTY', message));
                 return null;
             }
