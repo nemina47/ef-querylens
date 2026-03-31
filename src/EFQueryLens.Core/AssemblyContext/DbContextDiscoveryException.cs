@@ -4,6 +4,7 @@ public enum DbContextDiscoveryFailureKind
 {
     NoDbContextFound,
     MultipleDbContextsFound,
+    ConflictingDbContextHints,
 }
 
 public sealed class DbContextDiscoveryException : InvalidOperationException

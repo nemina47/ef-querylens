@@ -1,20 +1,26 @@
-public sealed class __QueryLensCapturedParameter__
+public sealed class __QueryLensCapturedParameter__ : IQueryLensCapturedParameter
 {
     public string Name { get; set; } = "@p";
     public string ClrType { get; set; } = "object";
+    public string DbTypeName { get; set; } = "Object";
     public string? InferredValue { get; set; }
 }
 
-public sealed class __QueryLensCapturedSqlCommand__
+public sealed class __QueryLensCapturedSqlCommand__ : IQueryLensCapturedCommand
 {
     public string Sql { get; set; } = string.Empty;
     public __QueryLensCapturedParameter__[] Parameters { get; set; } = Array.Empty<__QueryLensCapturedParameter__>();
+
+    IReadOnlyList<IQueryLensCapturedParameter> IQueryLensCapturedCommand.Parameters => Parameters;
 }
 
-public sealed class __QueryLensExecutionResult__
+public sealed class __QueryLensExecutionResult__ : IQueryLensExecutionPayload
 {
+    public int PayloadContractVersion => QueryLensGeneratedPayloadContract.Version;
     public object? Queryable { get; set; }
     public string? CaptureSkipReason { get; set; }
     public string? CaptureError { get; set; }
     public __QueryLensCapturedSqlCommand__[] Commands { get; set; } = Array.Empty<__QueryLensCapturedSqlCommand__>();
+
+    IReadOnlyList<IQueryLensCapturedCommand> IQueryLensExecutionPayload.Commands => Commands;
 }

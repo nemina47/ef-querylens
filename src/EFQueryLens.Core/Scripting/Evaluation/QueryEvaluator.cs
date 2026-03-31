@@ -1,8 +1,12 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Text;
 using EFQueryLens.Core.AssemblyContext;
 using EFQueryLens.Core.Contracts;
+using EFQueryLens.Core.Scripting.Contracts;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 
@@ -46,26 +50,32 @@ public sealed partial class QueryEvaluator
 
     private readonly ConcurrentDictionary<string, MetadataRefEntry> _refCache = new();
 
+    private delegate object? SyncRunnerInvoker(object dbInstance);
+    private delegate Task<object?> AsyncRunnerInvoker(object dbInstance, CancellationToken ct);
+
     // Compiled + loaded eval runner cache: skip the entire Roslyn pipeline on warm hits.
     // Keys follow the pattern: "shadowAssemblyPath|timestampTicks|assemblySetHash|dbContextTypeName|requestHash"
     // Evicted whenever the ALC for a shadow assembly is released (InvalidateMetadataRefCache).
-    private sealed record EvalRunnerEntry(Assembly EvalAssembly, MethodInfo RunMethod, long LastAccessTicks, string? ExecutedExpression = null);
+    private sealed record EvalRunnerEntry(
+        Assembly EvalAssembly,
+        SyncRunnerInvoker? SyncInvoker,
+        AsyncRunnerInvoker? AsyncInvoker,
+        long LastAccessTicks,
+        string? ExecutedExpression = null);
     private readonly ConcurrentDictionary<string, EvalRunnerEntry> _evalRunnerCache = new(StringComparer.Ordinal);
 
-    // Known namespace/type index cache keyed by assemblySetHash — the scan is expensive
-    // on large projects but the result only changes when the assembly set changes.
-    // The assemblySetHash is computed from shadow bundle paths, which change on every
-    // rebuild, so stale entries expire naturally via LRU without explicit eviction.
-    private sealed record NamespaceTypeIndexEntry(
-        HashSet<string> Namespaces,
-        HashSet<string> Types,
-        long LastAccessTicks);
-
-    private readonly ConcurrentDictionary<string, NamespaceTypeIndexEntry>
-        _namespaceTypeIndexCache = new(StringComparer.Ordinal);
+    private readonly INamespaceTypeIndexCache _namespaceTypeIndexCache;
 
     private readonly bool _debugEnabled = 
         EFQueryLens.Core.Common.EnvironmentVariableParser.ReadBool("QUERYLENS_DEBUG", fallback: false);
+
+    private readonly bool _dumpSourceEnabled =
+        EFQueryLens.Core.Common.EnvironmentVariableParser.ReadBool("QUERYLENS_DUMP_SOURCE", fallback: false);
+
+    public QueryEvaluator(INamespaceTypeIndexCache? namespaceTypeIndexCache = null)
+    {
+        _namespaceTypeIndexCache = namespaceTypeIndexCache ?? new NamespaceTypeIndexCache(MaxNamespaceTypeIndexCacheEntries);
+    }
 
     internal sealed record EvaluationStageTimings(
         TimeSpan? ContextResolution,
@@ -108,6 +118,45 @@ public sealed partial class QueryEvaluator
             sb.Append(s).Append('\0');
         foreach (var kv in request.LocalVariableTypes.OrderBy(x => x.Key, StringComparer.Ordinal))
             sb.Append(kv.Key).Append(':').Append(kv.Value).Append('\0');
+        sb.Append("useAsyncRunner=").Append(request.UseAsyncRunner ? '1' : '0').Append('\0');
+        sb.Append("payloadContractVersion=").Append(QueryLensGeneratedPayloadContract.Version).Append('\0');
+
+        if (request.DbContextResolution != null)
+        {
+            sb.Append("dbContextResolution=")
+              .Append(request.DbContextResolution.DeclaredTypeName ?? string.Empty).Append('|')
+              .Append(request.DbContextResolution.FactoryTypeName ?? string.Empty).Append('|')
+              .Append(request.DbContextResolution.ResolutionSource ?? string.Empty).Append('|')
+              .Append(request.DbContextResolution.Confidence.ToString(CultureInfo.InvariantCulture))
+              .Append('|');
+            foreach (var candidate in request.DbContextResolution.FactoryCandidateTypeNames.OrderBy(x => x, StringComparer.Ordinal))
+                sb.Append(candidate).Append(';');
+            sb.Append('\0');
+        }
+        
+        // Include UsingContextSnapshot to ensure same expression with different using contexts
+        // results in separate cache entries (reduces cache collisions)
+        if (request.UsingContextSnapshot != null)
+        {
+            sb.Append("usingSnapshot={");
+            foreach (var imp in request.UsingContextSnapshot.Imports.OrderBy(x => x, StringComparer.Ordinal))
+                sb.Append(imp).Append(';');
+            sb.Append('|');
+            foreach (var kv in request.UsingContextSnapshot.Aliases.OrderBy(x => x.Key, StringComparer.Ordinal))
+                sb.Append(kv.Key).Append('=').Append(kv.Value).Append(';');
+            sb.Append('|');
+            foreach (var st in request.UsingContextSnapshot.StaticTypes.OrderBy(x => x, StringComparer.Ordinal))
+                sb.Append(st).Append(';');
+            sb.Append("}\\0");
+        }
+        
+        // Include ExpressionMetadata source location for validation
+        if (request.ExpressionMetadata != null)
+        {
+            sb.Append("exprMeta=").Append(request.ExpressionMetadata.SourceLine).Append(':')
+              .Append(request.ExpressionMetadata.SourceCharacter).Append('\0');
+        }
+        
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(sb.ToString())))[..16];
     }
@@ -122,21 +171,44 @@ public sealed partial class QueryEvaluator
         Console.Error.WriteLine($"[QL-Eval] {message}");
     }
 
+    private bool ShouldDumpGeneratedSource() => _dumpSourceEnabled;
+
+    private string DumpGeneratedSourceToTemp(string source)
+    {
+        try
+        {
+            var tempDir = Path.GetTempPath();
+            Directory.CreateDirectory(tempDir);
+
+            for (var attempt = 0; attempt < 8; attempt++)
+            {
+                var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss_fff", CultureInfo.InvariantCulture);
+                var suffix = attempt == 0 ? string.Empty : $"_{attempt}";
+                var path = Path.Combine(tempDir, $"ql_eval_{timestamp}{suffix}.cs");
+
+                try
+                {
+                    File.WriteAllText(path, source, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                    return path;
+                }
+                catch (IOException) when (File.Exists(path))
+                {
+                    // Rare same-millisecond filename collision; retry with suffix.
+                }
+            }
+
+            return "(could not write temp file)";
+        }
+        catch
+        {
+            return "(could not write temp file)";
+        }
+    }
+
     private (HashSet<string> Namespaces, HashSet<string> Types) GetOrBuildNamespaceTypeIndex(
-        string assemblySetHash,
+        string namespaceIndexCacheKey,
         IReadOnlyList<Assembly> compilationAssemblies)
     {
-        if (_namespaceTypeIndexCache.TryGetValue(assemblySetHash, out var cached))
-        {
-            TouchNamespaceTypeIndexCacheEntry(assemblySetHash, cached);
-            return (cached.Namespaces, cached.Types);
-        }
-
-        // Filter the same assemblies excluded from metadata refs so knownTypes/knownNamespaces
-        // stay consistent with what the Roslyn compiler actually sees. Without this, Roslyn
-        // assemblies (loaded by the LSP process) appear in knownNamespaces but not in metadata
-        // refs, causing the compile-retry loop to synthesize 'using Microsoft.CodeAnalysis.*'
-        // directives that then fail with CS0234.
         var filteredAssemblies = compilationAssemblies
             .Where(a =>
             {
@@ -145,16 +217,71 @@ public sealed partial class QueryEvaluator
                 var normalizedLoc = loc.Replace('\\', '/');
                 if (normalizedLoc.Contains("/runtimes/", StringComparison.OrdinalIgnoreCase)) return false;
                 var name = a.GetName().Name;
+                if (name is not null && name.StartsWith("__QueryLensEval_", StringComparison.Ordinal)) return false;
                 return !ShouldSkipMetadataReferenceAssembly(name);
             })
             .ToList();
+
+        // Namespace/type index should be stable for a given assembly context snapshot.
+        // Use the context identity as fingerprint to avoid churn from incidental
+        // assembly-load differences across requests in the same daemon session.
+        var currentFingerprint = namespaceIndexCacheKey;
+
+        var lookupWatch = Stopwatch.StartNew();
+        if (_namespaceTypeIndexCache.TryGet(
+            namespaceIndexCacheKey,
+                currentFingerprint,
+                out var cachedNamespaces,
+                out var cachedTypes))
+        {
+            lookupWatch.Stop();
+            var metrics = _namespaceTypeIndexCache.GetMetrics();
+            Console.Error.WriteLine(
+                $"[QL-Engine] namespace-index cache=hit lookupMs={lookupWatch.Elapsed.TotalMilliseconds:0.###} " +
+                $"hits={metrics.Hits} misses={metrics.Misses} count={metrics.Count}");
+            return (cachedNamespaces, cachedTypes);
+        }
+        lookupWatch.Stop();
+
+        // Keep namespace/type index aligned with the same filtered assembly set used by metadata refs.
+        var buildWatch = Stopwatch.StartNew();
         var result = BuildKnownNamespaceAndTypeIndex(filteredAssemblies);
-        _namespaceTypeIndexCache[assemblySetHash] = new NamespaceTypeIndexEntry(
+        buildWatch.Stop();
+        _namespaceTypeIndexCache.Set(
+            namespaceIndexCacheKey,
+            currentFingerprint,
             result.Namespaces,
-            result.Types,
-            GetUtcNowTicks());
-        TrimCacheByLastAccess(_namespaceTypeIndexCache, MaxNamespaceTypeIndexCacheEntries, static e => e.LastAccessTicks);
+            result.Types);
+        var metricsAfterBuild = _namespaceTypeIndexCache.GetMetrics();
+        Console.Error.WriteLine(
+            $"[QL-Engine] namespace-index cache=miss lookupMs={lookupWatch.Elapsed.TotalMilliseconds:0.###} " +
+            $"buildMs={buildWatch.Elapsed.TotalMilliseconds:0.###} hits={metricsAfterBuild.Hits} " +
+            $"misses={metricsAfterBuild.Misses} count={metricsAfterBuild.Count}");
         return result;
+    }
+
+    private static string ComputeAssemblyFingerprint(IReadOnlyList<Assembly> assemblies)
+    {
+        var sb = new StringBuilder();
+        foreach (var asm in assemblies
+                     .OrderBy(a => a.GetName().Name, StringComparer.Ordinal))
+        {
+            var name = asm.GetName().Name ?? string.Empty;
+            string mvid;
+            try
+            {
+                mvid = asm.ManifestModule.ModuleVersionId.ToString("N");
+            }
+            catch
+            {
+                mvid = asm.FullName ?? string.Empty;
+            }
+
+            sb.Append(name).Append('|').Append(mvid).Append(';');
+        }
+
+        var bytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(sb.ToString()));
+        return Convert.ToHexString(bytes)[..16];
     }
 
     private static long GetUtcNowTicks() => DateTime.UtcNow.Ticks;
@@ -190,14 +317,6 @@ public sealed partial class QueryEvaluator
     private void TouchEvalRunnerCacheEntry(string key, EvalRunnerEntry entry)
     {
         _evalRunnerCache.TryUpdate(
-            key,
-            entry with { LastAccessTicks = GetUtcNowTicks() },
-            entry);
-    }
-
-    private void TouchNamespaceTypeIndexCacheEntry(string key, NamespaceTypeIndexEntry entry)
-    {
-        _namespaceTypeIndexCache.TryUpdate(
             key,
             entry with { LastAccessTicks = GetUtcNowTicks() },
             entry);

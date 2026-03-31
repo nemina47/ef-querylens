@@ -5,10 +5,13 @@ using System.Security.Cryptography;
 using System.Text;
 using EFQueryLens.Core.Contracts;
 using EFQueryLens.Core.Engine;
+using EFQueryLens.Core.Scripting.Contracts;
+using EFQueryLens.Core.Scripting.Evaluation;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Caching.Memory;
+using System.Threading;
 
 namespace EFQueryLens.Daemon;
 
@@ -62,7 +65,10 @@ internal static class Program
             }
         });
 
-        builder.Services.AddSingleton<IQueryLensEngine, QueryLensEngine>();
+        builder.Services.AddSingleton<INamespaceTypeIndexCache>(
+            _ => new NamespaceTypeIndexCache(maxEntries: 64));
+        builder.Services.AddSingleton<IQueryLensEngine>(sp =>
+            new QueryLensEngine(sp.GetRequiredService<INamespaceTypeIndexCache>()));
         builder.Services.AddMemoryCache();
         builder.Services.AddSingleton(jsonOptions);
 
@@ -74,11 +80,16 @@ internal static class Program
         var inflight = new ConcurrentDictionary<string, Lazy<Task<QueryTranslationResult>>>(StringComparer.Ordinal);
         var cache = app.Services.GetRequiredService<IMemoryCache>();
         var engine = app.Services.GetRequiredService<IQueryLensEngine>();
+        long cacheHits = 0;
+        long cacheMisses = 0;
 
         // GET /ping
         app.MapGet("/ping", () =>
         {
             lastActivity = DateTime.UtcNow;
+            var hits = Interlocked.Read(ref cacheHits);
+            var misses = Interlocked.Read(ref cacheMisses);
+            Console.Error.WriteLine($"[QL-Engine] ping cacheHits={hits} cacheMisses={misses}");
             return Results.Ok("pong");
         });
 
@@ -87,12 +98,17 @@ internal static class Program
         {
             lastActivity = DateTime.UtcNow;
 
+            ValidateRequestSnapshotConsistency(request);
+
             var cacheKey = ComputeCacheKey(request);
 
             if (cache.TryGetValue<QueryTranslationResult>(cacheKey, out var cached) && cached is not null)
             {
+                Interlocked.Increment(ref cacheHits);
                 return Results.Ok(cached);
             }
+
+            Interlocked.Increment(ref cacheMisses);
 
             var lazy = inflight.GetOrAdd(
                 cacheKey,
@@ -125,6 +141,7 @@ internal static class Program
         app.MapPost("/translate/warm", (TranslationRequest request) =>
         {
             lastActivity = DateTime.UtcNow;
+            ValidateRequestSnapshotConsistency(request);
             var cacheKey = ComputeCacheKey(request);
 
             if (cache.TryGetValue<QueryTranslationResult>(cacheKey, out _))
@@ -306,6 +323,8 @@ internal static class Program
         sb.Append(r.AssemblyPath ?? string.Empty).Append('\0');
         sb.Append(r.DbContextTypeName ?? string.Empty).Append('\0');
         sb.Append(r.ContextVariableName).Append('\0');
+        sb.Append("useAsyncRunner=").Append(r.UseAsyncRunner ? '1' : '0').Append('\0');
+        sb.Append("payloadContractVersion=").Append(QueryLensGeneratedPayloadContract.Version).Append('\0');
         foreach (var ns in r.AdditionalImports.OrderBy(x => x, StringComparer.Ordinal))
             sb.Append(ns).Append('\0');
         foreach (var kv in r.UsingAliases.OrderBy(x => x.Key, StringComparer.Ordinal))
@@ -314,7 +333,69 @@ internal static class Program
             sb.Append(st).Append('\0');
         foreach (var kv in r.LocalVariableTypes.OrderBy(x => x.Key, StringComparer.Ordinal))
             sb.Append(kv.Key).Append(':').Append(kv.Value).Append('\0');
+
+        if (r.DbContextResolution is not null)
+        {
+            sb.Append("dbContextResolution=")
+              .Append(r.DbContextResolution.DeclaredTypeName ?? string.Empty).Append('|')
+              .Append(r.DbContextResolution.FactoryTypeName ?? string.Empty).Append('|')
+              .Append(r.DbContextResolution.ResolutionSource ?? string.Empty).Append('|')
+              .Append(r.DbContextResolution.Confidence.ToString(CultureInfo.InvariantCulture))
+              .Append('|');
+            foreach (var candidate in r.DbContextResolution.FactoryCandidateTypeNames.OrderBy(x => x, StringComparer.Ordinal))
+                sb.Append(candidate).Append(';');
+            sb.Append('\0');
+        }
+        
+        if (r.UsingContextSnapshot is not null)
+        {
+            sb.Append("usingSnapshot={");
+            foreach (var imp in r.UsingContextSnapshot.Imports.OrderBy(x => x, StringComparer.Ordinal))
+                sb.Append(imp).Append(';');
+            sb.Append('|');
+            foreach (var kv in r.UsingContextSnapshot.Aliases.OrderBy(x => x.Key, StringComparer.Ordinal))
+                sb.Append(kv.Key).Append('=').Append(kv.Value).Append(';');
+            sb.Append('|');
+            foreach (var st in r.UsingContextSnapshot.StaticTypes.OrderBy(x => x, StringComparer.Ordinal))
+                sb.Append(st).Append(';');
+            sb.Append("}\\0");
+        }
+
+        if (r.ExpressionMetadata is not null)
+        {
+            sb.Append("exprMeta=")
+              .Append(r.ExpressionMetadata.ExpressionType ?? string.Empty).Append('|')
+              .Append(r.ExpressionMetadata.SourceLine).Append(':')
+              .Append(r.ExpressionMetadata.SourceCharacter).Append('|')
+              .Append(r.ExpressionMetadata.Confidence.ToString(CultureInfo.InvariantCulture))
+              .Append('\0');
+        }
+
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString()));
         return Convert.ToHexString(bytes)[..16].ToLowerInvariant();
+    }
+
+    private static void ValidateRequestSnapshotConsistency(TranslationRequest request)
+    {
+        if (request.UsingContextSnapshot is null)
+            return;
+
+        var importsMatch = request.AdditionalImports
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .SequenceEqual(request.UsingContextSnapshot.Imports.OrderBy(x => x, StringComparer.Ordinal), StringComparer.Ordinal);
+
+        var staticTypesMatch = request.UsingStaticTypes
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .SequenceEqual(request.UsingContextSnapshot.StaticTypes.OrderBy(x => x, StringComparer.Ordinal), StringComparer.Ordinal);
+
+        var aliasesMatch = request.UsingAliases.Count == request.UsingContextSnapshot.Aliases.Count
+            && request.UsingAliases.OrderBy(x => x.Key, StringComparer.Ordinal)
+                .SequenceEqual(request.UsingContextSnapshot.Aliases.OrderBy(x => x.Key, StringComparer.Ordinal));
+
+        if (!importsMatch || !staticTypesMatch || !aliasesMatch)
+        {
+            Console.Error.WriteLine(
+                "[QL-Engine] request-snapshot-mismatch additionalImports/usingAliases/usingStaticTypes do not match UsingContextSnapshot");
+        }
     }
 }

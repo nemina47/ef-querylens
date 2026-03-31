@@ -3,6 +3,7 @@ using EFQueryLens.Core.AssemblyContext;
 using EFQueryLens.Core.Common;
 using EFQueryLens.Core.Contracts;
 using EFQueryLens.Core.Scripting;
+using EFQueryLens.Core.Scripting.Evaluation;
 using QueryEvaluator = EFQueryLens.Core.Scripting.Evaluation.QueryEvaluator;
 
 namespace EFQueryLens.Core.Engine;
@@ -77,7 +78,7 @@ public sealed partial class QueryLensEngine : IQueryLensEngine, IDbContextPoolPr
         }
     }
 
-    private readonly QueryEvaluator _evaluator = new();
+    private readonly QueryEvaluator _evaluator;
     private readonly ConcurrentDictionary<string, CachedAssemblyContext> _alcCache = new(
         StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, object> _alcContextGates = new(
@@ -94,7 +95,7 @@ public sealed partial class QueryLensEngine : IQueryLensEngine, IDbContextPoolPr
     private readonly ShadowAssemblyCache _shadowCache;
     private bool _disposed;
 
-    public QueryLensEngine()
+    public QueryLensEngine(INamespaceTypeIndexCache? namespaceTypeIndexCache = null)
     {
         _debugEnabled = EnvironmentVariableParser.ReadBool("QUERYLENS_DEBUG", fallback: false);
         _dbContextPoolSize = EnvironmentVariableParser.ReadInt(
@@ -102,6 +103,7 @@ public sealed partial class QueryLensEngine : IQueryLensEngine, IDbContextPoolPr
             fallback: 4,
             min: 1,
             max: 16);
+        _evaluator = new QueryEvaluator(namespaceTypeIndexCache);
         _shadowCache = new ShadowAssemblyCache(_debugEnabled);
         _shadowCache.RunStartupCleanup();
     }

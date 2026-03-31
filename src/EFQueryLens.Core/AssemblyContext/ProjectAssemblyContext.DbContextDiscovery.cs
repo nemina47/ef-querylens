@@ -1,4 +1,5 @@
 using System.Reflection;
+using EFQueryLens.Core.Contracts;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -75,7 +76,10 @@ public sealed partial class ProjectAssemblyContext
     ///   No DbContext found; multiple found with null typeName; or no match
     ///   for the provided typeName.
     /// </exception>
-    public Type FindDbContextType(string? typeName = null, string? expressionHint = null)
+    public Type FindDbContextType(
+        string? typeName = null,
+        string? expressionHint = null,
+        DbContextResolutionSnapshot? resolutionSnapshot = null)
     {
         EnsureNotDisposed();
 
@@ -86,26 +90,114 @@ public sealed partial class ProjectAssemblyContext
                 DbContextDiscoveryFailureKind.NoDbContextFound,
                 $"No DbContext subclass found in '{Path.GetFileName(AssemblyPath)}'.");
 
+        var dbSetName = expressionHint is null ? null : ExtractFirstPropertyAccess(expressionHint);
+        var expressionMatches = string.IsNullOrWhiteSpace(dbSetName)
+            ? []
+            : all.Where(t => OwnsProperty(t, dbSetName)).ToList();
+
+        var explicitMatches = MatchDbContextCandidates(all, typeName);
+        var declaredMatches = MatchDbContextCandidates(all, resolutionSnapshot?.DeclaredTypeName);
+        var factoryMatches = MatchDbContextCandidates(all, resolutionSnapshot?.FactoryTypeName);
+        var factoryCandidateMatches = MatchDbContextCandidates(all, resolutionSnapshot?.FactoryCandidateTypeNames);
+
+        if (factoryMatches.Count == 1 && declaredMatches.Count == 1 && factoryMatches[0] != declaredMatches[0])
+        {
+            if (expressionMatches.Count == 1 && (expressionMatches[0] == factoryMatches[0] || expressionMatches[0] == declaredMatches[0]))
+                return expressionMatches[0];
+
+            throw new DbContextDiscoveryException(
+                DbContextDiscoveryFailureKind.ConflictingDbContextHints,
+                $"Conflicting DbContext hints for '{Path.GetFileName(AssemblyPath)}': declared='{declaredMatches[0].FullName}', factory='{factoryMatches[0].FullName}'. " +
+                "Rebuild the selected host project or specify a concrete DbContext explicitly.");
+        }
+
+        if (factoryMatches.Count == 1)
+        {
+            var factoryMatch = factoryMatches[0];
+            if (expressionMatches.Count == 1 && expressionMatches[0] != factoryMatch)
+            {
+                throw new DbContextDiscoveryException(
+                    DbContextDiscoveryFailureKind.ConflictingDbContextHints,
+                    $"Resolved DbContext '{factoryMatch.FullName}' from QueryLens factory, but expression root '{dbSetName}' belongs to '{expressionMatches[0].FullName}'. " +
+                    "Check the selected host assembly and QueryLens factory configuration.");
+            }
+
+            return factoryMatch;
+        }
+
+        if (!string.IsNullOrWhiteSpace(typeName))
+        {
+            if (explicitMatches.Count == 1)
+            {
+                var explicitMatch = explicitMatches[0];
+                if (expressionMatches.Count == 1 && expressionMatches[0] != explicitMatch)
+                {
+                    throw new DbContextDiscoveryException(
+                        DbContextDiscoveryFailureKind.ConflictingDbContextHints,
+                        $"Requested DbContext '{explicitMatch.FullName}' does not expose '{dbSetName}', which matches '{expressionMatches[0].FullName}'. " +
+                        "Specify the concrete DbContext that owns the queried DbSet.");
+                }
+
+                return explicitMatch;
+            }
+
+            if (explicitMatches.Count > 1)
+            {
+                if (expressionMatches.Count == 1 && explicitMatches.Contains(expressionMatches[0]))
+                    return expressionMatches[0];
+
+                throw new DbContextDiscoveryException(
+                    DbContextDiscoveryFailureKind.MultipleDbContextsFound,
+                    $"Multiple DbContext types match '{typeName}' in '{Path.GetFileName(AssemblyPath)}': " +
+                    $"{string.Join(", ", explicitMatches.Select(t => t.FullName))}. Specify a concrete fully qualified DbContext type name.");
+            }
+        }
+
+        if (declaredMatches.Count == 1)
+        {
+            var declaredMatch = declaredMatches[0];
+            if (expressionMatches.Count == 1 && expressionMatches[0] != declaredMatch && factoryCandidateMatches.Count > 1 && factoryCandidateMatches.Contains(expressionMatches[0]))
+                return expressionMatches[0];
+
+            return declaredMatch;
+        }
+
+        if (declaredMatches.Count > 1)
+        {
+            if (expressionMatches.Count == 1 && declaredMatches.Contains(expressionMatches[0]))
+                return expressionMatches[0];
+
+            throw new DbContextDiscoveryException(
+                DbContextDiscoveryFailureKind.MultipleDbContextsFound,
+                $"Multiple DbContext types match declared hint '{resolutionSnapshot?.DeclaredTypeName}' in '{Path.GetFileName(AssemblyPath)}': " +
+                $"{string.Join(", ", declaredMatches.Select(t => t.FullName))}. Specify a concrete fully qualified DbContext type name.");
+        }
+
+        if (factoryCandidateMatches.Count == 1)
+            return factoryCandidateMatches[0];
+
+        if (factoryCandidateMatches.Count > 1)
+        {
+            if (expressionMatches.Count == 1 && factoryCandidateMatches.Contains(expressionMatches[0]))
+                return expressionMatches[0];
+
+            throw new DbContextDiscoveryException(
+                DbContextDiscoveryFailureKind.MultipleDbContextsFound,
+                $"Multiple QueryLens factory DbContext candidates found in '{Path.GetFileName(AssemblyPath)}': " +
+                $"{string.Join(", ", factoryCandidateMatches.Select(t => t.FullName))}. " +
+                "Hover a query that references a DbSet unique to the intended DbContext or specify a concrete DbContext type.");
+        }
+
         if (typeName is null)
         {
             if (all.Count == 1)
                 return all[0];
 
-            // Auto-disambiguate using the LINQ expression: extract the first property
-            // access (e.g. "AppWorkflows" from "dbContext.AppWorkflows.Include(...)") and
-            // find which DbContext owns a DbSet/IQueryable property with that name.
-            if (expressionHint is not null)
+            // Auto-disambiguate using the LINQ expression root property when exactly one
+            // DbContext owns the referenced DbSet/IQueryable property.
+            if (expressionMatches.Count == 1)
             {
-                var dbSetName = ExtractFirstPropertyAccess(expressionHint);
-                if (dbSetName is not null)
-                {
-                    var match = all.FirstOrDefault(t =>
-                        t.GetProperties().Any(p =>
-                            string.Equals(p.Name, dbSetName, StringComparison.Ordinal)));
-
-                    if (match is not null)
-                        return match;
-                }
+                return expressionMatches[0];
             }
 
             // Fallback: filter out obvious test/utility DbContexts.
@@ -126,47 +218,6 @@ public sealed partial class ProjectAssemblyContext
                 $"Multiple DbContext types found in '{Path.GetFileName(AssemblyPath)}': " +
                 $"{string.Join(", ", candidates.Select(t => t.FullName))}. " +
                 "Specify --context to disambiguate.");
-        }
-
-        // Match on concrete DbContext simple/FQ name first for backwards compatibility.
-        var nameMatch = all.FirstOrDefault(t =>
-            string.Equals(t.Name, typeName, StringComparison.Ordinal) ||
-            string.Equals(t.FullName, typeName, StringComparison.Ordinal));
-
-        if (nameMatch is not null)
-            return nameMatch;
-
-        // If no concrete type matched, treat the provided name as a potential interface
-        // implemented by one or more DbContext classes (common with DI abstractions).
-        var interfaceMatches = all.Where(t =>
-                t.GetInterfaces().Any(i =>
-                    string.Equals(i.Name, typeName, StringComparison.Ordinal) ||
-                    string.Equals(i.FullName, typeName, StringComparison.Ordinal)))
-            .ToList();
-
-        if (interfaceMatches.Count == 1)
-            return interfaceMatches[0];
-
-        if (interfaceMatches.Count > 1)
-        {
-            if (expressionHint is not null)
-            {
-                var dbSetName = ExtractFirstPropertyAccess(expressionHint);
-                if (dbSetName is not null)
-                {
-                    var hintMatch = interfaceMatches.FirstOrDefault(t =>
-                        t.GetProperties().Any(p => string.Equals(p.Name, dbSetName, StringComparison.Ordinal)));
-
-                    if (hintMatch is not null)
-                        return hintMatch;
-                }
-            }
-
-            throw new DbContextDiscoveryException(
-                DbContextDiscoveryFailureKind.MultipleDbContextsFound,
-                $"Multiple DbContext types implement interface '{typeName}' in '{Path.GetFileName(AssemblyPath)}': " +
-                $"{string.Join(", ", interfaceMatches.Select(t => t.FullName))}. " +
-                "Specify --context with a concrete DbContext type name to disambiguate.");
         }
 
         throw new InvalidOperationException(
@@ -214,6 +265,60 @@ public sealed partial class ProjectAssemblyContext
             ParenthesizedExpressionSyntax { Expression: IdentifierNameSyntax } => true,
             _ => false,
         };
+    }
+
+    private static List<Type> MatchDbContextCandidates(IReadOnlyList<Type> all, string? hint)
+    {
+        if (string.IsNullOrWhiteSpace(hint))
+            return [];
+
+        var normalizedHint = hint.TrimEnd('?');
+
+        var exactFullName = all
+            .Where(t => string.Equals(t.FullName, normalizedHint, StringComparison.Ordinal))
+            .ToList();
+        if (exactFullName.Count > 0)
+            return exactFullName;
+
+        var exactSimpleName = all
+            .Where(t => string.Equals(t.Name, normalizedHint, StringComparison.Ordinal))
+            .ToList();
+        if (exactSimpleName.Count > 0)
+            return exactSimpleName;
+
+        var interfaceFullName = all.Where(t =>
+                t.GetInterfaces().Any(i => string.Equals(i.FullName, normalizedHint, StringComparison.Ordinal)))
+            .ToList();
+        if (interfaceFullName.Count > 0)
+            return interfaceFullName;
+
+        return all.Where(t =>
+                t.GetInterfaces().Any(i => string.Equals(i.Name, normalizedHint, StringComparison.Ordinal)))
+            .ToList();
+    }
+
+    private static List<Type> MatchDbContextCandidates(IReadOnlyList<Type> all, IReadOnlyList<string>? hints)
+    {
+        if (hints is null || hints.Count == 0)
+            return [];
+
+        return hints
+            .Where(static hint => !string.IsNullOrWhiteSpace(hint))
+            .SelectMany(hint => MatchDbContextCandidates(all, hint))
+            .Distinct()
+            .ToList();
+    }
+
+    private static bool OwnsProperty(Type dbContextType, string propertyName)
+    {
+        try
+        {
+            return dbContextType.GetProperties().Any(p => string.Equals(p.Name, propertyName, StringComparison.Ordinal));
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>

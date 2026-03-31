@@ -1,5 +1,13 @@
 internal static class __QueryLensOfflineCapture__
 {
+    private sealed record __QueryLensRelationalFacadeMethods__(MethodInfo? SetDbConnection, MethodInfo? GetDbConnection);
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, __QueryLensRelationalFacadeMethods__>
+        SRelationalFacadeMethodsCache = new(StringComparer.Ordinal);
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Func<DbParameter>?>
+        SProviderParameterFactoryCache = new(StringComparer.Ordinal);
+
     public static bool TryInstall(object dbContext, out string? skipReason)
     {
         skipReason = null;
@@ -25,14 +33,7 @@ internal static class __QueryLensOfflineCapture__
 
             // Build a provider-specific DbParameter factory so type mappings that hard-cast
             // DbParameter to their provider type (e.g. NpgsqlParameter) don't throw.
-            Func<DbParameter>? paramFactory = null;
-            var npgsqlAsm = assemblies.FirstOrDefault(a => a.GetName().Name == "Npgsql");
-            if (npgsqlAsm != null)
-            {
-                var npgsqlParamType = npgsqlAsm.GetType("Npgsql.NpgsqlParameter");
-                if (npgsqlParamType != null)
-                    paramFactory = () => (DbParameter)Activator.CreateInstance(npgsqlParamType)!;
-            }
+            var paramFactory = ResolveProviderParameterFactory(assemblies);
 
             var relAsm = assemblies.FirstOrDefault(a => a.GetName().Name == "Microsoft.EntityFrameworkCore.Relational");
             if (relAsm is null)
@@ -41,18 +42,8 @@ internal static class __QueryLensOfflineCapture__
                 return false;
             }
 
-            var extType = relAsm.GetType("Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions");
-            if (extType is null)
-            {
-                skipReason = "RelationalDatabaseFacadeExtensions not found in Relational assembly.";
-                return false;
-            }
-
-            var setMethod = extType.GetMethods(BindingFlags.Public | BindingFlags.Static)
-                .Where(m => m.Name == "SetDbConnection")
-                .OrderByDescending(m => m.GetParameters().Length)
-                .FirstOrDefault();
-            if (setMethod is null)
+            var methods = ResolveRelationalFacadeMethods(relAsm);
+            if (methods.SetDbConnection is null)
             {
                 skipReason = "SetDbConnection not found on RelationalDatabaseFacadeExtensions.";
                 return false;
@@ -70,8 +61,7 @@ internal static class __QueryLensOfflineCapture__
             // connection installed by a different ALC would route Record() calls to that ALC's
             // (now-null) scope and silently drop all captured SQL.  Only skip reinstall when
             // the installed connection is THIS assembly's type — same ALC, same capture scope.
-            var getConnMethod = extType.GetMethods(BindingFlags.Public | BindingFlags.Static)
-                .FirstOrDefault(m => m.Name == "GetDbConnection" && m.GetParameters().Length == 1);
+            var getConnMethod = methods.GetDbConnection;
             if (getConnMethod is not null)
             {
                 var existingConn = getConnMethod.Invoke(null, new[] { database });
@@ -84,11 +74,11 @@ internal static class __QueryLensOfflineCapture__
             }
 
             var offlineConn = new __QueryLensOfflineDbConnection__(paramFactory);
-            var paramCount = setMethod.GetParameters().Length;
+            var paramCount = methods.SetDbConnection.GetParameters().Length;
             var args = paramCount >= 3
                 ? new object?[] { database, offlineConn, true }
                 : new object?[] { database, offlineConn };
-            setMethod.Invoke(null, args);
+            methods.SetDbConnection.Invoke(null, args);
             return true;
         }
         catch (Exception ex)
@@ -96,6 +86,47 @@ internal static class __QueryLensOfflineCapture__
             skipReason = $"SetDbConnection failed: {(ex is TargetInvocationException tie ? tie.InnerException?.Message : ex.Message)}";
             return false;
         }
+    }
+
+    private static __QueryLensRelationalFacadeMethods__ ResolveRelationalFacadeMethods(Assembly relAsm)
+    {
+        var relAsmId = relAsm.FullName ?? relAsm.GetName().Name ?? string.Empty;
+
+        return SRelationalFacadeMethodsCache.GetOrAdd(relAsmId, _ =>
+        {
+            var extType = relAsm.GetType("Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions");
+            if (extType is null)
+            {
+                return new __QueryLensRelationalFacadeMethods__(null, null);
+            }
+
+            var setMethod = extType.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .Where(m => m.Name == "SetDbConnection")
+                .OrderByDescending(m => m.GetParameters().Length)
+                .FirstOrDefault();
+
+            var getConnMethod = extType.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(m => m.Name == "GetDbConnection" && m.GetParameters().Length == 1);
+
+            return new __QueryLensRelationalFacadeMethods__(setMethod, getConnMethod);
+        });
+    }
+
+    private static Func<DbParameter>? ResolveProviderParameterFactory(IEnumerable<Assembly> assemblies)
+    {
+        var npgsqlAsm = assemblies.FirstOrDefault(a => a.GetName().Name == "Npgsql");
+        if (npgsqlAsm is null)
+            return null;
+
+        var key = npgsqlAsm.FullName ?? npgsqlAsm.GetName().Name ?? "Npgsql";
+        return SProviderParameterFactoryCache.GetOrAdd(key, _ =>
+        {
+            var npgsqlParamType = npgsqlAsm.GetType("Npgsql.NpgsqlParameter");
+            if (npgsqlParamType is null)
+                return null;
+
+            return () => (DbParameter)Activator.CreateInstance(npgsqlParamType)!;
+        });
     }
 
     // Resets EF Core RelationalConnection._openedCount to 0 so that SetDbConnection can

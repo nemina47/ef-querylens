@@ -8,6 +8,7 @@ internal static class EvalSourceTemplateCatalog
     private static readonly Lazy<string> SSqlCaptureScope = new(() => LoadTemplate("SqlCaptureScope.cs.tmpl"));
     private static readonly Lazy<string> SOfflineCapture = new(() => LoadTemplate("OfflineCapture.cs.tmpl"));
     private static readonly Lazy<string> SRunner = new(() => LoadTemplate("Runner.cs.tmpl"));
+    private static readonly Lazy<string> SRunnerAsync = new(() => LoadTemplate("RunnerAsync.cs.tmpl"));
 
     internal static string CapturedTypes => SCapturedTypes.Value;
     internal static string OfflineDbConnection => SOfflineDbConnection.Value;
@@ -15,6 +16,7 @@ internal static class EvalSourceTemplateCatalog
     internal static string SqlCaptureScope => SSqlCaptureScope.Value;
     internal static string OfflineCapture => SOfflineCapture.Value;
     internal static string Runner => SRunner.Value;
+    internal static string RunnerAsync => SRunnerAsync.Value;
 
     internal static string Render(string template, IReadOnlyDictionary<string, string> tokens)
     {

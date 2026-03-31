@@ -1,7 +1,7 @@
 public static class __QueryLensRunner__
 {
     #region Main Entry Point
-    public static object? Run(object __ctx__)
+    public static async System.Threading.Tasks.Task<object?> RunAsync(object __ctx__, System.Threading.CancellationToken ct = default)
     {
 __QL_CONTEXT_DECL__
 __QL_STUBS__
@@ -18,7 +18,7 @@ __QL_STUBS__
         try
         {
             __query = (object?)(__QL_EXPRESSION__);
-            __query = UnwrapTask(__query);
+            __query = await UnwrapTaskAsync(__query, ct).ConfigureAwait(false);
             
             if (__captureInstalled && __query is System.Collections.IEnumerable __enumerable)
                 EnumerateQueryable(__enumerable);
@@ -47,11 +47,12 @@ __QL_STUBS__
     #endregion
 
     #region Helpers
-    private static object? UnwrapTask(object? value)
+    private static async System.Threading.Tasks.Task<object?> UnwrapTaskAsync(object? value, System.Threading.CancellationToken ct)
     {
         if (value is not System.Threading.Tasks.Task task)
             return value;
-        task.GetAwaiter().GetResult();
+
+        await task.WaitAsync(ct).ConfigureAwait(false);
         var resultProp = value.GetType().GetProperty("Result");
         return resultProp?.GetValue(value);
     }

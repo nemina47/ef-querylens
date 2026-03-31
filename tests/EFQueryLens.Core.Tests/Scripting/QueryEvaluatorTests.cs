@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.IO;
+using System.Text.RegularExpressions;
 using EFQueryLens.Core.AssemblyContext;
 using EFQueryLens.Core.Contracts;
 using EFQueryLens.Core.Scripting;
@@ -89,6 +90,7 @@ public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
         IReadOnlyList<string>? additionalImports = null,
         IReadOnlyDictionary<string, string>? usingAliases = null,
         IReadOnlyList<string>? usingStaticTypes = null,
+        bool useAsyncRunner = false,
         CancellationToken ct = default) =>
         _evaluator.EvaluateAsync(_alcCtx,
             new TranslationRequest
@@ -100,6 +102,7 @@ public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
                 UsingAliases = usingAliases
                     ?? new Dictionary<string, string>(StringComparer.Ordinal),
                 UsingStaticTypes = usingStaticTypes ?? [],
+                UseAsyncRunner = useAsyncRunner,
             }, ct);
 
     // ─── Basic translation ────────────────────────────────────────────────────
@@ -112,27 +115,6 @@ public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
         Assert.True(result.Success, result.ErrorMessage);
         Assert.NotNull(result.Sql);
         Assert.Contains("Orders", result.Sql, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact(Skip = "Pre-existing EF Core reflection issue: TranslateExecuteUpdate method not found in current EF Core version")]
-    public async Task Evaluate_SqlServerSample_SimpleDbSet_ReturnsSql()
-    {
-        using var sqlAlcCtx = new ProjectAssemblyContext(GetSampleSqlServerAppDll());
-        var evaluator = new QueryEvaluator();
-
-        var result = await evaluator.EvaluateAsync(
-            sqlAlcCtx,
-            new TranslationRequest
-            {
-                AssemblyPath = sqlAlcCtx.AssemblyPath,
-                Expression = "db.Customers",
-                DbContextTypeName = "SampleSqlServerApp.Infrastructure.Persistence.SqlServerAppDbContext",
-            });
-
-        Assert.True(result.Success, result.ErrorMessage);
-        Assert.NotNull(result.Sql);
-        Assert.Contains("Customers", result.Sql, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("Microsoft.EntityFrameworkCore.SqlServer", result.Metadata.ProviderName);
     }
 
     /// <summary>
@@ -953,6 +935,26 @@ public class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
     }
 
     [Fact]
+    public async Task Evaluate_AsyncRunnerMode_SimpleDbSet_ReturnsSql()
+    {
+        var result = await TranslateAsync("db.Orders", useAsyncRunner: true);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.Contains("Orders", result.Sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Evaluate_AsyncRunnerMode_AsyncTerminal_ReturnsSql()
+    {
+        var result = await TranslateAsync("db.Orders.Where(o => o.UserId == 5).ToListAsync(ct)", useAsyncRunner: true);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.Contains("WHERE", result.Sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Evaluate_FindCall_RewritesPkTypeAndReturnsSql()
     {
         // Find(someId) — key arg is rewritten to Find(default(int)) via EF model PK lookup.
@@ -1344,6 +1346,117 @@ public sealed class C
         Assert.DoesNotContain("public override Type GetFieldType", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void BuildEvalSource_DeduplicatesUsingDirectives()
+    {
+        var dbContextType = _alcCtx.FindDbContextType("MySqlAppDbContext");
+        var request = new TranslationRequest
+        {
+            AssemblyPath = _alcCtx.AssemblyPath,
+            Expression = "db.Orders",
+            ContextVariableName = "db",
+            AdditionalImports =
+            [
+                "System",
+                "System.Linq",
+                "System.Linq",
+                "SampleMySqlApp.Domain.Entities",
+            ],
+            UsingAliases = new Dictionary<string, string>(StringComparer.Ordinal),
+            UsingStaticTypes = ["System.Math", "System.Math"],
+        };
+
+        var buildEvalSourceMethod = typeof(QueryEvaluator).GetMethod(
+            "BuildEvalSource",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.NotNull(buildEvalSourceMethod);
+
+        var source = buildEvalSourceMethod!.Invoke(
+            null,
+            [
+                dbContextType,
+                request,
+                Array.Empty<string>(),
+                new HashSet<string>(StringComparer.Ordinal)
+                {
+                    "System",
+                    "System.Linq",
+                    "SampleMySqlApp.Domain.Entities",
+                },
+                new HashSet<string>(StringComparer.Ordinal)
+                {
+                    "System.Math",
+                    "SampleMySqlApp.Domain.Entities.Order",
+                },
+                Array.Empty<string>(),
+                Array.Empty<string>(),
+                false,
+            ]) as string;
+
+        Assert.False(string.IsNullOrWhiteSpace(source));
+
+        var usingLines = source!
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => line.StartsWith("using ", StringComparison.Ordinal))
+            .ToArray();
+
+        var duplicates = usingLines
+            .GroupBy(line => line, StringComparer.Ordinal)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToArray();
+
+        Assert.Empty(duplicates);
+    }
+
+    [Fact]
+    public void QueryEvaluator_DumpSourceFlag_RespectsEnvironmentVariable()
+    {
+        var previous = Environment.GetEnvironmentVariable("QUERYLENS_DUMP_SOURCE");
+        try
+        {
+            Environment.SetEnvironmentVariable("QUERYLENS_DUMP_SOURCE", "true");
+            var enabledEvaluator = new QueryEvaluator();
+            var enabled = InvokeShouldDumpGeneratedSource(enabledEvaluator);
+            Assert.True(enabled);
+
+            Environment.SetEnvironmentVariable("QUERYLENS_DUMP_SOURCE", null);
+            var disabledEvaluator = new QueryEvaluator();
+            var disabled = InvokeShouldDumpGeneratedSource(disabledEvaluator);
+            Assert.False(disabled);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("QUERYLENS_DUMP_SOURCE", previous);
+        }
+    }
+
+    [Fact]
+    public void DumpGeneratedSourceToTemp_WritesTimestampedFile()
+    {
+        var evaluator = new QueryEvaluator();
+        var source = "public sealed class __QueryLensRunner__ { }";
+
+        var path = InvokeDumpGeneratedSourceToTemp(evaluator, source);
+
+        try
+        {
+            Assert.NotEqual("(could not write temp file)", path);
+            Assert.True(File.Exists(path));
+            Assert.Matches(new Regex(@"^ql_eval_\d{8}_\d{6}_\d{3}(?:_\d+)?\.cs$", RegexOptions.CultureInvariant), Path.GetFileName(path));
+            var written = File.ReadAllText(path);
+            Assert.Equal(source, written);
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
     private string BuildStubDeclarationForTest(string missingName, string expression)
         => BuildStubDeclarationForRequestForTest(missingName, expression);
 
@@ -1418,6 +1531,28 @@ public sealed class C
 
         var value = method!.Invoke(null, [errors, compilation, assemblies]);
         return Assert.IsAssignableFrom<IReadOnlyList<string>>(value);
+    }
+
+    private static bool InvokeShouldDumpGeneratedSource(QueryEvaluator evaluator)
+    {
+        var method = typeof(QueryEvaluator).GetMethod(
+            "ShouldDumpGeneratedSource",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+
+        Assert.NotNull(method);
+        var value = method!.Invoke(evaluator, null);
+        return Assert.IsType<bool>(value);
+    }
+
+    private static string InvokeDumpGeneratedSourceToTemp(QueryEvaluator evaluator, string source)
+    {
+        var method = typeof(QueryEvaluator).GetMethod(
+            "DumpGeneratedSourceToTemp",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+
+        Assert.NotNull(method);
+        var value = method!.Invoke(evaluator, [source]);
+        return Assert.IsType<string>(value);
     }
 }
 

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Reflection;
 using EFQueryLens.Core.AssemblyContext;
 using EFQueryLens.Core.Contracts;
+using EFQueryLens.Core.Scripting.Compilation;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -29,12 +30,18 @@ public sealed partial class QueryEvaluator
             var contextResolutionWatch = Stopwatch.StartNew();
             try
             {
-                dbContextType = alcCtx.FindDbContextType(request.DbContextTypeName, request.Expression);
+                dbContextType = alcCtx.FindDbContextType(
+                    request.DbContextTypeName,
+                    request.Expression,
+                    request.DbContextResolution);
             }
             catch (InvalidOperationException ex) when (IsNoDbContextFoundError(ex))
             {
                 TryLoadSiblingAssemblies(alcCtx);
-                dbContextType = alcCtx.FindDbContextType(request.DbContextTypeName, request.Expression);
+                dbContextType = alcCtx.FindDbContextType(
+                    request.DbContextTypeName,
+                    request.Expression,
+                    request.DbContextResolution);
             }
             contextResolutionWatch.Stop();
             TimeSpan? contextResolutionTime = contextResolutionWatch.Elapsed;
@@ -89,14 +96,27 @@ public sealed partial class QueryEvaluator
                         sw.Elapsed, dbContextType, alcCtx.LoadedAssemblies);
             }
 
+            // 2c. Pre-validate expression syntax before incurring compilation cost.
+            var syntaxErrors = RunnerGenerator.ValidateExpressionSyntax(request.Expression);
+            if (syntaxErrors.Count > 0)
+            {
+                return Failure(
+                    "Expression syntax error: " + string.Join("; ", syntaxErrors),
+                    sw.Elapsed, dbContextType, alcCtx.LoadedAssemblies);
+            }
+
             // 3. Build compilation assembly set and compute eval-runner cache key.
             var compilationAssemblies = BuildCompilationAssemblySet(alcCtx);
             var asmSetHash = ComputeAssemblySetHash(
                 compilationAssemblies);
+            var namespaceIndexCacheKey =
+                $"{Path.GetFullPath(alcCtx.AssemblyPath)}|{alcCtx.AssemblyTimestamp.Ticks}";
             var evalCacheKey =
                 $"{alcCtx.AssemblyPath}|{alcCtx.AssemblyTimestamp.Ticks}|{asmSetHash}|{dbContextType.FullName}|{ComputeRequestHash(request)}";
+            var useAsyncRunner = request.UseAsyncRunner;
 
-            MethodInfo runMethod;
+            SyncRunnerInvoker? syncRunner;
+            AsyncRunnerInvoker? asyncRunner;
             TimeSpan? metadataReferenceBuildTime;
             TimeSpan? roslynCompilationTime;
             TimeSpan? evalAssemblyLoadTime;
@@ -105,7 +125,8 @@ public sealed partial class QueryEvaluator
             {
                 // Warm path: skip MetadataRefs, namespace scan, compile, emit, load.
                 TouchEvalRunnerCacheEntry(evalCacheKey, cachedRunner);
-                runMethod = cachedRunner.RunMethod;
+                syncRunner = cachedRunner.SyncInvoker;
+                asyncRunner = cachedRunner.AsyncInvoker;
                 executedExpression = cachedRunner.ExecutedExpression;
                 metadataReferenceBuildTime = TimeSpan.Zero;
                 roslynCompilationTime = TimeSpan.Zero;
@@ -119,9 +140,9 @@ public sealed partial class QueryEvaluator
                 metadataReferenceWatch.Stop();
                 metadataReferenceBuildTime = metadataReferenceWatch.Elapsed;
 
-                // 5. Build known namespace/type index for import filtering (cached by assemblySetHash).
+                // 5. Build known namespace/type index for import filtering (cached by context identity).
                 var (knownNamespaces, knownTypes) = GetOrBuildNamespaceTypeIndex(
-                    asmSetHash,
+                    namespaceIndexCacheKey,
                     compilationAssemblies);
 
                 // 6. Compile -> emit -> load into user ALC -> invoke Run.
@@ -138,16 +159,7 @@ public sealed partial class QueryEvaluator
 
                 string DumpSrcToTemp()
                 {
-                    try
-                    {
-                        var path = Path.Combine(Path.GetTempPath(), $"ql_eval_{Guid.NewGuid():N}.cs");
-                        File.WriteAllText(path, lastSrc);
-                        return path;
-                    }
-                    catch
-                    {
-                        return "(could not write temp file)";
-                    }
+                    return DumpGeneratedSourceToTemp(lastSrc);
                 }
 
                 while (true)
@@ -166,6 +178,13 @@ public sealed partial class QueryEvaluator
                         synthesizedUsingNamespaces,
                         includeGridifyFallbackExtensions);
                     lastSrc = src;
+
+                    if (ShouldDumpGeneratedSource())
+                    {
+                        var dumpPath = DumpGeneratedSourceToTemp(src);
+                        LogDebug($"generated-source dump={dumpPath}");
+                    }
+
                     compilation = BuildCompilation(src, refs);
                     var errors = compilation.GetDiagnostics()
                         .Where(d => d.Severity == DiagnosticSeverity.Error)
@@ -355,6 +374,16 @@ public sealed partial class QueryEvaluator
                         changed = true;
                     }
 
+                    if (TryNormalizeInaccessibleProjectionTypeFromErrors(
+                            errors,
+                            workingExpression,
+                            out var inaccessibleProjectionNormalizedExpression)
+                        && !string.Equals(inaccessibleProjectionNormalizedExpression, workingExpression, StringComparison.Ordinal))
+                    {
+                        workingExpression = inaccessibleProjectionNormalizedExpression;
+                        changed = true;
+                    }
+
                     foreach (var import in InferMissingExtensionStaticImports(errors, compilation, compilationAssemblies))
                     {
                         if (synthesizedUsingStaticTypes.Add(import))
@@ -414,13 +443,19 @@ public sealed partial class QueryEvaluator
 
                 var runType = evalAssembly.GetType("__QueryLensRunner__")
                     ?? throw new InvalidOperationException("Could not find __QueryLensRunner__ in eval assembly.");
-                runMethod = runType.GetMethod("Run", BindingFlags.Public | BindingFlags.Static)
-                    ?? throw new InvalidOperationException("Could not find Run method in __QueryLensRunner__.");
+
+                syncRunner = useAsyncRunner ? null : CreateSyncRunnerInvoker(runType);
+                asyncRunner = useAsyncRunner ? CreateAsyncRunnerInvoker(runType) : null;
 
                 executedExpression = string.Equals(workingExpression, originalExpression, StringComparison.Ordinal)
                     ? null
                     : workingExpression;
-                _evalRunnerCache[evalCacheKey] = new EvalRunnerEntry(evalAssembly, runMethod, GetUtcNowTicks(), executedExpression);
+                _evalRunnerCache[evalCacheKey] = new EvalRunnerEntry(
+                    evalAssembly,
+                    syncRunner,
+                    asyncRunner,
+                    GetUtcNowTicks(),
+                    executedExpression);
                 TrimCacheByLastAccess(_evalRunnerCache, MaxEvalRunnerCacheEntries, static e => e.LastAccessTicks);
             } // end else (eval runner cache miss)
 
@@ -429,8 +464,13 @@ public sealed partial class QueryEvaluator
             IReadOnlyList<QuerySqlCommand> commands;
 
             var runnerExecutionWatch = Stopwatch.StartNew();
-            var runPayload = runMethod.Invoke(null, [dbInstance]);
-            var (queryable, captureSkipReason, captureError, capturedCommands) = ParseExecutionPayload(runPayload);
+            var (queryable, captureSkipReason, captureError, capturedCommands) = useAsyncRunner
+                ? await InvokeRunMethodAsync(
+                    asyncRunner ?? throw new InvalidOperationException("Async runner delegate was not initialized."),
+                    dbInstance,
+                    ct)
+                : ParseExecutionPayload(
+                    (syncRunner ?? throw new InvalidOperationException("Sync runner delegate was not initialized."))(dbInstance));
             runnerExecutionWatch.Stop();
             TimeSpan? runnerExecutionTime = runnerExecutionWatch.Elapsed;
 
@@ -558,5 +598,152 @@ public sealed partial class QueryEvaluator
         return node is IdentifierNameSyntax identifier
             ? identifier.Identifier.ValueText
             : null;
+    }
+
+    private static bool TryNormalizeInaccessibleProjectionTypeFromErrors(
+        IReadOnlyCollection<Diagnostic> errors,
+        string expression,
+        out string normalizedExpression)
+    {
+        normalizedExpression = expression;
+
+        // Private/internal projection DTOs (for example Program.BlogDto) are not visible
+        // to the generated eval assembly. Rewrite terminal Select new Type(...) to
+        // Select new { ... } so SQL translation can proceed.
+        var hasProtectionLevelError = errors.Any(d =>
+            d.Id == "CS0122" &&
+            d.GetMessage().Contains("inaccessible due to its protection level", StringComparison.OrdinalIgnoreCase));
+        if (!hasProtectionLevelError)
+            return false;
+
+        ExpressionSyntax parsed;
+        try
+        {
+            parsed = SyntaxFactory.ParseExpression(expression);
+        }
+        catch
+        {
+            return false;
+        }
+
+        var rewriter = new InaccessibleProjectionRewriter();
+        var rewritten = (ExpressionSyntax?)rewriter.Visit(parsed);
+        if (!rewriter.Changed || rewritten is null)
+            return false;
+
+        normalizedExpression = rewritten.ToString();
+        return !string.Equals(normalizedExpression, expression, StringComparison.Ordinal);
+    }
+
+    private sealed class InaccessibleProjectionRewriter : CSharpSyntaxRewriter
+    {
+        public bool Changed { get; private set; }
+
+        public override SyntaxNode? VisitInvocationExpression(InvocationExpressionSyntax node)
+        {
+            var visited = (InvocationExpressionSyntax?)base.VisitInvocationExpression(node);
+            if (visited?.Expression is not MemberAccessExpressionSyntax member
+                || member.Name.Identifier.ValueText != "Select"
+                || visited.ArgumentList.Arguments.Count != 1)
+                return visited;
+
+            var argument = visited.ArgumentList.Arguments[0];
+            var rewrittenArgExpression = RewriteProjectionLambda(visited, argument.Expression);
+            if (rewrittenArgExpression is null)
+                return visited;
+
+            Changed = true;
+            var rewrittenArg = argument.WithExpression(rewrittenArgExpression);
+            return visited.WithArgumentList(
+                visited.ArgumentList.WithArguments(
+                    SyntaxFactory.SingletonSeparatedList(rewrittenArg)));
+        }
+
+        private static ExpressionSyntax? RewriteProjectionLambda(
+            InvocationExpressionSyntax selectInvocation,
+            ExpressionSyntax expr)
+        {
+            switch (expr)
+            {
+                case SimpleLambdaExpressionSyntax simple when simple.Body is ObjectCreationExpressionSyntax objectCreation:
+                {
+                    var expectedNames = CollectDownstreamMemberNames(selectInvocation, simple.Parameter.Identifier.ValueText);
+                    return simple.WithBody(BuildAnonymousProjection(objectCreation, expectedNames));
+                }
+                case ParenthesizedLambdaExpressionSyntax paren when paren.Body is ObjectCreationExpressionSyntax objectCreation:
+                {
+                    var lambdaParam = paren.ParameterList.Parameters.FirstOrDefault()?.Identifier.ValueText;
+                    var expectedNames = string.IsNullOrWhiteSpace(lambdaParam)
+                        ? []
+                        : CollectDownstreamMemberNames(selectInvocation, lambdaParam!);
+                    return paren.WithBody(BuildAnonymousProjection(objectCreation, expectedNames));
+                }
+                default:
+                    return null;
+            }
+        }
+
+        private static AnonymousObjectCreationExpressionSyntax BuildAnonymousProjection(
+            ObjectCreationExpressionSyntax objectCreation,
+            IReadOnlyList<string> expectedNames)
+        {
+            var args = objectCreation.ArgumentList?.Arguments ?? [];
+            var members = new List<AnonymousObjectMemberDeclaratorSyntax>();
+
+            for (var i = 0; i < args.Count; i++)
+            {
+                var expression = args[i].Expression.WithoutTrivia();
+                var expectedName = i < expectedNames.Count ? expectedNames[i] : null;
+                var memberName = !string.IsNullOrWhiteSpace(expectedName)
+                    ? expectedName!
+                    : TryInferMemberName(expression) ?? $"__ql{i}";
+                members.Add(
+                    SyntaxFactory.AnonymousObjectMemberDeclarator(
+                        SyntaxFactory.NameEquals(memberName),
+                        expression));
+            }
+
+            if (members.Count == 0)
+            {
+                members.Add(
+                    SyntaxFactory.AnonymousObjectMemberDeclarator(
+                        SyntaxFactory.NameEquals("__ql0"),
+                        SyntaxFactory.LiteralExpression(SyntaxKind.NullLiteralExpression)));
+            }
+
+            return SyntaxFactory.AnonymousObjectCreationExpression(
+                SyntaxFactory.SeparatedList(members));
+        }
+
+        private static IReadOnlyList<string> CollectDownstreamMemberNames(
+            InvocationExpressionSyntax selectInvocation,
+            string lambdaParameter)
+        {
+            // Inspect only the immediately chained invocation (if any), which covers the
+            // common pattern: .Select(x => new PrivateDto(...)).Select(x => new { x.A, x.B })
+            // and allows us to preserve A/B member names when rewriting the first projection.
+            if (selectInvocation.Parent is not MemberAccessExpressionSyntax parentAccess
+                || parentAccess.Parent is not InvocationExpressionSyntax chainedInvocation)
+            {
+                return [];
+            }
+
+            return chainedInvocation.DescendantNodes()
+                .OfType<MemberAccessExpressionSyntax>()
+                .Where(m => m.Expression is IdentifierNameSyntax id
+                            && string.Equals(id.Identifier.ValueText, lambdaParameter, StringComparison.Ordinal))
+                .Select(m => m.Name.Identifier.ValueText)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+        }
+
+        private static string? TryInferMemberName(ExpressionSyntax expression) =>
+            expression switch
+            {
+                IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+                MemberAccessExpressionSyntax memberAccess => memberAccess.Name.Identifier.ValueText,
+                _ => null,
+            };
     }
 }

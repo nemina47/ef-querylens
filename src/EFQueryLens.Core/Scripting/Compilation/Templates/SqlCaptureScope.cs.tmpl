@@ -30,7 +30,8 @@ internal sealed class __QueryLensSqlCaptureScope__ : IDisposable
             .Select(p => new __QueryLensCapturedParameter__
             {
                 Name = string.IsNullOrWhiteSpace(p.ParameterName) ? "@p" : p.ParameterName,
-                ClrType = p.DbType.ToString(),
+                ClrType = p.Value?.GetType().FullName ?? "object",
+                DbTypeName = p.DbType.ToString(),
                 InferredValue = p.Value is null || p.Value is DBNull ? null : Convert.ToString(p.Value, CultureInfo.InvariantCulture),
             })
             .ToArray();

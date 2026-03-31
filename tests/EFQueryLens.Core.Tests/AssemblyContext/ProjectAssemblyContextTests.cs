@@ -1,4 +1,5 @@
 using EFQueryLens.Core.AssemblyContext;
+using EFQueryLens.Core.Contracts;
 
 namespace EFQueryLens.Core.Tests.AssemblyContext;
 
@@ -290,6 +291,69 @@ public class ProjectAssemblyContextTests
         var type = ctx.FindDbContextType(null, "db.CustomerDirectory");
 
         Assert.Equal("SampleMySqlApp.Infrastructure.Persistence.MySqlReportingDbContext", type.FullName);
+    }
+
+    [Fact]
+    public void FindDbContextType_WithMultipleFactoryCandidates_UsesExpressionHintToDisambiguate()
+    {
+        var dll = GetSampleMySqlAppDll();
+        using var ctx = new ProjectAssemblyContext(dll);
+
+        var type = ctx.FindDbContextType(
+            expressionHint: "db.CustomerDirectory.Where(c => c.IsActive)",
+            resolutionSnapshot: new DbContextResolutionSnapshot
+            {
+                FactoryCandidateTypeNames =
+                [
+                    "SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext",
+                    "SampleMySqlApp.Infrastructure.Persistence.MySqlReportingDbContext",
+                ],
+                ResolutionSource = "factory-candidates",
+                Confidence = 0.5,
+            });
+
+        Assert.Equal("SampleMySqlApp.Infrastructure.Persistence.MySqlReportingDbContext", type.FullName);
+    }
+
+    [Fact]
+    public void FindDbContextType_WhenRequestedContextConflictsWithExpressionRoot_ThrowsTypedException()
+    {
+        using var ctx = new ProjectAssemblyContext(GetSampleSqlServerAppDll());
+
+        var ex = Assert.Throws<DbContextDiscoveryException>(() =>
+            ctx.FindDbContextType(
+                "SampleSqlServerApp.Infrastructure.Persistence.SqlServerAppDbContext",
+                "db.CustomerDirectory"));
+
+        Assert.Equal(DbContextDiscoveryFailureKind.ConflictingDbContextHints, ex.FailureKind);
+        Assert.Contains("CustomerDirectory", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("SqlServerReportingDbContext", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FindDbContextType_WhenDeclaredAndFactoryHintsConflict_ThrowsTypedException()
+    {
+        using var ctx = new ProjectAssemblyContext(GetSampleSqlServerAppDll());
+
+        var ex = Assert.Throws<DbContextDiscoveryException>(() =>
+            ctx.FindDbContextType(
+                expressionHint: null,
+                resolutionSnapshot: new DbContextResolutionSnapshot
+                {
+                    DeclaredTypeName = "SampleSqlServerApp.Infrastructure.Persistence.SqlServerAppDbContext",
+                    FactoryTypeName = "SampleSqlServerApp.Infrastructure.Persistence.SqlServerReportingDbContext",
+                    FactoryCandidateTypeNames =
+                    [
+                        "SampleSqlServerApp.Infrastructure.Persistence.SqlServerAppDbContext",
+                        "SampleSqlServerApp.Infrastructure.Persistence.SqlServerReportingDbContext",
+                    ],
+                    ResolutionSource = "declared+factory-mismatch",
+                    Confidence = 0.4,
+                }));
+
+        Assert.Equal(DbContextDiscoveryFailureKind.ConflictingDbContextHints, ex.FailureKind);
+        Assert.Contains("declared", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("factory", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     // ─── ALC isolation ────────────────────────────────────────────────────────

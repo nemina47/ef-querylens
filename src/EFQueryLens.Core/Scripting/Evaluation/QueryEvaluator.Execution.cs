@@ -1,24 +1,50 @@
-using System.Collections.Concurrent;
 using System.Reflection;
 using EFQueryLens.Core.Contracts;
+using EFQueryLens.Core.Scripting.Contracts;
 
 namespace EFQueryLens.Core.Scripting.Evaluation;
 
 public sealed partial class QueryEvaluator
 {
-    private sealed record PayloadAccessors(
-        PropertyInfo Queryable,
-        PropertyInfo CaptureSkipReason,
-        PropertyInfo CaptureError,
-        PropertyInfo Commands);
+    private static async Task<(object? Queryable, string? CaptureSkipReason, string? CaptureError, IReadOnlyList<QuerySqlCommand> Commands)>
+        InvokeRunMethodAsync(
+            AsyncRunnerInvoker runAsync,
+            object dbInstance,
+            CancellationToken ct)
+    {
+        var payload = await runAsync(dbInstance, ct).ConfigureAwait(false);
+        return ParseExecutionPayload(payload);
+    }
 
-    private sealed record CommandAccessors(PropertyInfo? Sql, PropertyInfo? Parameters);
+    private static SyncRunnerInvoker CreateSyncRunnerInvoker(Type runType)
+    {
+        var runMethod = runType.GetMethod("Run", BindingFlags.Public | BindingFlags.Static)
+            ?? throw new InvalidOperationException("Could not find Run method in __QueryLensRunner__.");
 
-    private sealed record ParameterAccessors(PropertyInfo? Name, PropertyInfo? ClrType, PropertyInfo? InferredValue);
+        try
+        {
+            return (SyncRunnerInvoker)Delegate.CreateDelegate(typeof(SyncRunnerInvoker), runMethod);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException("Could not bind sync runner delegate for __QueryLensRunner__.Run.", ex);
+        }
+    }
 
-    private static readonly ConcurrentDictionary<Type, PayloadAccessors> SPayloadAccessors = new();
-    private static readonly ConcurrentDictionary<Type, CommandAccessors> SCommandAccessors = new();
-    private static readonly ConcurrentDictionary<Type, ParameterAccessors> SParameterAccessors = new();
+    private static AsyncRunnerInvoker CreateAsyncRunnerInvoker(Type runType)
+    {
+        var runMethod = runType.GetMethod("RunAsync", BindingFlags.Public | BindingFlags.Static)
+            ?? throw new InvalidOperationException("Could not find RunAsync method in __QueryLensRunner__.");
+
+        try
+        {
+            return (AsyncRunnerInvoker)Delegate.CreateDelegate(typeof(AsyncRunnerInvoker), runMethod);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException("Could not bind async runner delegate for __QueryLensRunner__.RunAsync.", ex);
+        }
+    }
 
     private static (object? Queryable, string? CaptureSkipReason, string? CaptureError, IReadOnlyList<QuerySqlCommand> Commands)
         ParseExecutionPayload(object? payload)
@@ -26,116 +52,44 @@ public sealed partial class QueryEvaluator
         if (payload is null)
             return (null, "Generated runner returned null payload.", null, []);
 
-        var payloadType = payload.GetType();
-
-        // Validate structure upfront to fail fast on runner/parser version mismatches.
-        var payloadAccessors = ValidatePayloadStructure(payloadType);
-        var queryable = payloadAccessors.Queryable.GetValue(payload);
-        var captureSkipReason = payloadAccessors.CaptureSkipReason.GetValue(payload) as string;
-        var captureError = payloadAccessors.CaptureError.GetValue(payload) as string;
-
-        var commandsObj = payloadAccessors.Commands.GetValue(payload) as System.Collections.IEnumerable;
-
-        var commands = new List<QuerySqlCommand>();
-        if (commandsObj is null)
-            return (queryable, captureSkipReason, captureError, commands);
-
-        foreach (var cmdObj in commandsObj)
+        if (payload is not IQueryLensExecutionPayload typedPayload)
         {
-            if (cmdObj is null)
-                continue;
-
-            var cmdType = cmdObj.GetType();
-            var commandAccessors = SCommandAccessors.GetOrAdd(cmdType, static t =>
-            {
-                var sql = t.GetProperty("Sql", BindingFlags.Public | BindingFlags.Instance);
-                var parameters = t.GetProperty("Parameters", BindingFlags.Public | BindingFlags.Instance);
-                return new CommandAccessors(sql, parameters);
-            });
-
-            var sql = commandAccessors.Sql?.GetValue(cmdObj) as string;
-
-            if (string.IsNullOrWhiteSpace(sql))
-                continue;
-
-            var parameters = new List<QueryParameter>();
-            var paramsObj = commandAccessors.Parameters?.GetValue(cmdObj) as System.Collections.IEnumerable;
-
-            if (paramsObj is not null)
-            {
-                foreach (var paramObj in paramsObj)
-                {
-                    if (paramObj is null)
-                        continue;
-
-                    var paramType = paramObj.GetType();
-                    var parameterAccessors = SParameterAccessors.GetOrAdd(paramType, static t =>
-                    {
-                        var name = t.GetProperty("Name", BindingFlags.Public | BindingFlags.Instance);
-                        var clrType = t.GetProperty("ClrType", BindingFlags.Public | BindingFlags.Instance);
-                        var inferredValue = t.GetProperty("InferredValue", BindingFlags.Public | BindingFlags.Instance);
-                        return new ParameterAccessors(name, clrType, inferredValue);
-                    });
-
-                    var name = parameterAccessors.Name?.GetValue(paramObj) as string;
-                    var clrType = parameterAccessors.ClrType?.GetValue(paramObj) as string;
-                    var inferredValue = parameterAccessors.InferredValue?.GetValue(paramObj) as string;
-
-                    parameters.Add(new QueryParameter
-                    {
-                        Name = string.IsNullOrWhiteSpace(name) ? "@p" : name,
-                        ClrType = string.IsNullOrWhiteSpace(clrType) ? "object" : clrType,
-                        InferredValue = inferredValue,
-                    });
-                }
-            }
-
-            commands.Add(new QuerySqlCommand
-            {
-                Sql = sql,
-                Parameters = parameters,
-            });
+            throw new InvalidOperationException(
+                $"Payload contract mismatch: generated runner returned '{payload.GetType().FullName}', " +
+                $"which does not implement {nameof(IQueryLensExecutionPayload)}.");
         }
 
-        return (queryable, captureSkipReason, captureError, commands);
-    }
-
-    /// <summary>
-    /// Validates that the payload has the expected structure.
-    /// Throws InvalidOperationException if structure mismatch is detected.
-    /// </summary>
-    private static PayloadAccessors ValidatePayloadStructure(Type payloadType)
-    {
-        return SPayloadAccessors.GetOrAdd(payloadType, static t =>
+        if (typedPayload.PayloadContractVersion != QueryLensGeneratedPayloadContract.Version)
         {
-            var properties = t.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .ToDictionary(p => p.Name, StringComparer.Ordinal);
+            throw new InvalidOperationException(
+                $"Payload contract version mismatch: expected {QueryLensGeneratedPayloadContract.Version} " +
+                $"but runner returned {typedPayload.PayloadContractVersion}.");
+        }
 
-            var expectedProperties = new[] { "Queryable", "CaptureSkipReason", "CaptureError", "Commands" };
-            foreach (var expected in expectedProperties)
+        var commands = typedPayload.Commands
+            .Where(static command => !string.IsNullOrWhiteSpace(command.Sql))
+            .Select(static command => new QuerySqlCommand
             {
-                if (!properties.ContainsKey(expected))
-                {
-                    throw new InvalidOperationException(
-                        $"Payload structure mismatch: missing property '{expected}'. " +
-                        $"Actual: {string.Join(", ", properties.Keys.OrderBy(static x => x, StringComparer.Ordinal))}. " +
-                        "This may indicate a version conflict between the script runner and parser.");
-                }
-            }
+                Sql = command.Sql,
+                Parameters = command.Parameters
+                    .Where(static parameter => parameter is not null)
+                    .Select(static parameter => new QueryParameter
+                    {
+                        Name = string.IsNullOrWhiteSpace(parameter.Name) ? "@p" : parameter.Name,
+                        ClrType = string.IsNullOrWhiteSpace(parameter.ClrType)
+                            ? (string.IsNullOrWhiteSpace(parameter.DbTypeName) ? "object" : parameter.DbTypeName)
+                            : parameter.ClrType,
+                        InferredValue = parameter.InferredValue,
+                    })
+                    .ToList(),
+            })
+            .ToList();
 
-            var commandsProp = properties["Commands"];
-            if (!typeof(System.Collections.IEnumerable).IsAssignableFrom(commandsProp.PropertyType))
-            {
-                throw new InvalidOperationException(
-                    $"Payload structure mismatch: property 'Commands' must be enumerable but was '{commandsProp.PropertyType.FullName}'.");
-            }
-
-            return new PayloadAccessors(
-                properties["Queryable"],
-                properties["CaptureSkipReason"],
-                properties["CaptureError"],
-                commandsProp);
-        });
+        return (
+            typedPayload.Queryable,
+            typedPayload.CaptureSkipReason,
+            typedPayload.CaptureError,
+            commands);
     }
 }
 

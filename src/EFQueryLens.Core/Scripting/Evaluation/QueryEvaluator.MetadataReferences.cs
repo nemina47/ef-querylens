@@ -140,13 +140,41 @@ public sealed partial class QueryEvaluator
     private static string ComputeAssemblySetHash(List<Assembly> assemblies)
     {
         var sb = new StringBuilder();
-        foreach (var p in assemblies.Select(a => a.Location)
-                     .Where(l => !string.IsNullOrEmpty(l))
-                     .Order(StringComparer.OrdinalIgnoreCase))
+        foreach (var asm in assemblies
+                     .Where(ShouldIncludeInAssemblySetHash)
+                     .OrderBy(a => a.GetName().Name, StringComparer.Ordinal))
         {
-            sb.Append(p).Append('|');
+            var name = asm.GetName().Name ?? string.Empty;
+            string mvid;
+            try
+            {
+                mvid = asm.ManifestModule.ModuleVersionId.ToString("N");
+            }
+            catch
+            {
+                mvid = asm.FullName ?? string.Empty;
+            }
+
+            sb.Append(name).Append('|').Append(mvid).Append(';');
         }
 
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())))[..8];
+    }
+
+    private static bool ShouldIncludeInAssemblySetHash(Assembly assembly)
+    {
+        var assemblyName = assembly.GetName().Name;
+        if (!string.IsNullOrWhiteSpace(assemblyName)
+            && assemblyName.StartsWith("__QueryLensEval_", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var assemblyPath = assembly.Location;
+        var fileName = Path.GetFileNameWithoutExtension(assemblyPath);
+        if (fileName.StartsWith("__QueryLensEval_", StringComparison.Ordinal))
+            return false;
+
+        return true;
     }
 }

@@ -19,21 +19,41 @@ public sealed partial class QueryEvaluator
         bool includeGridifyFallbackExtensions)
     {
         var sb = new StringBuilder();
+        var emittedUsings = new HashSet<string>(StringComparer.Ordinal);
 
-        AppendBaseUsings(sb);
-        AppendRequestUsings(sb, request, knownNamespaces, knownTypes, synthesizedUsingStaticTypes, synthesizedUsingNamespaces);
+        sb.AppendLine("#region Metadata");
+        AppendBaseUsings(sb, emittedUsings);
+        AppendRequestUsings(sb, emittedUsings, request, knownNamespaces, knownTypes, synthesizedUsingStaticTypes, synthesizedUsingNamespaces);
+        sb.AppendLine("#endregion");
         sb.AppendLine();
+        
+        sb.AppendLine("#region Type Definitions");
         sb.Append(EvalSourceTemplateCatalog.CapturedTypes);
+        sb.AppendLine("#endregion");
         sb.AppendLine();
+        
+        sb.AppendLine("#region Offline Infrastructure");
         sb.Append(EvalSourceTemplateCatalog.OfflineDbConnection);
         sb.AppendLine();
         sb.Append(EvalSourceTemplateCatalog.FakeDbDataReader);
+        sb.AppendLine("#endregion");
         sb.AppendLine();
+        
+        sb.AppendLine("#region SQL Capture");
         sb.Append(EvalSourceTemplateCatalog.SqlCaptureScope);
+        sb.AppendLine("#endregion");
         sb.AppendLine();
+        
+        sb.AppendLine("#region Capture Setup");
         sb.Append(EvalSourceTemplateCatalog.OfflineCapture);
+        sb.AppendLine("#endregion");
+        sb.AppendLine();
+        
         AppendFallbackExtensions(sb, includeGridifyFallbackExtensions);
+        
+        sb.AppendLine("#region Execution");
         AppendRunner(sb, dbContextType, request, stubs);
+        sb.AppendLine("#endregion");
 
         return sb.ToString();
     }
