@@ -9,5 +9,19 @@
     <PackageProjectUrl>https://github.com/querylenshq/ef-querylens</PackageProjectUrl>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <_ProjectDirNormalized>$([System.String]::Copy('$(MSBuildProjectDirectory)').Replace('\\', '/'))</_ProjectDirNormalized>
+    <_IsSrcProject>$([System.String]::Copy('$(_ProjectDirNormalized)').Contains('/src/'))</_IsSrcProject>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(_IsSrcProject)' == 'true'">
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <AnalysisMode>Recommended</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <CodeAnalysisTreatWarningsAsErrors>false</CodeAnalysisTreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(_IsSrcProject)' != 'true'">
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
   </PropertyGroup>
 </Project>

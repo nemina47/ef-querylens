@@ -28,6 +28,24 @@ This document defines the default engineering baseline for EF QueryLens as an op
   - Kotlin: ktlint
   - TypeScript/JSON/Markdown/YAML: Prettier
 
+### Microsoft OSS Alignment (Src Projects)
+
+For C# projects under `src/`, follow a Microsoft .NET OSS-aligned baseline:
+
+- Use nullable correctness and explicit argument validation for public entry points.
+- Keep async APIs explicit and consistently named (`*Async`).
+- Prefer precise exception types with actionable error messages.
+- Control complexity in long methods and high-branching paths by extracting focused helpers.
+- Keep file/class boundaries discoverable; avoid excessive partial fragmentation.
+
+Initial enforcement is warning-first. Analyzer and code-style diagnostics should surface in local builds and CI without blocking PRs. After baseline cleanup, enforcement can ratchet to block new violations only.
+
+### Enforcement Modes
+
+- Stage A: warnings only (current default).
+- Stage B: block on new violations in selected pilot areas.
+- Stage C: selective hard-fail for high-value reliability and maintainability rules.
+
 ## Documentation Standards
 
 - Update `README.md` for changes that affect installation, supported scenarios, or user-facing features.
