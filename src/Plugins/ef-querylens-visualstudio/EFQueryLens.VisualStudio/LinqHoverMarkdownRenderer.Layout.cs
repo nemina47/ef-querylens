@@ -8,7 +8,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using Microsoft.VisualStudio.Shell;
@@ -18,7 +17,7 @@ internal static partial class LinqHoverMarkdownRenderer
     private static FrameworkElement RenderHeading(string text, double size, string? preferredCopySql)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var tb = new TextBlock
+        TextBlock tb = new()
         {
             FontWeight = FontWeights.SemiBold,
             FontSize = size,
@@ -35,7 +34,7 @@ internal static partial class LinqHoverMarkdownRenderer
     private static FrameworkElement RenderParagraph(string text, string? preferredCopySql)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var tb = new TextBlock
+        TextBlock tb = new()
         {
             FontSize = 12,
             Foreground = new SolidColorBrush(Color.FromRgb(0xd4, 0xd4, 0xd4)),
@@ -51,7 +50,7 @@ internal static partial class LinqHoverMarkdownRenderer
     private static FrameworkElement RenderSecondaryItalic(string text, string? preferredCopySql)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var tb = new TextBlock
+        TextBlock tb = new()
         {
             FontSize = 11,
             FontStyle = FontStyles.Italic,
@@ -68,7 +67,7 @@ internal static partial class LinqHoverMarkdownRenderer
     private static FrameworkElement RenderHeaderLine(string text, string? preferredCopySql)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var tb = new TextBlock
+        TextBlock tb = new()
         {
             FontSize = 13,
             FontWeight = FontWeights.Normal,
@@ -85,15 +84,15 @@ internal static partial class LinqHoverMarkdownRenderer
     private static FrameworkElement RenderBullet(string text, string? preferredCopySql)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var panel = new DockPanel { Margin = new Thickness(0, 1, 0, 1) };
-        var bullet = new TextBlock
+        DockPanel panel = new() { Margin = new Thickness(0, 1, 0, 1) };
+        TextBlock bullet = new()
         {
             Text = "• ",
             Width = 16,
             Foreground = new SolidColorBrush(Color.FromRgb(0xd4, 0xd4, 0xd4)),
             FontFamily = new FontFamily("Segoe UI"),
         };
-        var content = new TextBlock
+        TextBlock content = new()
         {
             Foreground = new SolidColorBrush(Color.FromRgb(0xd4, 0xd4, 0xd4)),
             TextWrapping = TextWrapping.Wrap,
@@ -109,9 +108,9 @@ internal static partial class LinqHoverMarkdownRenderer
     private static FrameworkElement RenderCodeBlock(string language, IReadOnlyCollection<string> lines)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var codeStack = new StackPanel { Margin = new Thickness(0) };
+        StackPanel codeStack = new() { Margin = new Thickness(0) };
 
-        var languageLabel = string.IsNullOrWhiteSpace(language)
+        string? languageLabel = string.IsNullOrWhiteSpace(language)
             ? null
             : language.Trim().ToUpperInvariant();
         if (!string.IsNullOrWhiteSpace(languageLabel))
@@ -127,10 +126,10 @@ internal static partial class LinqHoverMarkdownRenderer
             });
         }
 
-        foreach (var line in lines.DefaultIfEmpty(string.Empty))
+        foreach (string? line in lines.DefaultIfEmpty(string.Empty))
         {
-            var displayLine = line.Replace("\\`", "`");
-            var tb = new TextBlock
+            string displayLine = line.Replace("\\`", "`");
+            TextBlock tb = new()
             {
                 FontFamily = new FontFamily("Consolas"),
                 FontSize = 12,
@@ -172,7 +171,7 @@ internal static partial class LinqHoverMarkdownRenderer
             codeStack.Children.Add(tb);
         }
 
-        var innerScrollViewer = new ScrollViewer
+        ScrollViewer innerScrollViewer = new()
         {
             Content = codeStack,
             HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -181,7 +180,7 @@ internal static partial class LinqHoverMarkdownRenderer
         };
         innerScrollViewer.PreviewMouseWheel += ForwardMouseWheelToOuterScrollViewer;
 
-        var border = new Border
+        Border border = new()
         {
             Background = new SolidColorBrush(Color.FromRgb(0x11, 0x11, 0x11)),
             BorderBrush = new SolidColorBrush(Color.FromRgb(0x35, 0x35, 0x35)),
@@ -212,7 +211,7 @@ internal static partial class LinqHoverMarkdownRenderer
         }
 
         e.Handled = true;
-        var forwarded = new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
+        MouseWheelEventArgs forwarded = new(e.MouseDevice, e.Timestamp, e.Delta)
         {
             RoutedEvent = UIElement.MouseWheelEvent,
             Source = sender,

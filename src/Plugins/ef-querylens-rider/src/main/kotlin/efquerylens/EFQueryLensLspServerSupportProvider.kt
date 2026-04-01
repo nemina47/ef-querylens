@@ -30,36 +30,19 @@ class EFQueryLensLspServerSupportProvider : LspServerSupportProvider {
         file: VirtualFile,
         serverStarter: LspServerSupportProvider.LspServerStarter,
     ) {
-        logInfo(project, "[EFQueryLens] fileOpened path='${file.path}' extension='${file.extension}'")
+        logInfo("[EFQueryLens] fileOpened path='${file.path}' extension='${file.extension}'")
         if (!isSupported(file)) {
-            logInfo(project, "[EFQueryLens] fileOpened skipped unsupported file '${file.path}'")
+            logInfo("[EFQueryLens] fileOpened skipped unsupported file '${file.path}'")
             return
         }
 
-        logInfo(project, "[EFQueryLens] Ensuring LSP server is started for '${file.path}'")
+        logInfo("[EFQueryLens] Ensuring LSP server is started for '${file.path}'")
         serverStarter.ensureServerStarted(EFQueryLensServerDescriptor(project))
     }
 
     private fun isSupported(file: VirtualFile): Boolean = file.extension.equals("cs", ignoreCase = true)
 
-    private fun logInfo(
-        project: Project,
-        message: String,
-    ) {
-        thisLogger().info(message)
-    }
-
-    private fun logWarn(
-        project: Project,
-        message: String,
-        error: Throwable? = null,
-    ) {
-        if (error == null) {
-            thisLogger().warn(message)
-            return
-        }
-        thisLogger().warn(message, error)
-    }
+    private fun logInfo(message: String) = thisLogger().info(message)
 }
 
 private class EFQueryLensServerDescriptor(

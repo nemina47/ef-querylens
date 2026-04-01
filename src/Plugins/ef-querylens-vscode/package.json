@@ -128,16 +128,21 @@
     "vscode:prepublish": "npm run compile && npm run prepare-runtime",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "prepare-runtime": "node ./scripts/prepareRuntime.mjs"
+    "prepare-runtime": "node ./scripts/prepareRuntime.mjs",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "sql-formatter": "^15.7.2",
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^3.2.4",
     "@types/node": "^18.0.0",
     "@types/vscode": "^1.110.0",
     "prettier": "^3.6.2",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vitest": "^3.2.4"
   }
 }

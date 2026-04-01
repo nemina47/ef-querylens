@@ -23,7 +23,7 @@ internal sealed partial class QueryLensLanguageClient
         processStartInfo.Environment["QUERYLENS_DAEMON_SHUTDOWN_ON_DISPOSE"] = "0";
         // Keep rolling-window latency at 20 samples by default, but honor explicit env overrides.
         // Under .NET Framework, reading a missing key from ProcessStartInfo.Environment can throw.
-        var avgWindowSamplesOverride = Environment.GetEnvironmentVariable("QUERYLENS_AVG_WINDOW_SAMPLES");
+        string avgWindowSamplesOverride = Environment.GetEnvironmentVariable("QUERYLENS_AVG_WINDOW_SAMPLES");
         if (string.IsNullOrWhiteSpace(avgWindowSamplesOverride))
         {
             processStartInfo.Environment["QUERYLENS_AVG_WINDOW_SAMPLES"] = "20";
@@ -34,27 +34,27 @@ internal sealed partial class QueryLensLanguageClient
         processStartInfo.Environment["QUERYLENS_CLIENT"] = "vs";
         processStartInfo.Environment["QUERYLENS_DEBUG"] = "1";
         processStartInfo.Environment["QUERYLENS_ENABLE_LSP_HOVER"] = "0";
-        var lspLogPath = BuildLspLogFilePath(workspaceRoot);
+        string lspLogPath = BuildLspLogFilePath(workspaceRoot);
         processStartInfo.Environment["QUERYLENS_LSP_LOG_FILE"] = lspLogPath;
         currentLspLogPath = lspLogPath;
-        var serverDirectory = Path.GetDirectoryName(serverPath) ?? string.Empty;
-        var extensionRoot = Path.GetDirectoryName(serverDirectory) ?? serverDirectory;
+        string serverDirectory = Path.GetDirectoryName(serverPath) ?? string.Empty;
+        string extensionRoot = Path.GetDirectoryName(serverDirectory) ?? serverDirectory;
 
         // Bundled daemon (from VSIX/local extension layout) only.
-        var daemonExeCandidates = new List<string>
+        List<string> daemonExeCandidates = new()
         {
             Path.Combine(extensionRoot, "daemon", "EFQueryLens.Daemon.exe"),
             Path.Combine(serverDirectory, "daemon", "EFQueryLens.Daemon.exe"),
             Path.Combine(serverDirectory, "EFQueryLens.Daemon.exe"),
         };
-        var daemonDllCandidates = new List<string>
+        List<string> daemonDllCandidates = new()
         {
             Path.Combine(extensionRoot, "daemon", "EFQueryLens.Daemon.dll"),
             Path.Combine(serverDirectory, "daemon", "EFQueryLens.Daemon.dll"),
             Path.Combine(serverDirectory, "EFQueryLens.Daemon.dll"),
         };
 
-        foreach (var candidate in daemonExeCandidates)
+        foreach (string candidate in daemonExeCandidates)
         {
             if (!File.Exists(candidate)) continue;
             Log($"daemon-exe-resolved path={candidate}");
@@ -62,7 +62,7 @@ internal sealed partial class QueryLensLanguageClient
             break;
         }
 
-        foreach (var candidate in daemonDllCandidates)
+        foreach (string candidate in daemonDllCandidates)
         {
             if (!File.Exists(candidate)) continue;
             Log($"daemon-dll-resolved path={candidate}");
@@ -77,7 +77,7 @@ internal sealed partial class QueryLensLanguageClient
         {
             while (!process.HasExited && !cancellationToken.IsCancellationRequested)
             {
-                var line = await process.StandardError.ReadLineAsync();
+                string? line = await process.StandardError.ReadLineAsync().ConfigureAwait(false);
                 if (line is null)
                 {
                     break;
@@ -103,7 +103,7 @@ internal sealed partial class QueryLensLanguageClient
     {
         try
         {
-            var line = $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}Z [INFO] pid={Process.GetCurrentProcess().Id} {message}{Environment.NewLine}";
+            string line = $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}Z [INFO] pid={Process.GetCurrentProcess().Id} {message}{Environment.NewLine}";
             File.AppendAllText(LogFilePath, line);
         }
         catch

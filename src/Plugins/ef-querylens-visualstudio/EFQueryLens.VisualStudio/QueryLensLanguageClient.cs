@@ -9,16 +9,12 @@ using System.ComponentModel.Composition;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.LanguageServer.Client;
 using Microsoft.VisualStudio.Shell;
-using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft.VisualStudio.Threading;
 using Microsoft.VisualStudio.Utilities;
-using Newtonsoft.Json.Linq;
 using StreamJsonRpc;
 
 [Export(typeof(ILanguageClient))]
@@ -114,11 +110,11 @@ internal sealed partial class QueryLensLanguageClient : ILanguageClient, ILangua
             throw new ObjectDisposedException(nameof(QueryLensLanguageClient));
         }
 
-        var extensionDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
+        string extensionDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
             ?? throw new InvalidOperationException("Unable to resolve extension assembly directory.");
 
-        var workspaceRoot = ResolveWorkspacePath(extensionDirectory);
-        var serverPath = ResolveServerPath(extensionDirectory);
+        var workspaceRoot = await ResolveWorkspacePathAsync(extensionDirectory).ConfigureAwait(false);
+        string serverPath = ResolveServerPath(extensionDirectory);
         Log($"lsp-server-path-resolved extensionDir={extensionDirectory} workspaceRoot={workspaceRoot} serverPath={serverPath} exists={File.Exists(serverPath)}");
         if (!File.Exists(serverPath))
         {
@@ -126,7 +122,7 @@ internal sealed partial class QueryLensLanguageClient : ILanguageClient, ILangua
             throw new FileNotFoundException("Could not find the QueryLens language server assembly.", serverPath);
         }
 
-        var processStartInfo = new ProcessStartInfo
+        ProcessStartInfo processStartInfo = new()
         {
             FileName = "dotnet",
             Arguments = $"\"{serverPath}\"",
@@ -147,7 +143,7 @@ internal sealed partial class QueryLensLanguageClient : ILanguageClient, ILangua
         }
 
         Log($"lsp-process-started pid={serverProcess.Id} path={serverPath} workspace={workspaceRoot}");
-        var pumpCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        CancellationTokenSource pumpCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         lock (Sync)
         {
             serverErrorPumpCts = pumpCts;
@@ -179,7 +175,7 @@ internal sealed partial class QueryLensLanguageClient : ILanguageClient, ILangua
     public async Task OnLoadedAsync()
     {
         Log("language-client-loaded");
-        await (StartAsync?.InvokeAsync(this, EventArgs.Empty) ?? Task.CompletedTask);
+        await (StartAsync?.InvokeAsync(this, EventArgs.Empty) ?? Task.CompletedTask).ConfigureAwait(false);
     }
 
     public Task OnServerInitializedAsync()

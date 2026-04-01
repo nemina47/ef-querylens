@@ -43,7 +43,7 @@ public partial class QueryLensEngineTests
         });
 
         Assert.True(first.Success, first.ErrorMessage);
-        Assert.Equal(0, GetPrivateCollectionCount(_engine, "_dbContextCreateGates"));
+        Assert.Equal(0, GetPrivateCollectionCount(_engine, "_createGates"));
 
         var second = await _engine.TranslateAsync(new TranslationRequest
         {
@@ -53,8 +53,8 @@ public partial class QueryLensEngineTests
         });
 
         Assert.True(second.Success, second.ErrorMessage);
-        Assert.Equal(0, GetPrivateCollectionCount(_engine, "_dbContextCreateGates"));
-        Assert.True(GetPrivateCollectionCount(_engine, "_dbContextPool") >= 1);
+        Assert.Equal(0, GetPrivateCollectionCount(_engine, "_createGates"));
+        Assert.True(GetPrivateCollectionCount(_engine, "_pool") >= 1);
     }
 
     [Fact]

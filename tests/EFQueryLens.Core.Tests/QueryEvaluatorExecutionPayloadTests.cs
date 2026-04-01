@@ -3,15 +3,15 @@ using System.Runtime.CompilerServices;
 using EFQueryLens.Core.Contracts;
 using EFQueryLens.Core.Scripting;
 using EFQueryLens.Core.Scripting.Contracts;
-using QueryEvaluator = EFQueryLens.Core.Scripting.Evaluation.QueryEvaluator;
+using RunnerExecutor = EFQueryLens.Core.Scripting.Evaluation.RunnerExecutor;
 
 namespace EFQueryLens.Core.Tests;
 
 public class QueryEvaluatorExecutionPayloadTests
 {
-    private static readonly MethodInfo s_parseExecutionPayload = typeof(QueryEvaluator)
+    private static readonly MethodInfo s_parseExecutionPayload = typeof(RunnerExecutor)
         .GetMethod("ParseExecutionPayload", BindingFlags.NonPublic | BindingFlags.Static)
-        ?? throw new InvalidOperationException("Could not find QueryEvaluator.ParseExecutionPayload via reflection.");
+        ?? throw new InvalidOperationException("Could not find RunnerExecutor.ParseExecutionPayload via reflection.");
 
     [Fact]
     public void ParseExecutionPayload_NonContractPayload_ThrowsInvalidOperationException()

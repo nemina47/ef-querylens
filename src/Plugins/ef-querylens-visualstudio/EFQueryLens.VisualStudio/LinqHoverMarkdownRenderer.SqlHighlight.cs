@@ -55,14 +55,14 @@ internal static partial class LinqHoverMarkdownRenderer
             return sqlKeywords.Contains(token);
         }
 
-        var defaultBrush = new SolidColorBrush(Color.FromRgb(0xd4, 0xd4, 0xd4));
-        var keywordBrush = new SolidColorBrush(Color.FromRgb(0x56, 0x9c, 0xd6));
-        var numberBrush = new SolidColorBrush(Color.FromRgb(0xb5, 0xce, 0xa8));
-        var stringBrush = new SolidColorBrush(Color.FromRgb(0xce, 0x91, 0x78));
-        var identifierBrush = new SolidColorBrush(Color.FromRgb(0x9c, 0xdc, 0xfe));
-        var commentBrush = new SolidColorBrush(Color.FromRgb(0x6a, 0x99, 0x55));
+        SolidColorBrush defaultBrush = new(Color.FromRgb(0xd4, 0xd4, 0xd4));
+        SolidColorBrush keywordBrush = new(Color.FromRgb(0x56, 0x9c, 0xd6));
+        SolidColorBrush numberBrush = new(Color.FromRgb(0xb5, 0xce, 0xa8));
+        SolidColorBrush stringBrush = new(Color.FromRgb(0xce, 0x91, 0x78));
+        SolidColorBrush identifierBrush = new(Color.FromRgb(0x9c, 0xdc, 0xfe));
+        SolidColorBrush commentBrush = new(Color.FromRgb(0x6a, 0x99, 0x55));
 
-        var i = 0;
+        int i = 0;
         while (i < line.Length)
         {
             if (i + 1 < line.Length && line[i] == '-' && line[i + 1] == '-')
@@ -73,13 +73,13 @@ internal static partial class LinqHoverMarkdownRenderer
 
             if (line[i] == '`')
             {
-                var end = line.IndexOf('`', i + 1);
+                int end = line.IndexOf('`', i + 1);
                 if (end < 0)
                 {
                     end = line.Length - 1;
                 }
 
-                var len = end - i + 1;
+                int len = end - i + 1;
                 target.Inlines.Add(new Run(line.Substring(i, len)) { Foreground = identifierBrush });
                 i += len;
                 continue;
@@ -87,7 +87,7 @@ internal static partial class LinqHoverMarkdownRenderer
 
             if (line[i] == '\'')
             {
-                var sb = new StringBuilder();
+                StringBuilder sb = new();
                 sb.Append(line[i]);
                 i++;
                 while (i < line.Length)
@@ -114,7 +114,7 @@ internal static partial class LinqHoverMarkdownRenderer
 
             if (char.IsDigit(line[i]))
             {
-                var start = i;
+                int start = i;
                 while (i < line.Length && (char.IsDigit(line[i]) || line[i] == '.'))
                 {
                     i++;
@@ -126,13 +126,13 @@ internal static partial class LinqHoverMarkdownRenderer
 
             if (IsIdentifierChar(line[i]))
             {
-                var start = i;
+                int start = i;
                 while (i < line.Length && IsIdentifierChar(line[i]))
                 {
                     i++;
                 }
 
-                var token = line.Substring(start, i - start);
+                string token = line.Substring(start, i - start);
                 target.Inlines.Add(new Run(token)
                 {
                     Foreground = IsKeyword(token) ? keywordBrush : defaultBrush,

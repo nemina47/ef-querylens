@@ -1,20 +1,20 @@
 using System.Reflection;
-using QueryEvaluator = EFQueryLens.Core.Scripting.Evaluation.QueryEvaluator;
+using StubSynthesizer = EFQueryLens.Core.Scripting.Evaluation.StubSynthesizer;
 
 namespace EFQueryLens.Core.Tests.Scripting;
 
 public class PlaceholderTests
 {
     private static readonly MethodInfo s_buildScalar =
-        typeof(QueryEvaluator).GetMethod("BuildScalarPlaceholderExpression", BindingFlags.NonPublic | BindingFlags.Static)
+        typeof(StubSynthesizer).GetMethod("BuildScalarPlaceholderExpression", BindingFlags.NonPublic | BindingFlags.Static)
         ?? throw new InvalidOperationException("Could not find BuildScalarPlaceholderExpression via reflection.");
 
     private static readonly MethodInfo s_buildContains =
-        typeof(QueryEvaluator).GetMethod("BuildContainsPlaceholderValues", BindingFlags.NonPublic | BindingFlags.Static)
+        typeof(StubSynthesizer).GetMethod("BuildContainsPlaceholderValues", BindingFlags.NonPublic | BindingFlags.Static)
         ?? throw new InvalidOperationException("Could not find BuildContainsPlaceholderValues via reflection.");
 
     private static readonly MethodInfo s_tryBuildReflection =
-        typeof(QueryEvaluator).GetMethod("TryBuildReflectionPlaceholder", BindingFlags.NonPublic | BindingFlags.Static)
+        typeof(StubSynthesizer).GetMethod("TryBuildReflectionPlaceholder", BindingFlags.NonPublic | BindingFlags.Static)
         ?? throw new InvalidOperationException("Could not find TryBuildReflectionPlaceholder via reflection.");
 
     private static string Scalar(Type t) => (string)s_buildScalar.Invoke(null, [t])!;

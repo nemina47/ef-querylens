@@ -9,13 +9,13 @@ public sealed class QueryLensEngineFixture : IAsyncLifetime
     public QueryLensEngine Engine { get; } = new();
     public string SampleMySqlAppDll { get; private set; } = string.Empty;
 
-    public Task InitializeAsync()
+    public ValueTask InitializeAsync()
     {
         SampleMySqlAppDll = QueryLensEngineTests.GetSampleMySqlAppDll();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
-    public async Task DisposeAsync() => await Engine.DisposeAsync();
+    public ValueTask DisposeAsync() => Engine.DisposeAsync();
 }
 
 /// <summary>
@@ -98,14 +98,26 @@ public partial class QueryLensEngineTests : IClassFixture<QueryLensEngineFixture
         return false;
     }
 
-    private static int GetPrivateCollectionCount(object instance, string fieldName)
+    private static object GetPoolManager(object instance)
     {
         var field = instance.GetType().GetField(
+            "_poolManager",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Field '_poolManager' not found.");
+
+        return field.GetValue(instance)
+            ?? throw new InvalidOperationException("Field '_poolManager' is null.");
+    }
+
+    private static int GetPrivateCollectionCount(object instance, string fieldName)
+    {
+        var poolManager = GetPoolManager(instance);
+        var field = poolManager.GetType().GetField(
             fieldName,
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
             ?? throw new InvalidOperationException($"Field '{fieldName}' not found.");
 
-        var value = field.GetValue(instance)
+        var value = field.GetValue(poolManager)
             ?? throw new InvalidOperationException($"Field '{fieldName}' is null.");
 
         var countProperty = value.GetType().GetProperty(
@@ -119,21 +131,22 @@ public partial class QueryLensEngineTests : IClassFixture<QueryLensEngineFixture
 
     private static int GetMaxDbContextPoolCreatedCount(object instance)
     {
-        var field = instance.GetType().GetField(
-            "_dbContextPool",
+        var poolManager = GetPoolManager(instance);
+        var field = poolManager.GetType().GetField(
+            "_pool",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Field '_dbContextPool' not found.");
+            ?? throw new InvalidOperationException("Field '_pool' not found.");
 
-        var poolDictionary = field.GetValue(instance)
-            ?? throw new InvalidOperationException("Field '_dbContextPool' is null.");
+        var poolDictionary = field.GetValue(poolManager)
+            ?? throw new InvalidOperationException("Field '_pool' is null.");
 
         var valuesProperty = poolDictionary.GetType().GetProperty(
             "Values",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public)
-            ?? throw new InvalidOperationException("Field '_dbContextPool' does not expose Values.");
+            ?? throw new InvalidOperationException("Field '_pool' does not expose Values.");
 
         var values = valuesProperty.GetValue(poolDictionary) as IEnumerable
-            ?? throw new InvalidOperationException("Field '_dbContextPool' Values is not enumerable.");
+            ?? throw new InvalidOperationException("Field '_pool' Values is not enumerable.");
 
         var maxCreated = 0;
         foreach (var pool in values)

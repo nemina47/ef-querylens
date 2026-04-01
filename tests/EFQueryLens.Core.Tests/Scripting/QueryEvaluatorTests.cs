@@ -18,16 +18,16 @@ public sealed class QueryEvaluatorFixture : IAsyncLifetime
     public ProjectAssemblyContext AlcCtx { get; private set; } = null!;
     public QueryEvaluator Evaluator { get; } = new();
 
-    public Task InitializeAsync()
+    public ValueTask InitializeAsync()
     {
         AlcCtx = new ProjectAssemblyContext(QueryEvaluatorTests.GetSampleMySqlAppDll());
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         AlcCtx.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }
 

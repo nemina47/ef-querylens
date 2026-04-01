@@ -33,7 +33,7 @@ internal sealed class DocumentSyncProvider : IWpfTextViewCreationListener
         if (!buffer.Properties.TryGetProperty(typeof(ITextDocument), out ITextDocument document))
             return;
 
-        var filePath = document.FilePath;
+        string filePath = document.FilePath;
         if (string.IsNullOrWhiteSpace(filePath) || !filePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
             return;
 
@@ -49,11 +49,11 @@ internal sealed class DocumentSyncProvider : IWpfTextViewCreationListener
                 return;
             }
 
-            var syncBuffer = new DocumentSyncBuffer(filePath, buffer);
+            DocumentSyncBuffer syncBuffer = new(filePath, buffer);
             _syncedBuffers[filePath] = new TrackedSyncBuffer(syncBuffer, refCount: 1);
 
             // Send initial didOpen notification with current buffer content
-            var sourceText = buffer.CurrentSnapshot.GetText();
+            string sourceText = buffer.CurrentSnapshot.GetText();
             QueryLensLanguageClient.NotifyDocumentOpened(filePath, sourceText);
         }
     }
@@ -67,7 +67,7 @@ internal sealed class DocumentSyncProvider : IWpfTextViewCreationListener
 
         lock (SyncLock)
         {
-            if (!_viewToFile.TryGetValue(view, out var filePath))
+            if (!_viewToFile.TryGetValue(view, out string? filePath))
                 return;
 
             _viewToFile.Remove(view);
@@ -118,7 +118,7 @@ internal sealed class DocumentSyncProvider : IWpfTextViewCreationListener
                 return;
 
             // When the buffer content changes, send didChange notification with full content
-            var sourceText = _buffer.CurrentSnapshot.GetText();
+            string sourceText = _buffer.CurrentSnapshot.GetText();
             QueryLensLanguageClient.NotifyDocumentChanged(_filePath, sourceText);
         }
 

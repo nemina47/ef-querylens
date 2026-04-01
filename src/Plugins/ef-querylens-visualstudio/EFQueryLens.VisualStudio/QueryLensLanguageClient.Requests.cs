@@ -32,12 +32,12 @@ internal sealed partial class QueryLensLanguageClient
             var response = await languageServerRpc.InvokeWithParameterObjectAsync<JToken?>(
                 "efquerylens/daemon/restart",
                 new JObject(),
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
 
-            var success = response?["success"]?.Value<bool>() == true;
-            var message = response?["message"]?.Value<string>()
+            bool success = response?["success"]?.Value<bool>() == true;
+            string message = response?["message"]?.Value<string>()
                 ?? (success ? "Daemon restarted." : "Daemon restart did not complete.");
-            var code = success
+            string code = success
                 ? "OK"
                 : QueryLensErrorCodes.DaemonRestartIncomplete;
             return (success, code, message);
@@ -77,10 +77,10 @@ internal sealed partial class QueryLensLanguageClient
                         ["character"] = character,
                     },
                 },
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
 
-            var success = response?["success"]?.Value<bool>() == true;
-            var message = response?["message"]?.Value<string>()
+            bool success = response?["success"]?.Value<bool>() == true;
+            string message = response?["message"]?.Value<string>()
                 ?? (success ? "Preview recalculated." : "Preview recalculation did not complete.");
             return (success, message);
         }
@@ -93,7 +93,7 @@ internal sealed partial class QueryLensLanguageClient
 
     internal static IReadOnlyList<string> GetLogFilePaths()
     {
-        var result = new List<string>();
+        List<string> result = new();
         if (!string.IsNullOrWhiteSpace(currentLspLogPath))
         {
             result.Add(currentLspLogPath!);
@@ -115,7 +115,7 @@ internal sealed partial class QueryLensLanguageClient
 
         try
         {
-            var uri = new Uri(filePath).AbsoluteUri;
+            string uri = new Uri(filePath).AbsoluteUri;
             _ = rpc.NotifyWithParameterObjectAsync(
                 "textDocument/didOpen",
                 new JObject
@@ -147,7 +147,7 @@ internal sealed partial class QueryLensLanguageClient
 
         try
         {
-            var uri = new Uri(filePath).AbsoluteUri;
+            string uri = new Uri(filePath).AbsoluteUri;
             _ = rpc.NotifyWithParameterObjectAsync(
                 "textDocument/didChange",
                 new JObject
@@ -184,7 +184,7 @@ internal sealed partial class QueryLensLanguageClient
 
         try
         {
-            var uri = new Uri(filePath).AbsoluteUri;
+            string uri = new Uri(filePath).AbsoluteUri;
             _ = rpc.NotifyWithParameterObjectAsync(
                 "textDocument/didClose",
                 new JObject
@@ -215,7 +215,7 @@ internal sealed partial class QueryLensLanguageClient
         try
         {
             Log($"structured-hover-request-start file={Path.GetFileName(filePath)} line={line} char={character}");
-            var uri = new Uri(filePath).AbsoluteUri;
+            string uri = new Uri(filePath).AbsoluteUri;
             var response = await languageServerRpc.InvokeWithParameterObjectAsync<JToken?>(
                 "efquerylens/hover",
                 new JObject
@@ -227,7 +227,7 @@ internal sealed partial class QueryLensLanguageClient
                         ["character"] = Math.Max(0, character),
                     }
                 },
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
 
             if (response is null || response.Type == JTokenType.Null)
             {

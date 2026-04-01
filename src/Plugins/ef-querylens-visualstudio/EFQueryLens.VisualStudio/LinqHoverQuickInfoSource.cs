@@ -36,7 +36,7 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
             return null;
         }
 
-        var position = triggerPoint.Value.Position;
+        int position = triggerPoint.Value.Position;
         var applicableSpan = BuildApplicableSpan(snapshot, position);
 
         if (!TryMarkSessionContent(session))
@@ -44,17 +44,17 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
             return null;
         }
 
-        var applicableSnapshotSpan = new SnapshotSpan(snapshot, applicableSpan);
+        SnapshotSpan applicableSnapshotSpan = new(snapshot, applicableSpan);
         ITrackingSpan? applicableTrackingSpan = snapshot.CreateTrackingSpan(applicableSnapshotSpan, SpanTrackingMode.EdgeInclusive);
 
         // Try structured hover first (VS-optimized path: typed SQL, always-pinned header, no markdown parsing).
-        var structuredElement = await TryGetStructuredContentAsync(triggerPoint.Value, snapshot, applicableSpan, cancellationToken);
+        var structuredElement = await TryGetStructuredContentAsync(triggerPoint.Value, snapshot, applicableSpan, cancellationToken).ConfigureAwait(false);
         if (structuredElement is not null)
         {
             return new QuickInfoItem(applicableTrackingSpan, structuredElement);
         }
 
-        var documentUri = "about:blank";
+        string documentUri = "about:blank";
         if (textBuffer.Properties.TryGetProperty(typeof(ITextDocument), out ITextDocument unavailableDocument)
             && !string.IsNullOrWhiteSpace(unavailableDocument.FilePath))
         {
@@ -93,7 +93,7 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
             documentUri,
             0,
             0);
-        var item = new QuickInfoItem(applicableTrackingSpan, content);
+        QuickInfoItem item = new(applicableTrackingSpan, content);
         return item;
     }
 
@@ -119,9 +119,9 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
             return null;
         }
 
-        var uri = new Uri(document.FilePath).AbsoluteUri;
+        string uri = new Uri(document.FilePath).AbsoluteUri;
         var attempts = BuildHoverAttempts(triggerPoint, snapshot, applicableSpan);
-        for (var i = 0; i < attempts.Count; i++)
+        for (int i = 0; i < attempts.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var attempt = attempts[i];
@@ -131,7 +131,7 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
                 document.FilePath,
                 attempt.Line,
                 attempt.Character,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
 
             if (response is not null)
             {
@@ -142,7 +142,7 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
 
             if (i < attempts.Count - 1)
             {
-                await Task.Delay(120, cancellationToken);
+                await Task.Delay(120, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -157,15 +157,15 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
             return new Span(0, 0);
         }
 
-        var safePosition = Math.Max(0, Math.Min(position, snapshot.Length - 1));
+        int safePosition = Math.Max(0, Math.Min(position, snapshot.Length - 1));
         var line = snapshot.GetLineFromPosition(safePosition);
-        var lineText = line.GetText();
+        string lineText = line.GetText();
         if (lineText.Length == 0)
         {
             return new Span(safePosition, 1);
         }
 
-        var lineOffset = Math.Max(0, Math.Min(safePosition - line.Start.Position, lineText.Length - 1));
+        int lineOffset = Math.Max(0, Math.Min(safePosition - line.Start.Position, lineText.Length - 1));
         if (!IsIdentifierChar(lineText[lineOffset])
             && lineOffset > 0
             && IsIdentifierChar(lineText[lineOffset - 1]))
@@ -178,20 +178,20 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
             return new Span(safePosition, 1);
         }
 
-        var start = lineOffset;
+        int start = lineOffset;
         while (start > 0 && IsIdentifierChar(lineText[start - 1]))
         {
             start--;
         }
 
-        var endExclusive = lineOffset + 1;
+        int endExclusive = lineOffset + 1;
         while (endExclusive < lineText.Length && IsIdentifierChar(lineText[endExclusive]))
         {
             endExclusive++;
         }
 
-        var absoluteStart = line.Start.Position + start;
-        var length = Math.Max(1, endExclusive - start);
+        int absoluteStart = line.Start.Position + start;
+        int length = Math.Max(1, endExclusive - start);
         return new Span(absoluteStart, length);
     }
 
@@ -202,8 +202,8 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
 
     private static System.Collections.Generic.List<HoverAttempt> BuildHoverAttempts(SnapshotPoint triggerPoint, ITextSnapshot snapshot, Span applicableSpan)
     {
-        var attempts = new System.Collections.Generic.List<HoverAttempt>();
-        var seen = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+        List<HoverAttempt> attempts = new();
+        HashSet<string> seen = new(StringComparer.Ordinal);
 
         static void AddAttempt(
             System.Collections.Generic.List<HoverAttempt> list,
@@ -212,7 +212,7 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
             int line,
             int character)
         {
-            var key = $"{line}:{character}";
+            string key = $"{line}:{character}";
             if (!dedupe.Add(key))
             {
                 return;
@@ -222,16 +222,16 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
         }
 
         var triggerLine = triggerPoint.GetContainingLine();
-        var triggerChar = Math.Max(0, triggerPoint.Position - triggerLine.Start.Position);
+        int triggerChar = Math.Max(0, triggerPoint.Position - triggerLine.Start.Position);
         AddAttempt(attempts, seen, "trigger", triggerLine.LineNumber, triggerChar);
         AddAttemptFromAbsolute(snapshot, attempts, seen, "trigger-prev", Math.Max(0, triggerPoint.Position - 1));
         AddAttemptFromAbsolute(snapshot, attempts, seen, "trigger-next", Math.Min(snapshot.Length - 1, triggerPoint.Position + 1));
 
         if (snapshot.Length > 0)
         {
-            var startPos = Math.Max(0, Math.Min(applicableSpan.Start, snapshot.Length - 1));
-            var endPos = Math.Max(0, Math.Min(Math.Max(applicableSpan.End - 1, applicableSpan.Start), snapshot.Length - 1));
-            var midPos = Math.Max(0, Math.Min(applicableSpan.Start + (applicableSpan.Length / 2), snapshot.Length - 1));
+            int startPos = Math.Max(0, Math.Min(applicableSpan.Start, snapshot.Length - 1));
+            int endPos = Math.Max(0, Math.Min(Math.Max(applicableSpan.End - 1, applicableSpan.Start), snapshot.Length - 1));
+            int midPos = Math.Max(0, Math.Min(applicableSpan.Start + (applicableSpan.Length / 2), snapshot.Length - 1));
 
             AddAttemptFromAbsolute(snapshot, attempts, seen, "span-start", startPos);
             AddAttemptFromAbsolute(snapshot, attempts, seen, "span-mid", midPos);
@@ -253,12 +253,12 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
             return;
         }
 
-        var pos = Math.Max(0, Math.Min(absolutePosition, snapshot.Length - 1));
-        var point = new SnapshotPoint(snapshot, pos);
+        int pos = Math.Max(0, Math.Min(absolutePosition, snapshot.Length - 1));
+        SnapshotPoint point = new(snapshot, pos);
         var line = point.GetContainingLine();
-        var character = Math.Max(0, point.Position - line.Start.Position);
+        int character = Math.Max(0, point.Position - line.Start.Position);
 
-        var key = $"{line.LineNumber}:{character}";
+        string key = $"{line.LineNumber}:{character}";
         if (!dedupe.Add(key))
         {
             return;
@@ -280,7 +280,7 @@ internal sealed class LinqHoverQuickInfoSource(ITextBuffer textBuffer) : IAsyncQ
     {
         try
         {
-            var line = $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}Z] {message}{Environment.NewLine}";
+            string line = $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}Z] {message}{Environment.NewLine}";
             File.AppendAllText(logPath, line);
         }
         catch

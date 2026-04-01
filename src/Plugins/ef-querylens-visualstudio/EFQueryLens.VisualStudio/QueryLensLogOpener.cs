@@ -26,7 +26,7 @@ internal static class QueryLensLogOpener
 
     internal static async Task InitializeOutputPaneAsync(AsyncPackage package, CancellationToken cancellationToken)
     {
-        var pane = await EnsureOutputPaneAsync(package, cancellationToken);
+        var pane = await EnsureOutputPaneAsync(package, cancellationToken).ConfigureAwait(false);
         if (pane is null)
         {
             return;
@@ -50,7 +50,7 @@ internal static class QueryLensLogOpener
 
     internal static async Task<(bool Success, string Message)> StartTailInOutputWindowAsync(AsyncPackage package, CancellationToken cancellationToken)
     {
-        var candidates = QueryLensLanguageClient.GetLogFilePaths()
+        List<string> candidates = QueryLensLanguageClient.GetLogFilePaths()
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -60,10 +60,10 @@ internal static class QueryLensLogOpener
             return (false, "No QueryLens log file path is available yet. Trigger a hover first.");
         }
 
-        var selectedPath = candidates.FirstOrDefault(File.Exists) ?? candidates[0];
+        string selectedPath = candidates.FirstOrDefault(File.Exists) ?? candidates[0];
         EnsureFileExists(selectedPath);
 
-        var pane = await EnsureOutputPaneAsync(package, cancellationToken);
+        var pane = await EnsureOutputPaneAsync(package, cancellationToken).ConfigureAwait(false);
         if (pane is null)
         {
             return (false, "Failed to access Visual Studio Output window pane.");
@@ -74,7 +74,7 @@ internal static class QueryLensLogOpener
         pane.OutputString($"{Environment.NewLine}=== EF QueryLens log tail started ({DateTime.UtcNow:O}) ==={Environment.NewLine}");
         pane.OutputString($"Source: {selectedPath}{Environment.NewLine}");
 
-        var snapshot = ReadLastLines(selectedPath, maxLines: 120);
+        string snapshot = ReadLastLines(selectedPath, maxLines: 120);
         if (!string.IsNullOrWhiteSpace(snapshot))
         {
             pane.OutputString($"--- Last 120 lines ---{Environment.NewLine}");
@@ -135,7 +135,7 @@ internal static class QueryLensLogOpener
 
     private static void EnsureFileExists(string path)
     {
-        var directory = Path.GetDirectoryName(path);
+        string directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory))
         {
             Directory.CreateDirectory(directory);
@@ -151,7 +151,7 @@ internal static class QueryLensLogOpener
     {
         await package.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
 
-        var outputWindow = await package.GetServiceAsync(typeof(SVsOutputWindow)) as IVsOutputWindow;
+        IVsOutputWindow? outputWindow = await package.GetServiceAsync(typeof(SVsOutputWindow)).ConfigureAwait(false) as IVsOutputWindow;
         if (outputWindow is null)
         {
             return null;
@@ -183,7 +183,7 @@ internal static class QueryLensLogOpener
 
         try
         {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             if (stream.Length < position)
             {
                 position = 0;
@@ -198,9 +198,9 @@ internal static class QueryLensLogOpener
             }
 
             stream.Seek(position, SeekOrigin.Begin);
-            using var reader = new StreamReader(stream);
-            var appended = reader.ReadToEnd();
-            var nextPosition = stream.Position;
+            using StreamReader reader = new(stream);
+            string appended = reader.ReadToEnd();
+            long nextPosition = stream.Position;
 
             if (!string.IsNullOrEmpty(appended))
             {
@@ -227,7 +227,7 @@ internal static class QueryLensLogOpener
     {
         try
         {
-            var fileInfo = new FileInfo(path);
+            FileInfo fileInfo = new(path);
             return fileInfo.Exists ? fileInfo.Length : 0;
         }
         catch
@@ -240,9 +240,9 @@ internal static class QueryLensLogOpener
     {
         try
         {
-            var tail = new Queue<string>(maxLines);
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            using var reader = new StreamReader(stream);
+            Queue<string> tail = new(maxLines);
+            using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using StreamReader reader = new(stream);
 
             string? line;
             while ((line = reader.ReadLine()) is not null)

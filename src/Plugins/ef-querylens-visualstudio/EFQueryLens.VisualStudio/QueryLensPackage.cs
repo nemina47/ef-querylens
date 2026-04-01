@@ -21,12 +21,12 @@ internal sealed class QueryLensPackage : AsyncPackage
     {
         await JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
 
-        if (await GetServiceAsync(typeof(IMenuCommandService)) is not OleMenuCommandService menuCommandService)
+        if (await GetServiceAsync(typeof(IMenuCommandService)).ConfigureAwait(false) is not OleMenuCommandService menuCommandService)
         {
             return;
         }
 
-        await QueryLensLogOpener.InitializeOutputPaneAsync(this, cancellationToken);
+        await QueryLensLogOpener.InitializeOutputPaneAsync(this, cancellationToken).ConfigureAwait(false);
 
         AddMenuCommand(menuCommandService, QueryLensCommandIds.RestartDaemon, HandleRestartDaemonCommand);
         AddMenuCommand(menuCommandService, QueryLensCommandIds.OpenLogs, HandleOpenLogsCommand);
@@ -35,8 +35,8 @@ internal sealed class QueryLensPackage : AsyncPackage
     private static void AddMenuCommand(OleMenuCommandService menuCommandService, int commandId, EventHandler handler)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var menuCommandId = new CommandID(new Guid(QueryLensCommandGuids.CommandSetString), commandId);
-        var menuCommand = new OleMenuCommand(handler, menuCommandId);
+        CommandID menuCommandId = new(new Guid(QueryLensCommandGuids.CommandSetString), commandId);
+        OleMenuCommand menuCommand = new(handler, menuCommandId);
         menuCommandService.AddCommand(menuCommand);
     }
 
@@ -44,7 +44,7 @@ internal sealed class QueryLensPackage : AsyncPackage
     {
         RunCommand(async cancellationToken =>
         {
-            var result = await QueryLensLanguageClient.RequestDaemonRestartAsync(cancellationToken);
+            var result = await QueryLensLanguageClient.RequestDaemonRestartAsync(cancellationToken).ConfigureAwait(false);
 
             await JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
             var icon = result.Success ? OLEMSGICON.OLEMSGICON_INFO : OLEMSGICON.OLEMSGICON_WARNING;
@@ -62,7 +62,7 @@ internal sealed class QueryLensPackage : AsyncPackage
     {
         RunCommand(async cancellationToken =>
         {
-            var (success, message) = await QueryLensLogOpener.StartTailInOutputWindowAsync(this, cancellationToken);
+            var (success, message) = await QueryLensLogOpener.StartTailInOutputWindowAsync(this, cancellationToken).ConfigureAwait(false);
 
             if (success)
             {
@@ -102,7 +102,7 @@ internal sealed class QueryLensPackage : AsyncPackage
         {
             try
             {
-                await action(CancellationToken.None);
+                await action(CancellationToken.None).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

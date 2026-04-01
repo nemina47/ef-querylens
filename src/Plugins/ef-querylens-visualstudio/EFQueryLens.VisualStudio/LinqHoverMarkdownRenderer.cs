@@ -17,13 +17,13 @@ internal static partial class LinqHoverMarkdownRenderer
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var status = response.Status;
-        var isQueueStatus = status is 1 or 2;
-        var isServiceUnavailable = status is 3;
+        int status = response.Status;
+        bool isQueueStatus = status is 1 or 2;
+        bool isServiceUnavailable = status is 3;
 
         if (!response.Success && !isQueueStatus && !isServiceUnavailable)
         {
-            var errorMessage = response.ErrorMessage ?? "Translation failed.";
+            string errorMessage = response.ErrorMessage ?? "Translation failed.";
             response = new QueryLensStructuredHoverResponse
             {
                 Success = false,
@@ -47,27 +47,27 @@ internal static partial class LinqHoverMarkdownRenderer
             isServiceUnavailable = true;
         }
 
-        var statements = response.Statements ?? [];
-        var enrichedSql = string.IsNullOrWhiteSpace(response.EnrichedSql)
+        List<QueryLensSqlStatementDto> statements = response.Statements ?? [];
+        string? enrichedSql = string.IsNullOrWhiteSpace(response.EnrichedSql)
             ? null
             : response.EnrichedSql;
-        var copySql = enrichedSql;
-        var effectiveTranslationMs = response.LastTranslationMs > 0
+        string? copySql = enrichedSql;
+        double effectiveTranslationMs = response.LastTranslationMs > 0
             ? response.LastTranslationMs
             : response.AvgTranslationMs;
 
-        var queryParams = $"uri={Uri.EscapeDataString(uri)}&line={line}&character={character}";
-        var statementWord = response.CommandCount == 1 ? "query" : "queries";
-        var statusLabel = BuildStructuredStatusLabel(status, response.AvgTranslationMs);
-        var readyLabel = $"**EF QueryLens** · {response.CommandCount} {statementWord}";
-        var actionsLine = $"[Copy SQL](efquerylens://copySql?{queryParams}) | [Open SQL](efquerylens://openSqlEditor?{queryParams}) | [Reanalyze](efquerylens://recalculate?{queryParams})";
-        var headerText = status == 0
+        string queryParams = $"uri={Uri.EscapeDataString(uri)}&line={line}&character={character}";
+        string statementWord = response.CommandCount == 1 ? "query" : "queries";
+        string statusLabel = BuildStructuredStatusLabel(status, response.AvgTranslationMs);
+        string readyLabel = $"**EF QueryLens** · {response.CommandCount} {statementWord}";
+        string actionsLine = $"[Copy SQL](efquerylens://copySql?{queryParams}) | [Open SQL](efquerylens://openSqlEditor?{queryParams}) | [Reanalyze](efquerylens://recalculate?{queryParams})";
+        string headerText = status == 0
             ? (string.IsNullOrWhiteSpace(copySql)
                 ? readyLabel
                 : $"{readyLabel}\n{actionsLine}")
             : $"**{statusLabel}**";
 
-        var hostBorder = new Border
+        Border hostBorder = new()
         {
             Background = Brushes.Transparent,
             BorderBrush = Brushes.Transparent,
@@ -79,21 +79,21 @@ internal static partial class LinqHoverMarkdownRenderer
             MaxHeight = 420,
         };
 
-        var layoutGrid = new Grid();
+        Grid layoutGrid = new();
         layoutGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layoutGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-        var headerElement = RenderHeaderLine(headerText, copySql);
+        FrameworkElement headerElement = RenderHeaderLine(headerText, copySql);
         Grid.SetRow(headerElement, 0);
         layoutGrid.Children.Add(headerElement);
 
-        var scrollViewer = new ScrollViewer
+        ScrollViewer scrollViewer = new()
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };
 
-        var stack = new StackPanel
+        StackPanel stack = new()
         {
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
@@ -102,20 +102,20 @@ internal static partial class LinqHoverMarkdownRenderer
             && status is 1 or 2 or 3
             && (!string.IsNullOrWhiteSpace(response.StatusMessage) || !string.IsNullOrWhiteSpace(response.ErrorMessage)))
         {
-            var statusMessage = response.StatusMessage ?? response.ErrorMessage ?? "Translation failed.";
+            string statusMessage = response.StatusMessage ?? response.ErrorMessage ?? "Translation failed.";
             if (!statusMessage.StartsWith("EF QueryLens - error", StringComparison.OrdinalIgnoreCase))
             {
                 stack.Children.Add(RenderParagraph(statusMessage, copySql));
             }
         }
 
-        foreach (var stmt in statements)
+        foreach (QueryLensSqlStatementDto stmt in statements)
         {
-            var sqlLines = (stmt.Sql ?? string.Empty).Replace("\r\n", "\n").Split('\n').ToList();
-            var rawSplitLabel = stmt.SplitLabel;
+            List<string> sqlLines = (stmt.Sql ?? string.Empty).Replace("\r\n", "\n").Split('\n').ToList();
+            string? rawSplitLabel = stmt.SplitLabel;
             if (!string.IsNullOrWhiteSpace(rawSplitLabel))
             {
-                var label = rawSplitLabel!.Trim().Trim('*').Trim();
+                string label = rawSplitLabel!.Trim().Trim('*').Trim();
                 if (!string.IsNullOrWhiteSpace(label))
                 {
                     sqlLines.Insert(0, $"-- {label}");
@@ -124,11 +124,11 @@ internal static partial class LinqHoverMarkdownRenderer
             stack.Children.Add(RenderCodeBlock("sql", sqlLines));
         }
 
-        var warnings = response.Warnings ?? [];
+        List<string> warnings = response.Warnings ?? [];
         if (warnings.Count > 0)
         {
             stack.Children.Add(RenderHeading("Notes", 13, copySql));
-            foreach (var w in warnings)
+            foreach (string w in warnings)
             {
                 stack.Children.Add(RenderBullet(w, copySql));
             }

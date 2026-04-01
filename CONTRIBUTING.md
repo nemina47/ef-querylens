@@ -63,6 +63,7 @@ dotnet test EFQueryLens.slnx
 ```bash
 npm ci --prefix src/Plugins/ef-querylens-vscode
 npm run compile --prefix src/Plugins/ef-querylens-vscode
+npm run test --prefix src/Plugins/ef-querylens-vscode
 ```
 
 ## Rider Plugin
@@ -70,6 +71,7 @@ npm run compile --prefix src/Plugins/ef-querylens-vscode
 ```bash
 cd src/Plugins/ef-querylens-rider
 ./gradlew build
+./gradlew test
 ```
 
 Run sandbox IDE for local plugin debugging:
@@ -82,6 +84,8 @@ Run sandbox IDE for local plugin debugging:
 
 ```bash
 dotnet build src/Plugins/ef-querylens-visualstudio/EFQueryLens.VisualStudio/EFQueryLens.VisualStudio.csproj -c Debug
+dotnet test tests/EFQueryLens.VisualStudio.Tests/EFQueryLens.VisualStudio.Tests.csproj -c Debug
+dotnet test tests/EFQueryLens.VisualStudio.IntegrationTests/EFQueryLens.VisualStudio.IntegrationTests.csproj -c Debug
 ```
 
 ## Local Release Packaging

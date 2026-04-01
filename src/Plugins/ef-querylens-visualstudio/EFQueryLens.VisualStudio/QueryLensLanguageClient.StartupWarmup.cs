@@ -3,8 +3,6 @@
 
 namespace EFQueryLens.VisualStudio;
 
-using System;
-
 internal sealed partial class QueryLensLanguageClient
 {
     private static object BuildInitializationOptions()

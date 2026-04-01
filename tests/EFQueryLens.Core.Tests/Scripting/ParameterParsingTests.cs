@@ -1,22 +1,22 @@
 using System.Reflection;
 using EFQueryLens.Core.Contracts;
-using QueryEvaluator = EFQueryLens.Core.Scripting.Evaluation.QueryEvaluator;
+using StubSynthesizer = EFQueryLens.Core.Scripting.Evaluation.StubSynthesizer;
 
 namespace EFQueryLens.Core.Tests.Scripting;
 
 public class ParameterParsingTests
 {
     private static readonly MethodInfo s_parseParameters =
-        typeof(QueryEvaluator).GetMethod("ParseParameters", BindingFlags.NonPublic | BindingFlags.Static)
-        ?? throw new InvalidOperationException("Could not find QueryEvaluator.ParseParameters via reflection.");
+        typeof(StubSynthesizer).GetMethod("ParseParameters", BindingFlags.NonPublic | BindingFlags.Static)
+        ?? throw new InvalidOperationException("Could not find StubSynthesizer.ParseParameters via reflection.");
 
     private static readonly MethodInfo s_extractDbType =
-        typeof(QueryEvaluator).GetMethod("ExtractDbType", BindingFlags.NonPublic | BindingFlags.Static)
-        ?? throw new InvalidOperationException("Could not find QueryEvaluator.ExtractDbType via reflection.");
+        typeof(StubSynthesizer).GetMethod("ExtractDbType", BindingFlags.NonPublic | BindingFlags.Static)
+        ?? throw new InvalidOperationException("Could not find StubSynthesizer.ExtractDbType via reflection.");
 
     private static readonly MethodInfo s_extractInferredValue =
-        typeof(QueryEvaluator).GetMethod("ExtractInferredValue", BindingFlags.NonPublic | BindingFlags.Static)
-        ?? throw new InvalidOperationException("Could not find QueryEvaluator.ExtractInferredValue via reflection.");
+        typeof(StubSynthesizer).GetMethod("ExtractInferredValue", BindingFlags.NonPublic | BindingFlags.Static)
+        ?? throw new InvalidOperationException("Could not find StubSynthesizer.ExtractInferredValue via reflection.");
 
     private static IReadOnlyList<QueryParameter> ParseParameters(string sql) =>
         (IReadOnlyList<QueryParameter>)s_parseParameters.Invoke(null, [sql])!;

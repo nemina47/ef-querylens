@@ -13,15 +13,15 @@ using Microsoft.VisualStudio.Threading;
 
 internal sealed partial class QueryLensLanguageClient
 {
-    private static string ResolveWorkspacePath(string extensionDirectory)
+    private static async System.Threading.Tasks.Task<string> ResolveWorkspacePathAsync(string extensionDirectory)
     {
-        var solutionRoot = TryGetSolutionDirectory();
-        if (!string.IsNullOrWhiteSpace(solutionRoot))
+        var solutionDirectory = await TryGetSolutionDirectoryAsync().ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(solutionDirectory))
         {
-            return solutionRoot!;
+            return solutionDirectory!;
         }
 
-        var envWorkspace = Environment.GetEnvironmentVariable("QUERYLENS_WORKSPACE");
+        string envWorkspace = Environment.GetEnvironmentVariable("QUERYLENS_WORKSPACE");
         if (!string.IsNullOrWhiteSpace(envWorkspace) && Directory.Exists(envWorkspace))
         {
             return Path.GetFullPath(envWorkspace);
@@ -32,19 +32,19 @@ internal sealed partial class QueryLensLanguageClient
 
     private static string ResolveServerPath(string extensionDirectory)
     {
-        var overridePath = Environment.GetEnvironmentVariable(LspDllOverrideEnvVar);
+        string overridePath = Environment.GetEnvironmentVariable(LspDllOverrideEnvVar);
         if (!string.IsNullOrWhiteSpace(overridePath) && File.Exists(overridePath))
         {
             return Path.GetFullPath(overridePath);
         }
 
-        var packagedServerPath = Path.Combine(extensionDirectory, "server", "EFQueryLens.Lsp.dll");
+        string packagedServerPath = Path.Combine(extensionDirectory, "server", "EFQueryLens.Lsp.dll");
         if (File.Exists(packagedServerPath))
         {
             return packagedServerPath;
         }
 
-        var rootServerPath = Path.Combine(extensionDirectory, "EFQueryLens.Lsp.dll");
+        string rootServerPath = Path.Combine(extensionDirectory, "EFQueryLens.Lsp.dll");
         if (File.Exists(rootServerPath))
         {
             return rootServerPath;
@@ -55,46 +55,43 @@ internal sealed partial class QueryLensLanguageClient
 
     private static string BuildLspLogFilePath(string workspaceRoot)
     {
-        var normalizedWorkspace = Path.GetFullPath(workspaceRoot)
+        string normalizedWorkspace = Path.GetFullPath(workspaceRoot)
             .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         byte[] hashBytes;
-        using (var sha = SHA256.Create())
+        using (SHA256 sha = SHA256.Create())
         {
             hashBytes = sha.ComputeHash(Encoding.UTF8.GetBytes(normalizedWorkspace));
         }
 
-        var hash = BitConverter.ToString(hashBytes).Replace("-", string.Empty).ToLowerInvariant();
+        string hash = BitConverter.ToString(hashBytes).Replace("-", string.Empty).ToLowerInvariant();
         if (hash.Length > 16)
         {
             hash = hash.Substring(0, 16);
         }
 
-        var directory = Path.Combine(Path.GetTempPath(), "EFQueryLens", "vs-logs");
+        string directory = Path.Combine(Path.GetTempPath(), "EFQueryLens", "vs-logs");
         Directory.CreateDirectory(directory);
         return Path.Combine(directory, $"lsp-{hash}.log");
     }
 
-    private static string? TryGetSolutionDirectory()
+    private static async System.Threading.Tasks.Task<string?> TryGetSolutionDirectoryAsync()
     {
         try
         {
-            return ThreadHelper.JoinableTaskFactory.Run(async () =>
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            IVsSolution? solution = Package.GetGlobalService(typeof(SVsSolution)) as IVsSolution;
+            if (solution is null)
             {
-                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                var solution = Package.GetGlobalService(typeof(SVsSolution)) as IVsSolution;
-                if (solution is null)
-                {
-                    return null;
-                }
+                return null;
+            }
 
-                solution.GetSolutionInfo(out var solutionDirectory, out _, out _);
-                if (string.IsNullOrWhiteSpace(solutionDirectory))
-                {
-                    return null;
-                }
+            solution.GetSolutionInfo(out string? solutionDirectory, out _, out _);
+            if (string.IsNullOrWhiteSpace(solutionDirectory))
+            {
+                return null;
+            }
 
-                return Path.GetFullPath(solutionDirectory);
-            });
+            return Path.GetFullPath(solutionDirectory);
         }
         catch
         {
