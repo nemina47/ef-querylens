@@ -9,6 +9,7 @@
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.3.0" />
     <PackageReference Include="Microsoft.VisualStudio.LanguageServer.Protocol" Version="17.2.8" />
     <PackageReference Include="Microsoft.VisualStudio.LanguageServer.Protocol.Extensions" Version="17.2.8" />
+  <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="StreamJsonRpc" Version="2.24.84" />
   </ItemGroup>
 
