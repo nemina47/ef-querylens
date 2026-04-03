@@ -105,6 +105,7 @@ public sealed partial class QueryEvaluator
                 .Append(symbol.TypeName).Append(':')
                 .Append(symbol.Kind).Append(':')
                 .Append(symbol.Scope ?? string.Empty).Append(':')
+                .Append(symbol.ReplayPolicy).Append(':')
                 .Append(symbol.InitializerExpression ?? string.Empty)
                 .Append('\0');
 

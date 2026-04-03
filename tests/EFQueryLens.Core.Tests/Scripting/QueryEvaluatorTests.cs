@@ -207,6 +207,7 @@ public partial class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
                 DeclarationOrder = hint.DeclarationOrder > 0 ? hint.DeclarationOrder : order++,
                 Dependencies = hint.Dependencies,
                 Scope = hint.Scope,
+                ReplayPolicy = hint.ReplayPolicy,
             };
         }
 
@@ -228,6 +229,7 @@ public partial class QueryEvaluatorTests : IClassFixture<QueryEvaluatorFixture>
                 TypeName = kv.Value,
                 Kind = "local",
                 DeclarationOrder = order++,
+                ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
             };
         }
 

@@ -47,4 +47,12 @@ public partial class LspSyntaxHelperTests
 
         Assert.False(allowed);
     }
+
+    [Fact]
+    public void PassesExtractedExpressionLinqShapeGate_QueryableChainShape_ReturnsTrue()
+    {
+        var expression = "dbContext.ApplicationDrafts.Where(x => x.IsNotDeleted).Where(d => d.ApplicationDetailsId == applicationId && d.Page == page).SingleOrDefaultAsync(cancellationToken: ct)";
+        var allowed = LspSyntaxHelper.PassesExtractedExpressionLinqShapeGate(expression, "dbContext");
+        Assert.True(allowed);
+    }
 }

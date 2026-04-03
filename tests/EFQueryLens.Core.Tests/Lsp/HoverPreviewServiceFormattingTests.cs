@@ -402,6 +402,36 @@ public class HoverPreviewServiceFormattingTests : IDisposable
         Assert.Equal("rewrittenExpr", executed);
     }
 
+    [Fact]
+    public void FindUnresolvedSymbols_IgnoresNamedArgumentIdentifier()
+    {
+        var method = GetStaticMethod(
+            "FindUnresolvedSymbols",
+            typeof(string),
+            typeof(string),
+            typeof(IReadOnlyList<LocalSymbolGraphEntry>));
+
+        IReadOnlyList<LocalSymbolGraphEntry> graph =
+        [
+            new()
+            {
+                Name = "ct",
+                TypeName = "global::System.Threading.CancellationToken",
+                Kind = "parameter",
+                DeclarationOrder = 1,
+                ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+            },
+        ];
+
+        var unresolved = (IReadOnlyList<string>)method.Invoke(null, [
+            "dbContext.Companies.SingleOrDefaultAsync(cancellationToken: ct)",
+            "dbContext",
+            graph,
+        ])!;
+
+        Assert.DoesNotContain("cancellationToken", unresolved, StringComparer.Ordinal);
+    }
+
     private static MethodInfo GetStaticMethod(string name, params Type[] parameterTypes) =>
         typeof(HoverPreviewService).GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic, null, parameterTypes, null)
         ?? throw new InvalidOperationException($"Method {name} not found.");

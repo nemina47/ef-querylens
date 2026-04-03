@@ -100,6 +100,17 @@ public partial class LspSyntaxHelperTests
         Assert.Equal(input, result);
     }
 
+    [Fact]
+    public void PreNormalizeExtractedExpression_CollectionExpressionReceiver_RewritesToImplicitArray()
+    {
+        var input = "db.ProductOwners.Where(m => [productOwnerId ?? Guid.Empty].Contains(m.ProductOwnerId)).ToListAsync(ct)";
+        var result = LspSyntaxHelper.PreNormalizeExtractedExpression(input);
+
+        Assert.Contains("new[]", result, StringComparison.Ordinal);
+        Assert.DoesNotContain("[productOwnerId ?? Guid.Empty].Contains", result, StringComparison.Ordinal);
+        Assert.Contains(".Contains(m.ProductOwnerId)", result, StringComparison.Ordinal);
+    }
+
     // ── PreNormalization: extraction pipeline integration ────────────────────
 
     [Fact]

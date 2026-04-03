@@ -120,6 +120,42 @@ public static partial class LspSyntaxHelper
         }
     }
 
+    internal static bool PassesExtractedExpressionLinqShapeGate(
+        string expression,
+        string contextVariableName)
+    {
+        if (string.IsNullOrWhiteSpace(expression) || string.IsNullOrWhiteSpace(contextVariableName))
+            return false;
+
+        try
+        {
+            var parsed = SyntaxFactory.ParseExpression(expression);
+            if (parsed.ContainsDiagnostics)
+                return false;
+
+            var rootContext = TryExtractRootContextVariable(parsed);
+            if (!string.Equals(rootContext, contextVariableName, StringComparison.Ordinal))
+                return false;
+
+            if (parsed is InvocationExpressionSyntax invocation)
+            {
+                var methodNames = GetInvocationChainMethodNames(invocation).ToArray();
+                if (methodNames.Any(name => QueryChainMethods.Contains(name) || TerminalMethods.Contains(name)))
+                    return true;
+            }
+
+            var anyInvocation = parsed.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>()
+                .SelectMany(GetInvocationChainMethodNames)
+                .Any(name => QueryChainMethods.Contains(name) || TerminalMethods.Contains(name));
+
+            return anyInvocation;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static bool IsQueryableInvocation(InvocationExpressionSyntax invocation, SemanticModel model)
     {
         foreach (var call in invocation.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())

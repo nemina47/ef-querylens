@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="SampleDbContextFactoryApp.csproj" />
+  </Folder>
+</Solution>

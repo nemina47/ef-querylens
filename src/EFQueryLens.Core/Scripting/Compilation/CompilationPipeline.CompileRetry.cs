@@ -35,22 +35,13 @@ internal sealed partial class CompilationPipeline
         IReadOnlyList<Assembly> compilationAssemblies,
         IReadOnlySet<string> knownNamespaces,
         IReadOnlySet<string> knownTypes,
-        Type dbContextType,
-        TranslationRequest workingRequest,
         List<string> stubs,
         ISet<string> synthesizedUsingStaticTypes,
-        ISet<string> synthesizedUsingNamespaces,
-        ref string workingExpression)
+        ISet<string> synthesizedUsingNamespaces)
     {
         var changed = false;
 
         changed |= ApplyMissingTypeImportRule(errors, knownNamespaces, knownTypes, synthesizedUsingStaticTypes, synthesizedUsingNamespaces);
-        changed |= ApplyArgumentTypeRestubRule(errors, dbContextType, workingRequest, stubs);
-        // LSP-authoritative mode only: daemon expression rewrites are disabled.
-        // Keep only CS0122 inaccessible projection normalization, which is required
-        // as a generated-assembly visibility bridge.
-        changed |= ApplyInaccessibleProjectionNormalizationRule(errors, ref workingExpression);
-
         changed |= ApplyMissingExtensionImportRule(errors, compilation, compilationAssemblies, synthesizedUsingStaticTypes);
         changed |= ReorderStubsByDependency(stubs);
 
@@ -116,71 +107,6 @@ internal sealed partial class CompilationPipeline
         }
 
         return changed;
-    }
-
-    private static bool ApplyArgumentTypeRestubRule(
-        IReadOnlyList<Diagnostic> errors,
-        Type dbContextType,
-        TranslationRequest workingRequest,
-        ICollection<string> stubs)
-    {
-        // CS1503: argument type mismatch - a stub was generated as 'object' because
-        // no type could be inferred (e.g. a pattern string passed to EF.Functions.Like).
-        // Extract the expected type from the diagnostic message and re-generate the
-        // stub with the correct type so overload resolution succeeds on retry.
-        var changed = false;
-
-        foreach (var cs1503 in errors.Where(e => e.Id == "CS1503"))
-        {
-            var argName = TryExtractSimpleIdentifierAtDiagnosticLocation(cs1503);
-            if (argName is null)
-                continue;
-
-            var expectedType = QueryEvaluator.TryExtractExpectedTypeFromCS1503(cs1503);
-            if (string.IsNullOrWhiteSpace(expectedType))
-                continue;
-
-            var oldStub = stubs.FirstOrDefault(s =>
-                s.Contains($" {argName} ", StringComparison.Ordinal)
-                || s.Contains($" {argName};", StringComparison.Ordinal));
-            if (oldStub is null)
-                continue;
-
-            var typedStub = StubSynthesizer.BuildStubFromTypeName(expectedType, argName, dbContextType, workingRequest.UsingAliases);
-            if (string.IsNullOrWhiteSpace(typedStub))
-            {
-                stubs.Remove(oldStub);
-                changed = true;
-                continue;
-            }
-
-            if (string.Equals(oldStub, typedStub, StringComparison.Ordinal))
-                continue;
-
-            stubs.Remove(oldStub);
-            stubs.Add(typedStub);
-            changed = true;
-        }
-
-        return changed;
-    }
-
-    private bool ApplyInaccessibleProjectionNormalizationRule(
-        IReadOnlyList<Diagnostic> errors,
-        ref string workingExpression)
-    {
-        if (TryNormalizeInaccessibleProjectionTypeFromErrors(
-                errors,
-                workingExpression,
-                out var inaccessibleProjectionNormalizedExpression)
-            && !string.Equals(inaccessibleProjectionNormalizedExpression, workingExpression, StringComparison.Ordinal))
-        {
-            LogDebug($"compile-retry expression-mutation rule=inaccessible-projection trigger=CS0122 before-len={workingExpression.Length} after-len={inaccessibleProjectionNormalizedExpression.Length}");
-            workingExpression = inaccessibleProjectionNormalizedExpression;
-            return true;
-        }
-
-        return false;
     }
 
     private static bool ApplyMissingExtensionImportRule(
@@ -291,27 +217,6 @@ internal sealed partial class CompilationPipeline
                 .ToHashSet(StringComparer.Ordinal);
 
         return new StubNode(index, normalized, name, deps);
-    }
-
-    /// <summary>
-    /// Returns the identifier name at the diagnostic location only when the AST node
-    /// is a bare <see cref="IdentifierNameSyntax"/> (i.e. a simple variable reference,
-    /// not a member access or method invocation). Used for CS1503 re-stub logic: a
-    /// compound expression like <c>someObj.Pattern</c> at the error site would require
-    /// changing the stub for <c>someObj</c>, which could be wrong if it is used with a
-    /// different type elsewhere in the expression.
-    /// </summary>
-    private static string? TryExtractSimpleIdentifierAtDiagnosticLocation(Diagnostic diagnostic)
-    {
-        if (!diagnostic.Location.IsInSource || diagnostic.Location.SourceTree is null)
-            return null;
-
-        var root = diagnostic.Location.SourceTree.GetRoot();
-        var node = root.FindNode(diagnostic.Location.SourceSpan, getInnermostNodeForTie: true);
-
-        return node is IdentifierNameSyntax identifier
-            ? identifier.Identifier.ValueText
-            : null;
     }
 
     private sealed record StubNode(

@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/samples/">
+    <Project Path="samples/SampleDbContextFactoryApp/SampleDbContextFactoryApp.csproj" />
     <Project Path="samples/SampleMySqlApp/SampleMySqlApp.csproj" />
     <Project Path="samples/SamplePostgresApp/SamplePostgresApp.csproj" />
     <Project Path="samples/SampleSqliteApp/SampleSqliteApp.csproj" />

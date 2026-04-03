@@ -101,7 +101,7 @@ public record TranslationRequest
 
 public static class TranslationRequestContract
 {
-    public const int Version = 2;
+    public const int Version = 3;
 }
 
 /// <summary>
@@ -198,6 +198,7 @@ public sealed record LocalSymbolHint
     public int DeclarationOrder { get; init; }
     public IReadOnlyList<string> Dependencies { get; init; } = [];
     public string? Scope { get; init; }
+    public string ReplayPolicy { get; init; } = LocalSymbolReplayPolicies.ReplayInitializer;
 }
 
 /// <summary>
@@ -212,6 +213,13 @@ public sealed record LocalSymbolGraphEntry
     public int DeclarationOrder { get; init; }
     public IReadOnlyList<string> Dependencies { get; init; } = [];
     public string? Scope { get; init; }
+    public string ReplayPolicy { get; init; } = LocalSymbolReplayPolicies.ReplayInitializer;
+}
+
+public static class LocalSymbolReplayPolicies
+{
+    public const string ReplayInitializer = "ReplayInitializer";
+    public const string UsePlaceholder = "UsePlaceholder";
 }
 
 /// <summary>

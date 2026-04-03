@@ -91,6 +91,7 @@ internal sealed class DaemonRuntime(IMemoryCache cache)
                 .Append(hint.TypeName).Append(':')
                 .Append(hint.Kind).Append(':')
                 .Append(hint.Scope ?? string.Empty).Append(':')
+                .Append(hint.ReplayPolicy).Append(':')
                 .Append(hint.InitializerExpression ?? string.Empty)
                 .Append('\0');
             foreach (var dep in hint.Dependencies.OrderBy(x => x, StringComparer.Ordinal))

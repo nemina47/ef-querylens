@@ -48,6 +48,7 @@ internal sealed partial class HoverHandler
 
         var cacheKey = BuildHoverCacheKey(
             filePath,
+            sourceText,
             request.Position.Line,
             request.Position.Character,
             semanticContext);

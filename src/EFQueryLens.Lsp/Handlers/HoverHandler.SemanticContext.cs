@@ -1,5 +1,7 @@
 using EFQueryLens.Lsp.Parsing;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace EFQueryLens.Lsp.Handlers;
 
@@ -18,19 +20,34 @@ internal sealed partial class HoverHandler
     /// </summary>
     private string BuildHoverCacheKey(
         string filePath,
+        string sourceText,
         int requestLine,
         int requestCharacter,
         SemanticHoverContext? semanticContext)
     {
         var fingerprint = AssemblyResolver.TryGetAssemblyFingerprint(filePath)
                           ?? $"no-assembly|{Path.GetFullPath(filePath)}";
+        var fileToken = Path.GetFullPath(filePath).ToLowerInvariant();
 
         if (semanticContext is not null)
         {
-            return $"{fingerprint}|semantic|{semanticContext.SemanticKey}|{semanticContext.EffectiveLine}|{semanticContext.EffectiveCharacter}";
+            return $"{fingerprint}|file|{fileToken}|semantic|{semanticContext.SemanticKey}";
         }
 
-        return $"{fingerprint}|cursor|{requestLine}|{requestCharacter}";
+        if (TryGetAnchorRangeAtPosition(
+                sourceText,
+                requestLine,
+                requestCharacter,
+                out var anchorStartLine,
+                out var anchorStartCharacter,
+                out var anchorEndLine,
+                out var anchorEndCharacter))
+        {
+            return
+                $"{fingerprint}|file|{fileToken}|anchor|{anchorStartLine}:{anchorStartCharacter}-{anchorEndLine}:{anchorEndCharacter}";
+        }
+
+        return $"{fingerprint}|file|{fileToken}|cursor|{requestLine}|{requestCharacter}";
     }
 
     private static bool TryResolveSemanticHoverContext(
@@ -60,10 +77,11 @@ internal sealed partial class HoverHandler
                 containingChain.ContextVariableName,
                 factoryDbContextCandidates);
             var dbContextTypeToken = LspSyntaxHelper.GetDbContextResolutionCacheToken(resolution);
+            var anchorToken = $"{containingChain.StatementStartLine}:{containingChain.StatementStartCharacter}-{containingChain.StatementEndLine}:{containingChain.StatementEndCharacter}";
             semanticContext = new SemanticHoverContext(
-                SemanticKey: $"{fingerprint}|{dbContextTypeToken}|{NormalizeWhitespace(containingChain.Expression)}",
-                EffectiveLine: containingChain.Line,
-                EffectiveCharacter: containingChain.Character);
+                SemanticKey: $"{fingerprint}|{dbContextTypeToken}|{NormalizeWhitespace(containingChain.Expression)}|anchor|{anchorToken}",
+                EffectiveLine: containingChain.StatementStartLine,
+                EffectiveCharacter: containingChain.StatementStartCharacter);
             return true;
         }
 
@@ -80,11 +98,70 @@ internal sealed partial class HoverHandler
             contextVariableName,
             factoryDbContextCandidates);
         var fallbackDbContextToken = LspSyntaxHelper.GetDbContextResolutionCacheToken(fallbackResolution);
+        if (!TryGetAnchorRangeAtPosition(sourceText, line, character, out var anchorStartLine, out var anchorStartChar, out var anchorEndLine, out var anchorEndChar))
+        {
+            anchorStartLine = line;
+            anchorStartChar = character;
+            anchorEndLine = line;
+            anchorEndChar = character;
+        }
+
+        var fallbackAnchorToken = $"{anchorStartLine}:{anchorStartChar}-{anchorEndLine}:{anchorEndChar}";
         semanticContext = new SemanticHoverContext(
-            SemanticKey: $"{fingerprint}|{fallbackDbContextToken}|{NormalizeWhitespace(expression)}",
-            EffectiveLine: line,
-            EffectiveCharacter: character);
+            SemanticKey: $"{fingerprint}|{fallbackDbContextToken}|{NormalizeWhitespace(expression)}|anchor|{fallbackAnchorToken}",
+            EffectiveLine: anchorStartLine,
+            EffectiveCharacter: anchorStartChar);
         return true;
+    }
+
+    private static bool TryGetAnchorRangeAtPosition(
+        string sourceText,
+        int line,
+        int character,
+        out int startLine,
+        out int startCharacter,
+        out int endLine,
+        out int endCharacter)
+    {
+        startLine = line;
+        startCharacter = character;
+        endLine = line;
+        endCharacter = character;
+
+        try
+        {
+            var tree = CSharpSyntaxTree.ParseText(sourceText);
+            var text = tree.GetText();
+            if (line < 0 || line >= text.Lines.Count)
+                return false;
+
+            var lineText = text.Lines[line];
+            var boundedChar = Math.Min(Math.Max(character, 0), lineText.End - lineText.Start);
+            var position = lineText.Start + boundedChar;
+            var node = tree.GetRoot().FindToken(position).Parent;
+            if (node is null)
+                return false;
+
+            SyntaxNode anchor = node.FirstAncestorOrSelf<InvocationExpressionSyntax>()
+                               ?? node.FirstAncestorOrSelf<StatementSyntax>()
+                               ?? node;
+
+            while (anchor.Parent is MemberAccessExpressionSyntax or InvocationExpressionSyntax)
+            {
+                anchor = anchor.Parent;
+            }
+
+            var span = anchor.GetLocation().GetLineSpan();
+            startLine = span.StartLinePosition.Line;
+            startCharacter = span.StartLinePosition.Character;
+            endLine = span.EndLinePosition.Line;
+            endCharacter = span.EndLinePosition.Character;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool TryFindContainingChain(string sourceText, int line, int character, out LinqChainInfo containingChain)

@@ -16,7 +16,7 @@ public class DaemonEndpointsTests
         await using var appHandle = await TestDaemonApp.StartAsync();
         var client = appHandle.Client;
 
-        var ping = await client.GetAsync("/ping");
+        var ping = await client.GetAsync("/ping", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, ping.StatusCode);
 
         var request = new TranslationRequest
@@ -34,42 +34,38 @@ public class DaemonEndpointsTests
             },
         };
 
-        var firstTranslate = await client.PostAsJsonAsync("/translate", request);
+        var firstTranslate = await client.PostAsJsonAsync("/translate", request, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, firstTranslate.StatusCode);
 
-        var secondTranslate = await client.PostAsJsonAsync("/translate", request);
+        var secondTranslate = await client.PostAsJsonAsync("/translate", request, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, secondTranslate.StatusCode);
         Assert.Equal(1, appHandle.Engine.TranslateCalls);
 
-        var warm = await client.PostAsJsonAsync("/translate/warm", request);
+        var warm = await client.PostAsJsonAsync("/translate/warm", request, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Accepted, warm.StatusCode);
 
-        var inspect = await client.PostAsJsonAsync(
-            "/inspect-model",
-            new ModelInspectionRequest { AssemblyPath = "C:/app/MyApp.dll" });
+        var inspect = await client.PostAsJsonAsync("/inspect-model", new ModelInspectionRequest { AssemblyPath = "C:/app/MyApp.dll" }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, inspect.StatusCode);
 
-        var model = await inspect.Content.ReadFromJsonAsync<ModelSnapshot>();
+        var model = await inspect.Content.ReadFromJsonAsync<ModelSnapshot>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(model);
         Assert.Equal("MyDb", model.DbContextType);
 
-        var generateFactory = await client.PostAsJsonAsync(
-            "/generate-factory",
-            new FactoryGenerationRequest { AssemblyPath = "C:/app/MyApp.dll", DbContextTypeName = "MyDb" });
+        var generateFactory = await client.PostAsJsonAsync("/generate-factory", new FactoryGenerationRequest { AssemblyPath = "C:/app/MyApp.dll", DbContextTypeName = "MyDb" }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, generateFactory.StatusCode);
 
-        var factory = await generateFactory.Content.ReadFromJsonAsync<FactoryGenerationResult>();
+        var factory = await generateFactory.Content.ReadFromJsonAsync<FactoryGenerationResult>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(factory);
         Assert.Equal("MyDb", factory.DbContextTypeFullName);
 
-        var invalidate = await client.PostAsync("/invalidate", null);
+        var invalidate = await client.PostAsync("/invalidate", null, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, invalidate.StatusCode);
 
-        var thirdTranslate = await client.PostAsJsonAsync("/translate", request);
+        var thirdTranslate = await client.PostAsJsonAsync("/translate", request, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, thirdTranslate.StatusCode);
         Assert.Equal(2, appHandle.Engine.TranslateCalls);
 
-        var shutdown = await client.PostAsync("/shutdown", null);
+        var shutdown = await client.PostAsync("/shutdown", null, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Accepted, shutdown.StatusCode);
     }
 
@@ -94,8 +90,8 @@ public class DaemonEndpointsTests
             },
         };
 
-        var first = await appHandle.Client.PostAsJsonAsync("/translate", request);
-        var second = await appHandle.Client.PostAsJsonAsync("/translate", request);
+        var first = await appHandle.Client.PostAsJsonAsync("/translate", request, cancellationToken: TestContext.Current.CancellationToken);
+        var second = await appHandle.Client.PostAsJsonAsync("/translate", request, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);

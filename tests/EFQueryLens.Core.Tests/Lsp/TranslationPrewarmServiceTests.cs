@@ -265,6 +265,49 @@ public sealed class C
             return new TempLspProject(rootPath, sourceFilePath, querySource);
         }
 
+        public static TempLspProject CreateWithHelperCallsite()
+        {
+            var rootPath = Path.Combine(Path.GetTempPath(), $"ql-prewarm-helper-{Guid.NewGuid():N}");
+            var projectDir = Path.Combine(rootPath, "App");
+            var outputDir = Path.Combine(projectDir, "bin", "Debug", "net10.0");
+            Directory.CreateDirectory(outputDir);
+
+            var querySource = """
+using System;
+using System.Linq;
+using System.Linq.Expressions;
+using System.Threading;
+using System.Threading.Tasks;
+public sealed class AppDbContext { public IQueryable<Order> Orders => Array.Empty<Order>().AsQueryable(); }
+public sealed class Order { public int Id { get; set; } public bool IsDeleted { get; set; } }
+public sealed class Svc
+{
+    private readonly AppDbContext db = new();
+    public Task<int?> M(Guid id, CancellationToken ct)
+    {
+        return GetByIdAsync(id, o => o.Id, ct);
+    }
+    private Task<TResult?> GetByIdAsync<TResult>(Guid id, Expression<Func<Order, TResult>> expression, CancellationToken ct)
+    {
+        return db.Orders
+            .Where(o => !o.IsDeleted)
+            .Where(o => o.Id == id)
+            .Select(expression)
+            .SingleOrDefaultAsync(ct);
+    }
+}
+""";
+
+            File.WriteAllText(
+                Path.Combine(projectDir, "App.csproj"),
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType><AssemblyName>App</AssemblyName></PropertyGroup></Project>");
+            var sourceFilePath = Path.Combine(projectDir, "QueryFile.cs");
+            File.WriteAllText(sourceFilePath, querySource);
+            File.WriteAllBytes(Path.Combine(outputDir, "App.dll"), [0x4D, 0x5A]);
+
+            return new TempLspProject(rootPath, sourceFilePath, querySource);
+        }
+
         public void Dispose()
         {
             try
@@ -539,6 +582,25 @@ public class LspWarmupAndPreviewWrapperTests
     }
 
     [Fact]
+    public async Task BuildStructuredAsync_HelperExtraction_FromNonQueryableCallsite_DoesNotSemanticGateBlock()
+    {
+        using var project = TranslationPrewarmServiceTests.TempLspProject.CreateWithHelperCallsite();
+        var service = new HoverPreviewService(new TestControllableEngine());
+        var (line, character) = FindPosition(project.QuerySource, "GetByIdAsync(id, o => o.Id, ct)");
+
+        var result = await service.BuildStructuredAsync(
+            project.SourceFilePath,
+            project.QuerySource,
+            line,
+            character,
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal(QueryTranslationStatus.Ready, result.Status);
+        Assert.Single(result.Statements);
+    }
+
+    [Fact]
     public async Task HandleAsync_WithSuccessfulInspectModel_ReturnsReadyAndCachesResult()
     {
         using var project = TranslationPrewarmServiceTests.TempLspProject.Create(withAssembly: true);
@@ -670,5 +732,28 @@ public class LspWarmupAndPreviewWrapperTests
             => Task.FromResult(new FactoryGenerationResult { Content = "// generated", SuggestedFileName = "Factory.cs", DbContextTypeFullName = "AppDbContext" });
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private static (int line, int character) FindPosition(string source, string marker)
+    {
+        var index = source.IndexOf(marker, StringComparison.Ordinal);
+        Assert.True(index >= 0, $"Marker '{marker}' not found.");
+
+        var line = 0;
+        var character = 0;
+        for (var i = 0; i < index; i++)
+        {
+            if (source[i] == '\n')
+            {
+                line++;
+                character = 0;
+            }
+            else
+            {
+                character++;
+            }
+        }
+
+        return (line, character);
     }
 }

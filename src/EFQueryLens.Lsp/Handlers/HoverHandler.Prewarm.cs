@@ -33,7 +33,7 @@ internal sealed partial class HoverHandler
         if (computed.Hover is null && computed.Structured is null) return;
 
         TryResolveSemanticHoverContext(filePath, sourceText, line, character, out var semanticContext);
-        var cacheKey = BuildHoverCacheKey(filePath, line, character, semanticContext);
+        var cacheKey = BuildHoverCacheKey(filePath, sourceText, line, character, semanticContext);
 
         // Don't overwrite a Ready entry that a real hover already computed.
         if (TryGetCachedEntry(cacheKey, out var existing)

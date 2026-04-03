@@ -93,13 +93,15 @@ internal sealed partial class HoverPreviewService
 
         var sourceLine = line + 1;
 
-    var sourceIndex = ProjectSourceHelper.GetProjectIndex(filePath);
+        var targetAssembly = AssemblyResolver.TryGetTargetAssembly(filePath);
+        var sourceIndex = ProjectSourceHelper.GetProjectIndex(filePath);
         var extraction = LspSyntaxHelper.TryExtractLinqExpressionDetailed(
             sourceText,
             filePath,
             line,
             character,
-            sourceIndex);
+            sourceIndex,
+            targetAssembly);
         var expression = extraction?.Expression;
         var contextVariableName = extraction?.ContextVariableName;
         var callSiteExpression = extraction?.CallSiteExpression;
@@ -125,7 +127,6 @@ internal sealed partial class HoverPreviewService
             return Fail("Could not extract a LINQ query expression at the current caret location.", sourceLine);
         }
 
-        var targetAssembly = AssemblyResolver.TryGetTargetAssembly(filePath);
         if (string.IsNullOrWhiteSpace(targetAssembly)
             || targetAssembly.StartsWith("DEBUG_FAIL", StringComparison.Ordinal)
             || !File.Exists(targetAssembly))
@@ -133,14 +134,33 @@ internal sealed partial class HoverPreviewService
             return Fail("Could not locate compiled target assembly for this file. Build the project and try again.", sourceLine);
         }
 
-        if (!LspSyntaxHelper.PassesSemanticLinqGate(sourceText, line, character, targetAssembly, out var gateReason))
+        var isHelperExtraction = string.Equals(origin?.Scope, "helper-method", StringComparison.Ordinal);
+        if (isHelperExtraction)
         {
-            log($"semantic-gate-block line={line} char={character} reason={gateReason ?? "unknown"}");
-            return Fail("No queryable LINQ expression was resolved at this cursor location.", sourceLine);
+            log($"semantic-gate-bypass line={line} char={character} reason=helper-method");
+        }
+        else if (!LspSyntaxHelper.PassesSemanticLinqGate(sourceText, line, character, targetAssembly, out var gateReason))
+        {
+            if (LspSyntaxHelper.PassesExtractedExpressionLinqShapeGate(expression, contextVariableName))
+            {
+                log($"semantic-gate-fallback line={line} char={character} reason={gateReason ?? "unknown"}");
+            }
+            else
+            {
+                log($"semantic-gate-block line={line} char={character} reason={gateReason ?? "unknown"}");
+                return Fail("No queryable LINQ expression was resolved at this cursor location.", sourceLine);
+            }
         }
 
         var usingContext = LspSyntaxHelper.ExtractUsingContext(sourceText);
         var additionalImports = BuildAdditionalImports(usingContext.Imports);
+        var factoryDbContextCandidates = AssemblyResolver.TryExtractDbContextTypeNamesFromFactories(targetAssembly);
+        var dbContextResolution = LspSyntaxHelper.BuildDbContextResolutionSnapshot(
+            sourceText,
+            contextVariableName,
+            factoryDbContextCandidates);
+        var dbContextTypeName = LspSyntaxHelper.GetPreferredDbContextTypeName(dbContextResolution);
+
         if (!originValid)
         {
             log($"preview-blocked line={line} char={character} reason=missing-origin");
@@ -168,12 +188,27 @@ internal sealed partial class HoverPreviewService
             }
         }
 
-        var localSymbolGraph = LspSyntaxHelper.ExtractLocalSymbolGraphAtPosition(
+        var helperSubstitutionApplied = string.Equals(origin.Scope, "helper-method", StringComparison.Ordinal);
+        var localSymbolGraph = LspSyntaxHelper.ExtractFreeVariableSymbolGraph(
+            expression,
+            contextVariableName!,
             extractionSourceText,
             extractionLine,
             extractionChar,
-            targetAssembly);
-        var unresolvedNames = FindUnresolvedSymbols(expression, contextVariableName!, localSymbolGraph);
+            targetAssembly,
+            out var executableExpression,
+            secondarySourceText: helperSubstitutionApplied ? sourceText : null,
+            secondaryLine: helperSubstitutionApplied ? line : null,
+            secondaryCharacter: helperSubstitutionApplied ? character : null,
+            dbContextTypeName: dbContextTypeName,
+            debugLog: detail => log($"symbol-graph {detail}"));
+        localSymbolGraph = DowngradeReplayInitializersWithMissingDependencies(localSymbolGraph, out var downgradedReplayInitializers);
+        if (downgradedReplayInitializers > 0)
+        {
+            log($"extract-local-types-adjusted line={line} char={character} downgradedReplayInit={downgradedReplayInitializers}");
+        }
+
+        var unresolvedNames = FindUnresolvedSymbols(executableExpression, contextVariableName!, localSymbolGraph);
         var declaredNames = new HashSet<string>(
             localSymbolGraph.Select(s => s.Name),
             StringComparer.Ordinal);
@@ -183,10 +218,16 @@ internal sealed partial class HoverPreviewService
             .ToArray();
         var graphComplete = unresolvedNames.Count == 0
                             && unresolvedDependencies.Length == 0;
+        var replayInitializerCount = localSymbolGraph.Count(s =>
+            string.Equals(s.ReplayPolicy, LocalSymbolReplayPolicies.ReplayInitializer, StringComparison.Ordinal));
+        var placeholderCount = localSymbolGraph.Count - replayInitializerCount;
         log(
             $"extract-local-types line={line} char={character} originLine={extractionLine} originChar={extractionChar} " +
             $"count={localSymbolGraph.Count} vars={string.Join(",", localSymbolGraph.Select(s => s.Name))} " +
-            $"unresolved={unresolvedNames.Count} unresolvedDeps={unresolvedDependencies.Length} graphComplete={graphComplete}");
+            $"unresolved={unresolvedNames.Count} unresolvedDeps={unresolvedDependencies.Length} graphComplete={graphComplete} " +
+            $"helperSubstitution={helperSubstitutionApplied} replayInit={replayInitializerCount} placeholder={placeholderCount} " +
+            $"rewritten={(string.Equals(executableExpression, expression, StringComparison.Ordinal) ? "False" : "True")} " +
+            $"hasMemberCapture={(executableExpression.Contains("__qlm_", StringComparison.Ordinal) ? "True" : "False")}");
 
         if (!graphComplete)
         {
@@ -208,13 +249,6 @@ internal sealed partial class HoverPreviewService
             log($"preview-blocked line={line} char={character} reason={reason}");
             return Fail($"No preview: symbol graph incomplete ({reason}).", sourceLine);
         }
-        var factoryDbContextCandidates = AssemblyResolver.TryExtractDbContextTypeNamesFromFactories(targetAssembly);
-        var dbContextResolution = LspSyntaxHelper.BuildDbContextResolutionSnapshot(
-            sourceText,
-            contextVariableName,
-            factoryDbContextCandidates);
-        var dbContextTypeName = LspSyntaxHelper.GetPreferredDbContextTypeName(dbContextResolution);
-
         try
         {
             var sw = Stopwatch.StartNew();
@@ -223,10 +257,10 @@ internal sealed partial class HoverPreviewService
             var translationRequest = new TranslationRequest
             {
                 AssemblyPath = targetAssembly,
-                Expression = expression,
+                Expression = executableExpression,
                 OriginalExpression = callSiteExpression ?? expression,
-                RewrittenExpression = expression,
-                RewriteFlags = BuildRewriteFlags(callSiteExpression, expression),
+                RewrittenExpression = executableExpression,
+                RewriteFlags = BuildRewriteFlags(callSiteExpression, executableExpression),
                 ContextVariableName = contextVariableName,
                 DbContextTypeName = dbContextTypeName,
                 DbContextResolution = dbContextResolution,
@@ -309,6 +343,14 @@ internal sealed partial class HoverPreviewService
                 return Fail("No SQL was produced for this expression.", sourceLine);
             }
 
+            for (var i = 0; i < commands.Count; i++)
+            {
+                var commandSql = commands[i].Sql ?? string.Empty;
+                log(
+                    $"translate-sql line={line} char={character} idx={i + 1}/{commands.Count} " +
+                    $"sql={BuildSqlLogPreview(commandSql)}");
+            }
+
             return new HoverCanonicalComputationResult(
                 Success: true,
                 Message: string.Empty,
@@ -318,7 +360,7 @@ internal sealed partial class HoverPreviewService
                 SourceExpression: callSiteExpression ?? expression,
                 ExecutedExpression: ResolveExecutedExpression(
                     callSiteExpression,
-                    expression,
+                    executableExpression,
                     translation.ExecutedExpression),
                 SourceLine: sourceLine,
                 Metadata: translation.Metadata,
@@ -367,6 +409,12 @@ internal sealed partial class HoverPreviewService
             {
                 continue;
             }
+            if (id.Parent is Microsoft.CodeAnalysis.CSharp.Syntax.NameColonSyntax
+                or Microsoft.CodeAnalysis.CSharp.Syntax.TypeArgumentListSyntax
+                or Microsoft.CodeAnalysis.CSharp.Syntax.QualifiedNameSyntax)
+            {
+                continue;
+            }
 
             var name = id.Identifier.ValueText;
             if (string.IsNullOrWhiteSpace(name))
@@ -407,6 +455,60 @@ internal sealed partial class HoverPreviewService
         }
 
         return new CombinedHoverResult(markdown, structured);
+    }
+
+    private static IReadOnlyList<LocalSymbolGraphEntry> DowngradeReplayInitializersWithMissingDependencies(
+        IReadOnlyList<LocalSymbolGraphEntry> graph,
+        out int downgradedCount)
+    {
+        downgradedCount = 0;
+        if (graph.Count == 0)
+            return graph;
+
+        var declaredNames = new HashSet<string>(graph.Select(s => s.Name), StringComparer.Ordinal);
+        var adjusted = new List<LocalSymbolGraphEntry>(graph.Count);
+
+        foreach (var entry in graph)
+        {
+            var isReplayInitializer = string.Equals(
+                entry.ReplayPolicy,
+                LocalSymbolReplayPolicies.ReplayInitializer,
+                StringComparison.Ordinal);
+            var hasConcreteType = !string.Equals(entry.TypeName, "?", StringComparison.Ordinal);
+            var hasMissingDependency = entry.Dependencies.Any(dep => !declaredNames.Contains(dep));
+
+            if (isReplayInitializer && hasConcreteType && hasMissingDependency)
+            {
+                adjusted.Add(entry with
+                {
+                    ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+                    InitializerExpression = null,
+                    Dependencies = [],
+                });
+                downgradedCount++;
+                continue;
+            }
+
+            adjusted.Add(entry);
+        }
+
+        return adjusted;
+    }
+
+    private static string BuildSqlLogPreview(string sql)
+    {
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            return string.Empty;
+        }
+
+        var oneLine = sql.Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal)
+            .Trim();
+
+        return oneLine.Length <= 1200
+            ? oneLine
+            : oneLine[..1200] + "...";
     }
 
     private async Task<QueuedTranslationResult> TranslateQueuedOrImmediateAsync(

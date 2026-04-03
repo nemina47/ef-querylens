@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 using EFQueryLens.Core.Contracts;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -21,7 +20,8 @@ public static partial class LspSyntaxHelper
         string filePath,
         int line,
         int character,
-        ProjectSourceIndex? sourceIndex = null)
+        ProjectSourceIndex? sourceIndex = null,
+        string? targetAssemblyPath = null)
     {
         var expression = TryExtractLinqExpression(
             sourceText,
@@ -31,7 +31,8 @@ public static partial class LspSyntaxHelper
             out var callSiteExpression,
             out var extractionOrigin,
             filePath,
-            sourceIndex);
+            sourceIndex,
+            targetAssemblyPath);
 
         if (string.IsNullOrWhiteSpace(expression) || string.IsNullOrWhiteSpace(contextVariableName))
             return null;
@@ -61,7 +62,8 @@ public static partial class LspSyntaxHelper
     public static string? TryExtractLinqExpression(string sourceText, int line, int character,
         out string? contextVariableName,
         out string? callSiteExpression,
-        ProjectSourceIndex? sourceIndex = null)
+        ProjectSourceIndex? sourceIndex = null,
+        string? targetAssemblyPath = null)
         => TryExtractLinqExpression(
             sourceText,
             line,
@@ -70,14 +72,16 @@ public static partial class LspSyntaxHelper
             out callSiteExpression,
             out _,
             filePath: null,
-            sourceIndex);
+            sourceIndex,
+            targetAssemblyPath);
 
     public static string? TryExtractLinqExpression(string sourceText, int line, int character,
         out string? contextVariableName,
         out string? callSiteExpression,
         out ExtractionOriginSnapshot? extractionOrigin,
         string? filePath = null,
-        ProjectSourceIndex? sourceIndex = null)
+        ProjectSourceIndex? sourceIndex = null,
+        string? targetAssemblyPath = null)
     {
         contextVariableName = null;
         callSiteExpression = null;
@@ -97,9 +101,15 @@ public static partial class LspSyntaxHelper
 
         // Find the node at the cursor position
         var node = root.FindToken(position).Parent;
+        SemanticModel? helperSemanticModel = null;
+        if (TryCreateSemanticModel(sourceText, targetAssemblyPath, out _, out _, out var extractedModel))
+        {
+            helperSemanticModel = extractedModel;
+        }
 
         InvocationExpressionSyntax? invocation = null;
         ExpressionSyntax? targetExpression = null;
+        ExpressionSyntax? sourceBackedExtractionNode = null;
 
         // Conditional expression special-case:
         // - Hovering inside a query subtree in either branch should extract that branch query.
@@ -107,28 +117,34 @@ public static partial class LspSyntaxHelper
         //   regular outermost extraction, which preserves current default behavior.
         if (!TryExtractConditionalBranchQueryAtPosition(node, position, out targetExpression, out invocation))
         {
-            // Walk up until we find an InvocationExpression (like .Where() or .ToList()),
-            // a MemberAccessExpression (like db.Orders), or a query-expression root
-            // (from ... in ... select ...).
-            invocation = node?.FirstAncestorOrSelf<InvocationExpressionSyntax>();
-            var memberAccess = node?.FirstAncestorOrSelf<MemberAccessExpressionSyntax>();
-            var queryExpression = node?.FirstAncestorOrSelf<QueryExpressionSyntax>();
-
-            targetExpression = invocation
-                ?? (ExpressionSyntax?)memberAccess
-                ?? queryExpression;
+            if (!TryExtractSemanticCandidateAtPosition(
+                    sourceText,
+                    line,
+                    character,
+                    targetAssemblyPath,
+                    out targetExpression,
+                    out invocation))
+            {
+                // Strict mode: when semantic candidate resolution fails, only keep the
+                // nearest invocation under cursor so helper-call extraction still works.
+                // Do not broaden to generic member/query-expression heuristics.
+                invocation = node?.FirstAncestorOrSelf<InvocationExpressionSyntax>();
+                targetExpression = invocation;
+            }
         }
+        sourceBackedExtractionNode = targetExpression;
 
         if (targetExpression is null
             && TryGetRhsExpressionFromDeclarationOrAssignment(node, out var rhsExpression))
         {
             targetExpression = rhsExpression;
             invocation = rhsExpression.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>().FirstOrDefault();
+            sourceBackedExtractionNode = rhsExpression;
         }
 
         if (targetExpression == null)
             return null;
-        var sourceBackedExtractionNode = targetExpression;
+        sourceBackedExtractionNode ??= targetExpression;
 
         // Walk to the topmost invocation/member access, including any terminal call
         // (Count, ToList, FirstOrDefaultAsync, ExecuteDeleteAsync, etc.) so the engine
@@ -154,6 +170,7 @@ public static partial class LspSyntaxHelper
                     root,
                     finalInvocation,
                     position,
+                    helperSemanticModel,
                     out var synthesizedExpression,
                     out var synthesizedContextVariableName,
                     out var helperOrigin,
@@ -172,6 +189,7 @@ public static partial class LspSyntaxHelper
                     root,
                     finalInvocation,
                     position,
+                    helperSemanticModel,
                     out synthesizedExpression,
                     out synthesizedContextVariableName,
                     out helperOrigin,
@@ -186,30 +204,7 @@ public static partial class LspSyntaxHelper
                 return synthesizedExpression;
             }
 
-            // The cursor is inside a nested call (e.g. a predicate method inside a lambda
-            // argument: "w.IsNotDeleted()" inside ".Where(w => w.IsNotDeleted())").
-            // Walk up through ancestors to find a containing LINQ query chain — this
-            // handles hovering on any token within a .Where(…) or .Select(…) lambda
-            // in Visual Studio / Rider, where the QuickInfo trigger fires on the exact
-            // token under the cursor rather than the method name.
-            var outerChain = node?.AncestorsAndSelf()
-                .OfType<InvocationExpressionSyntax>()
-                .Select(GetOutermostInvocationChain)
-                .FirstOrDefault(IsLikelyQueryChain);
-
-            if (outerChain is null)
-            {
-                if (!IsPotentialQueryableOperatorInvocation(finalInvocation))
-                {
-                    return null;
-                }
-
-                targetExpression = finalInvocation;
-            }
-            else
-            {
-                targetExpression = outerChain;
-            }
+            return null;
         }
 
         // If the outermost chain is chained on the result of an await expression
@@ -248,6 +243,7 @@ public static partial class LspSyntaxHelper
                 root,
                 helperInvocation,
                 position,
+                helperSemanticModel,
                 out var helperExpression,
                 out var helperContextVariableName,
                 out var helperOrigin,
@@ -369,6 +365,74 @@ public static partial class LspSyntaxHelper
         }
 
         return new SourceUsingContext(imports, aliases, staticTypes);
+    }
+
+    private static bool TryExtractSemanticCandidateAtPosition(
+        string sourceText,
+        int line,
+        int character,
+        string? targetAssemblyPath,
+        out ExpressionSyntax? expression,
+        out InvocationExpressionSyntax? invocation)
+    {
+        expression = null;
+        invocation = null;
+
+        try
+        {
+            TryCreateSemanticModel(sourceText, targetAssemblyPath, out var tree, out var root, out var model);
+            var textLines = tree.GetText().Lines;
+            if (line < 0 || line >= textLines.Count)
+                return false;
+
+            var charOffset = Math.Min(Math.Max(character, 0), textLines[line].End - textLines[line].Start);
+            var position = textLines[line].Start + charOffset;
+            var node = root.FindToken(position).Parent;
+            if (node is null)
+                return false;
+
+            var semanticInvocations = node.AncestorsAndSelf()
+                .OfType<InvocationExpressionSyntax>()
+                .Select(GetOutermostInvocationChain)
+                .GroupBy(static i => (i.SpanStart, i.Span.Length))
+                .Select(static g => g.First())
+                .OrderBy(static i => i.Span.Length);
+
+            foreach (var candidate in semanticInvocations)
+            {
+                if (!IsSemanticallyQueryableInvocation(candidate, model))
+                    continue;
+
+                expression = candidate;
+                invocation = candidate;
+                return true;
+            }
+
+            var queryExpression = node.FirstAncestorOrSelf<QueryExpressionSyntax>();
+            if (queryExpression is not null && IsSemanticallyQueryableExpression(queryExpression, model))
+            {
+                expression = queryExpression;
+                invocation = queryExpression.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>().FirstOrDefault();
+                return true;
+            }
+
+            var semanticMemberAccess = node.AncestorsAndSelf()
+                .OfType<MemberAccessExpressionSyntax>()
+                .OrderBy(static m => m.Span.Length)
+                .FirstOrDefault(member => IsSemanticallyQueryableExpression(member, model));
+            if (semanticMemberAccess is not null)
+            {
+                expression = semanticMemberAccess;
+                invocation = semanticMemberAccess.AncestorsAndSelf().OfType<InvocationExpressionSyntax>().FirstOrDefault();
+                return true;
+            }
+        }
+        catch
+        {
+            // Best-effort semantic short-circuit. Caller falls back to syntax-based extraction.
+        }
+
+        return false;
     }
 
     private static string? TryExtractRootContextVariable(ExpressionSyntax expression)
@@ -519,46 +583,6 @@ public static partial class LspSyntaxHelper
         return methodNames.Any(name => TerminalMethods.Contains(name) || QueryChainMethods.Contains(name));
     }
 
-    private static bool IsPotentialQueryableOperatorInvocation(InvocationExpressionSyntax invocation)
-    {
-        if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
-        {
-            return false;
-        }
-
-        if (memberAccess.Expression is PredefinedTypeSyntax)
-        {
-            return false;
-        }
-
-        if (memberAccess.Expression is not IdentifierNameSyntax receiver)
-        {
-            return false;
-        }
-
-        var anchorStatement = invocation.FirstAncestorOrSelf<StatementSyntax>();
-        if (anchorStatement is null)
-        {
-            return false;
-        }
-
-        if (!TryResolveLocalExpressionCore(
-                receiver.Identifier.ValueText,
-                anchorStatement,
-                out var resolvedReceiver,
-                out _))
-        {
-            return false;
-        }
-
-        return resolvedReceiver switch
-        {
-            InvocationExpressionSyntax resolvedInvocation => IsLikelyQueryChain(GetOutermostInvocationChain(resolvedInvocation)),
-            MemberAccessExpressionSyntax => true,
-            _ => false,
-        };
-    }
-
     private static bool TryFindQueryableHelperInvocationInChain(
         InvocationExpressionSyntax outerInvocation,
         int cursorPosition,
@@ -616,6 +640,7 @@ public static partial class LspSyntaxHelper
         SyntaxNode root,
         InvocationExpressionSyntax invocation,
         int cursorPosition,
+        SemanticModel? semanticModel,
         out string expression,
         out string? contextVariableName,
         out ExtractionOriginSnapshot? extractionOrigin,
@@ -640,25 +665,10 @@ public static partial class LspSyntaxHelper
             return false;
         }
 
-        // Search the current file first, then fall back to sibling project files.
-        // The sibling search covers the common pattern where the helper method is defined
-        // in a service class in a different file from the call site (e.g. Program.cs calls
-        // CustomerReadService.GetCustomerByIdAsync which lives in CustomerReadService.cs).
-        IEnumerable<MethodDeclarationSyntax> allDeclarations = root
-            .DescendantNodes()
-            .OfType<MethodDeclarationSyntax>();
-
-        if (sourceIndex is not null)
-        {
-            // Text-pre-filtered: only files that mention the method name are parsed.
-            var methodRoots = sourceIndex.FindRootsForMethod(helperName);
-            allDeclarations = allDeclarations.Concat(
-                methodRoots.SelectMany(r => r.DescendantNodes().OfType<MethodDeclarationSyntax>()));
-        }
-
-        var candidates = allDeclarations
+        var candidates = ResolveHelperMethodDeclarations(invocation, semanticModel, fallbackFilePath)
             .Where(m => string.Equals(m.Identifier.Text, helperName, StringComparison.Ordinal)
                 && m.ParameterList.Parameters.Count == arguments.Count)
+            .OrderByDescending(m => ComputeHelperMethodCandidateScore(m, arguments))
             .ToArray();
 
         foreach (var method in candidates)
@@ -687,30 +697,13 @@ public static partial class LspSyntaxHelper
 
             ExpressionSyntax queryExpression = queryInvocation;
             queryExpression = TryInlineLocalQueryRoot(queryExpression, queryInvocation);
-            queryExpression = TryInlineLocalIdentifierReferences(queryExpression, queryInvocation);
             queryExpression = StripTransparentQueryableCasts(queryExpression);
 
-            var queryText = queryExpression.ToString();
-            if (string.IsNullOrWhiteSpace(queryText))
-            {
-                continue;
-            }
-
-            queryText = SubstituteMethodParametersWithCallArguments(
-                queryText,
+            var parsed = BindHelperMethodParameters(
+                queryExpression,
                 method.ParameterList.Parameters,
                 arguments,
                 invocation);
-
-            ExpressionSyntax parsed;
-            try
-            {
-                parsed = SyntaxFactory.ParseExpression(queryText);
-            }
-            catch
-            {
-                continue;
-            }
 
             if (parsed is InvocationExpressionSyntax parsedInvocation
                 && !IsLikelyQueryChain(parsedInvocation))
@@ -728,7 +721,7 @@ public static partial class LspSyntaxHelper
                 continue;
             }
 
-            expression = parsed.ToString();
+            expression = PreNormalizeExtractedExpression(parsed.ToString());
             contextVariableName = rootContext;
             var origin = BuildExtractionOriginSnapshot(
                 queryInvocation,
@@ -752,6 +745,7 @@ public static partial class LspSyntaxHelper
         SyntaxNode root,
         InvocationExpressionSyntax invocation,
         int cursorPosition,
+        SemanticModel? semanticModel,
         out string expression,
         out string? contextVariableName,
         out ExtractionOriginSnapshot? extractionOrigin,
@@ -776,20 +770,10 @@ public static partial class LspSyntaxHelper
             return false;
         }
 
-        IEnumerable<MethodDeclarationSyntax> allDeclarations = root
-            .DescendantNodes()
-            .OfType<MethodDeclarationSyntax>();
-
-        if (sourceIndex is not null)
-        {
-            var methodRoots = sourceIndex.FindRootsForMethod(helperName);
-            allDeclarations = allDeclarations.Concat(
-                methodRoots.SelectMany(r => r.DescendantNodes().OfType<MethodDeclarationSyntax>()));
-        }
-
-        var candidates = allDeclarations
+        var candidates = ResolveHelperMethodDeclarations(invocation, semanticModel, fallbackFilePath)
             .Where(m => string.Equals(m.Identifier.Text, helperName, StringComparison.Ordinal)
                 && m.ParameterList.Parameters.Count == arguments.Count)
+            .OrderByDescending(m => ComputeHelperMethodCandidateScore(m, arguments))
             .ToArray();
 
         foreach (var method in candidates)
@@ -812,30 +796,13 @@ public static partial class LspSyntaxHelper
 
             ExpressionSyntax queryExpression = queryInvocation;
             queryExpression = TryInlineLocalQueryRoot(queryExpression, queryInvocation);
-            queryExpression = TryInlineLocalIdentifierReferences(queryExpression, queryInvocation);
             queryExpression = StripTransparentQueryableCasts(queryExpression);
 
-            var queryText = queryExpression.ToString();
-            if (string.IsNullOrWhiteSpace(queryText))
-            {
-                continue;
-            }
-
-            queryText = SubstituteMethodParametersWithCallArguments(
-                queryText,
+            var parsed = BindHelperMethodParameters(
+                queryExpression,
                 method.ParameterList.Parameters,
                 arguments,
                 invocation);
-
-            ExpressionSyntax parsed;
-            try
-            {
-                parsed = SyntaxFactory.ParseExpression(queryText);
-            }
-            catch
-            {
-                continue;
-            }
 
             if (parsed is InvocationExpressionSyntax parsedInvocation
                 && !IsLikelyQueryChain(GetOutermostInvocationChain(parsedInvocation)))
@@ -853,7 +820,7 @@ public static partial class LspSyntaxHelper
                 continue;
             }
 
-            expression = parsed.ToString();
+            expression = PreNormalizeExtractedExpression(parsed.ToString());
             contextVariableName = rootContext;
             var origin = BuildExtractionOriginSnapshot(
                 queryInvocation,
@@ -883,6 +850,277 @@ public static partial class LspSyntaxHelper
 
         return returnTypeText.Contains("IQueryable<", StringComparison.Ordinal)
                || returnTypeText.Contains("IOrderedQueryable<", StringComparison.Ordinal);
+    }
+
+    private static int ComputeHelperMethodCandidateScore(
+        MethodDeclarationSyntax method,
+        SeparatedSyntaxList<ArgumentSyntax> arguments)
+    {
+        var score = 0;
+        var parameters = method.ParameterList.Parameters;
+        var count = Math.Min(parameters.Count, arguments.Count);
+        for (var i = 0; i < count; i++)
+        {
+            var parameter = parameters[i];
+            var argument = arguments[i].Expression;
+            var parameterName = parameter.Identifier.ValueText;
+            var parameterType = parameter.Type?.ToString() ?? string.Empty;
+
+            if (argument is IdentifierNameSyntax id
+                && string.Equals(id.Identifier.ValueText, parameterName, StringComparison.Ordinal))
+            {
+                score += 4;
+            }
+
+            if (argument is LambdaExpressionSyntax && parameterType.Contains("Expression<", StringComparison.Ordinal))
+            {
+                score += 3;
+            }
+            else if (argument is not LambdaExpressionSyntax && !parameterType.Contains("Expression<", StringComparison.Ordinal))
+            {
+                score += 1;
+            }
+        }
+
+        return score;
+    }
+
+    private static IReadOnlyList<MethodDeclarationSyntax> ResolveHelperMethodDeclarations(
+        InvocationExpressionSyntax invocation,
+        SemanticModel? semanticModel,
+        string? currentFilePath)
+    {
+        if (semanticModel is null)
+            return [];
+
+        var invocationForModel = invocation;
+        if (!ReferenceEquals(semanticModel.SyntaxTree, invocation.SyntaxTree))
+        {
+            var modelRoot = semanticModel.SyntaxTree.GetRoot();
+            var mappedNode = modelRoot.FindNode(invocation.Span, getInnermostNodeForTie: true);
+            if (mappedNode is InvocationExpressionSyntax mappedInvocation)
+            {
+                invocationForModel = mappedInvocation;
+            }
+            else
+            {
+                invocationForModel = modelRoot
+                    .DescendantNodes(invocation.Span)
+                    .OfType<InvocationExpressionSyntax>()
+                    .FirstOrDefault(i => i.Span.Equals(invocation.Span))
+                    ?? invocationForModel;
+            }
+        }
+
+        var symbolInfo = semanticModel.GetSymbolInfo(invocationForModel);
+        var methodSymbol = symbolInfo.Symbol as IMethodSymbol
+            ?? symbolInfo.CandidateSymbols.OfType<IMethodSymbol>().FirstOrDefault();
+        if (methodSymbol is null)
+        {
+            return ResolveFromReceiverTypeFallback(invocationForModel, semanticModel, currentFilePath);
+        }
+
+        var declarations = new List<MethodDeclarationSyntax>();
+        foreach (var syntaxReference in methodSymbol.DeclaringSyntaxReferences)
+        {
+            if (syntaxReference.GetSyntax() is MethodDeclarationSyntax declaration)
+            {
+                declarations.Add(declaration);
+            }
+        }
+
+        if (declarations.Count == 0)
+        {
+            declarations.AddRange(ResolveMetadataMethodDeclarations(methodSymbol, currentFilePath));
+        }
+
+        return declarations;
+    }
+
+    private static IReadOnlyList<MethodDeclarationSyntax> ResolveFromReceiverTypeFallback(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        string? currentFilePath)
+    {
+        if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
+            return [];
+
+        var methodName = memberAccess.Name.Identifier.ValueText;
+        if (string.IsNullOrWhiteSpace(methodName))
+            return [];
+
+        var receiverType = semanticModel.GetTypeInfo(memberAccess.Expression).Type;
+        var receiverTypeName = receiverType?.Name;
+        if (string.IsNullOrWhiteSpace(receiverTypeName)
+            && memberAccess.Expression is IdentifierNameSyntax receiverIdentifier)
+        {
+            receiverTypeName = TryResolvePartialPrimaryConstructorParameterTypeName(
+                invocation,
+                receiverIdentifier.Identifier.ValueText,
+                currentFilePath);
+        }
+        if (string.IsNullOrWhiteSpace(receiverTypeName))
+            return [];
+
+        return ResolveMethodsByContainingTypeName(
+            receiverTypeName!,
+            methodName,
+            invocation.ArgumentList.Arguments.Count,
+            currentFilePath);
+    }
+
+    private static string? TryResolvePartialPrimaryConstructorParameterTypeName(
+        InvocationExpressionSyntax invocation,
+        string parameterName,
+        string? currentFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(currentFilePath))
+            return null;
+
+        var className = invocation
+            .FirstAncestorOrSelf<ClassDeclarationSyntax>()?
+            .Identifier.ValueText;
+        if (string.IsNullOrWhiteSpace(className))
+            return null;
+
+        var projectDir = AssemblyResolver.TryGetProjectDirectory(currentFilePath!);
+        if (string.IsNullOrWhiteSpace(projectDir))
+            return null;
+
+        foreach (var file in Directory.EnumerateFiles(projectDir, $"{className}*.cs", SearchOption.AllDirectories))
+        {
+            var relative = file[(projectDir.Length + 1)..];
+            if (relative.StartsWith("bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || relative.StartsWith("obj" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string source;
+            try
+            {
+                source = File.ReadAllText(file);
+            }
+            catch
+            {
+                continue;
+            }
+
+            SyntaxNode root;
+            try
+            {
+                root = CSharpSyntaxTree.ParseText(source, path: file).GetRoot();
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var classDecl in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
+            {
+                if (!string.Equals(classDecl.Identifier.ValueText, className, StringComparison.Ordinal))
+                    continue;
+
+                var parameter = classDecl.ParameterList?.Parameters
+                    .FirstOrDefault(p => string.Equals(p.Identifier.ValueText, parameterName, StringComparison.Ordinal));
+                if (parameter?.Type is null)
+                    continue;
+
+                if (parameter.Type is IdentifierNameSyntax idType)
+                    return idType.Identifier.ValueText;
+
+                return parameter.Type.ToString();
+            }
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<MethodDeclarationSyntax> ResolveMetadataMethodDeclarations(
+        IMethodSymbol methodSymbol,
+        string? currentFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(currentFilePath))
+            return [];
+
+        var projectDir = AssemblyResolver.TryGetProjectDirectory(currentFilePath!);
+        if (string.IsNullOrWhiteSpace(projectDir))
+            return [];
+
+        var typeName = methodSymbol.ContainingType?.Name;
+        if (string.IsNullOrWhiteSpace(typeName))
+            return [];
+
+        return ResolveMethodsByContainingTypeName(
+            typeName!,
+            methodSymbol.Name,
+            methodSymbol.Parameters.Length,
+            currentFilePath);
+    }
+
+    private static IReadOnlyList<MethodDeclarationSyntax> ResolveMethodsByContainingTypeName(
+        string containingTypeName,
+        string methodName,
+        int parameterCount,
+        string? currentFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(currentFilePath))
+            return [];
+
+        var projectDir = AssemblyResolver.TryGetProjectDirectory(currentFilePath!);
+        if (string.IsNullOrWhiteSpace(projectDir))
+            return [];
+
+        var searchDirs = new List<string> { projectDir };
+        searchDirs.AddRange(AssemblyResolver.TryGetProjectReferenceDirs(projectDir));
+
+        var candidates = new List<MethodDeclarationSyntax>();
+        var seenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var dir in searchDirs)
+        {
+            foreach (var path in Directory.EnumerateFiles(dir, $"{containingTypeName}*.cs", SearchOption.AllDirectories))
+            {
+                if (!seenFiles.Add(path))
+                    continue;
+
+                var relative = path[(dir.Length + 1)..];
+                if (relative.StartsWith("bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                    || relative.StartsWith("obj" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string source;
+                try
+                {
+                    source = File.ReadAllText(path);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                SyntaxNode root;
+                try
+                {
+                    root = CSharpSyntaxTree.ParseText(source, path: path).GetRoot();
+                }
+                catch
+                {
+                    continue;
+                }
+
+                foreach (var declaration in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
+                {
+                    if (!string.Equals(declaration.Identifier.ValueText, methodName, StringComparison.Ordinal))
+                        continue;
+                    if (declaration.ParameterList.Parameters.Count != parameterCount)
+                        continue;
+
+                    candidates.Add(declaration);
+                }
+            }
+        }
+
+        return candidates;
     }
 
     private static bool IsCursorRelevantToInvocation(int cursorPosition, InvocationExpressionSyntax invocation)
@@ -1148,45 +1386,42 @@ public static partial class LspSyntaxHelper
         return best;
     }
 
-    private static string SubstituteMethodParametersWithCallArguments(
-        string queryText,
+    private static ExpressionSyntax BindHelperMethodParameters(
+        ExpressionSyntax queryExpression,
         SeparatedSyntaxList<ParameterSyntax> parameters,
         SeparatedSyntaxList<ArgumentSyntax> arguments,
         InvocationExpressionSyntax invocationContext)
     {
-        var result = queryText;
-
+        var parameterMap = new Dictionary<string, ExpressionSyntax>(StringComparer.Ordinal);
         for (var i = 0; i < parameters.Count && i < arguments.Count; i++)
         {
-            var parameterName = parameters[i].Identifier.Text;
+            var parameterName = parameters[i].Identifier.ValueText;
             if (string.IsNullOrWhiteSpace(parameterName))
-            {
                 continue;
-            }
 
             var argumentExpression = arguments[i].Expression;
-            var argumentText = argumentExpression.ToString();
             if (argumentExpression is IdentifierNameSyntax identifier
-                && TryResolveLocalExpression(
-                    identifier.Identifier.ValueText,
-                    invocationContext,
-                    out var resolvedExpression))
+                && IsExpressionParameter(parameters[i])
+                && TryResolveLocalExpression(identifier.Identifier.ValueText, invocationContext, out var resolvedExpression))
             {
-                argumentText = resolvedExpression.WithoutTrivia().ToString();
+                argumentExpression = resolvedExpression;
             }
 
-            if (string.IsNullOrWhiteSpace(argumentText))
-            {
-                continue;
-            }
-
-            result = Regex.Replace(
-                result,
-                $@"\b{Regex.Escape(parameterName)}\b",
-                argumentText);
+            parameterMap[parameterName] = argumentExpression.WithoutTrivia();
         }
 
-        return result;
+        if (parameterMap.Count == 0)
+            return queryExpression;
+
+        var rewritten = new HelperParameterBinder(parameterMap).Visit(queryExpression) as ExpressionSyntax;
+        return rewritten ?? queryExpression;
+    }
+
+    private static bool IsExpressionParameter(ParameterSyntax parameter)
+    {
+        var typeText = parameter.Type?.ToString();
+        return !string.IsNullOrWhiteSpace(typeText)
+            && typeText.Contains("Expression<", StringComparison.Ordinal);
     }
 
     private static ExpressionSyntax TryInlineLocalIdentifierReferences(
@@ -1234,6 +1469,30 @@ public static partial class LspSyntaxHelper
             }
 
             return SyntaxFactory.ParenthesizedExpression(resolvedExpression.WithoutTrivia());
+        }
+    }
+
+    private sealed class HelperParameterBinder : CSharpSyntaxRewriter
+    {
+        private readonly IReadOnlyDictionary<string, ExpressionSyntax> _parameterMap;
+
+        public HelperParameterBinder(IReadOnlyDictionary<string, ExpressionSyntax> parameterMap)
+        {
+            _parameterMap = parameterMap;
+        }
+
+        public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
+        {
+            if (node.Parent is MemberAccessExpressionSyntax memberAccess
+                && ReferenceEquals(memberAccess.Name, node))
+            {
+                return base.VisitIdentifierName(node);
+            }
+
+            if (_parameterMap.TryGetValue(node.Identifier.ValueText, out var replacement))
+                return replacement.WithTriviaFrom(node);
+
+            return base.VisitIdentifierName(node);
         }
     }
 }

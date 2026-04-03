@@ -121,4 +121,30 @@ public sealed class DbContextResolutionSnapshotTests
             "SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext;SampleMySqlApp.Infrastructure.Persistence.MySqlReportingDbContext",
             LspSyntaxHelper.GetDbContextResolutionCacheToken(snapshot));
     }
+
+    [Fact]
+    public void BuildDbContextResolutionSnapshot_UnwrapsDbContextFactoryDeclaredType()
+    {
+        var source = """
+            private readonly IDbContextFactory<SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext> _contextFactory;
+            var query = _contextFactory.CreateDbContext().Orders;
+            """;
+
+        var snapshot = LspSyntaxHelper.BuildDbContextResolutionSnapshot(
+            source,
+            "_contextFactory",
+            [
+                "SampleMySqlApp.Infrastructure.Persistence.MySqlReportingDbContext",
+                "SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext",
+            ]);
+
+        Assert.NotNull(snapshot);
+        Assert.Equal(
+            "SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext",
+            snapshot!.DeclaredTypeName);
+        Assert.Equal("declared+factory-candidates", snapshot.ResolutionSource);
+        Assert.Equal(
+            "SampleMySqlApp.Infrastructure.Persistence.MySqlAppDbContext",
+            LspSyntaxHelper.GetPreferredDbContextTypeName(snapshot));
+    }
 }

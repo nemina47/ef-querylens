@@ -41,6 +41,11 @@ try
     // 1. Initialize the engine
     await using var engine = await LspProgramHelpers.CreateEngineAsync(debugEnabled);
 
+    if (await LspProgramHelpers.TryRunHoverReplayCommandAsync(args, engine, debugEnabled))
+    {
+        return;
+    }
+
     // 2. Run the Microsoft protocol-based host.
     await MicrosoftLspHost.RunAsync(engine);
 }

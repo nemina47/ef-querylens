@@ -386,8 +386,36 @@ public static partial class LspSyntaxHelper
     /// <summary>
     /// Normalises a syntactically-resolved type name for use as a DbContext disambiguator.
     /// Strips nullable-reference-type annotations (<c>?</c>) - they have no CLR distinction.
+    /// Unwraps common factory wrappers so declared <c>IDbContextFactory&lt;TContext&gt;</c> resolves to <c>TContext</c>.
     /// </summary>
-    private static string NormalizeDbContextTypeName(string typeName) => typeName.TrimEnd('?');
+    private static string NormalizeDbContextTypeName(string typeName)
+    {
+        var normalized = typeName.TrimEnd('?').Trim();
+        var unwrapped = TryUnwrapDbContextFactoryTypeName(normalized);
+        return string.IsNullOrWhiteSpace(unwrapped) ? normalized : unwrapped;
+    }
+
+    private static string? TryUnwrapDbContextFactoryTypeName(string typeName)
+    {
+        var start = typeName.IndexOf('<');
+        var end = typeName.LastIndexOf('>');
+        if (start <= 0 || end <= start)
+            return null;
+
+        var wrapper = typeName[..start].Trim();
+        if (wrapper.StartsWith("global::", StringComparison.Ordinal))
+            wrapper = wrapper["global::".Length..];
+
+        if (!string.Equals(wrapper, "IDbContextFactory", StringComparison.Ordinal)
+            && !string.Equals(wrapper, "Microsoft.EntityFrameworkCore.IDbContextFactory", StringComparison.Ordinal)
+            && !string.Equals(wrapper, "PooledDbContextFactory", StringComparison.Ordinal)
+            && !string.Equals(wrapper, "Microsoft.EntityFrameworkCore.Infrastructure.PooledDbContextFactory", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return typeName[(start + 1)..end].Trim().TrimEnd('?');
+    }
 
     internal static DbContextResolutionSnapshot? BuildDbContextResolutionSnapshot(
         string sourceText,

@@ -1,5 +1,7 @@
 using EFQueryLens.Core.Contracts;
 using EFQueryLens.Core.Scripting.Compilation;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Reflection;
 
 namespace EFQueryLens.Core.Scripting.Evaluation;
@@ -65,7 +67,8 @@ internal static partial class StubSynthesizer
             .FirstOrDefault(h => string.Equals(h.Name, name, StringComparison.Ordinal));
 
         var hintedTypeName = localHint?.TypeName;
-        if (!string.IsNullOrWhiteSpace(localHint?.InitializerExpression))
+        if (string.Equals(localHint?.ReplayPolicy, LocalSymbolReplayPolicies.ReplayInitializer, StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(localHint?.InitializerExpression))
         {
             var initializerStub = BuildStubFromInitializer(
                 name,
@@ -100,6 +103,7 @@ internal static partial class StubSynthesizer
         var normalizedTypeName = typeName.Trim();
         if (string.IsNullOrWhiteSpace(normalizedTypeName) || normalizedTypeName == "?")
             return string.Empty;
+        var comparableTypeName = normalizedTypeName.Replace("global::", string.Empty, StringComparison.Ordinal);
 
         var resolvedType = TryResolveStubType(normalizedTypeName, dbContextType, usingAliases);
         if (IsStaticClassType(resolvedType))
@@ -114,19 +118,17 @@ internal static partial class StubSynthesizer
             return $"{underlying}? {varName} = {BuildScalarPlaceholderExpression(resolvedType!)};";
         }
 
-        if (string.Equals(normalizedTypeName, "Gridify.IGridifyQuery", StringComparison.Ordinal)
-            || string.Equals(normalizedTypeName, "global::Gridify.IGridifyQuery", StringComparison.Ordinal))
+        if (string.Equals(comparableTypeName, "Gridify.IGridifyQuery", StringComparison.Ordinal))
         {
-            return $"{normalizedTypeName} {varName} = new global::Gridify.GridifyQuery();";
+            return $"{comparableTypeName} {varName} = new global::Gridify.GridifyQuery();";
         }
 
-        if (normalizedTypeName.StartsWith("Gridify.IGridifyMapper<", StringComparison.Ordinal)
-            || normalizedTypeName.StartsWith("global::Gridify.IGridifyMapper<", StringComparison.Ordinal))
+        if (comparableTypeName.StartsWith("Gridify.IGridifyMapper<", StringComparison.Ordinal))
         {
-            return $"{normalizedTypeName} {varName} = null!;";
+            return $"{comparableTypeName} {varName} = null!;";
         }
 
-        return normalizedTypeName switch
+        return comparableTypeName switch
         {
             "int" or "Int32" or "System.Int32" => $"int {varName} = 0;",
             "long" or "Int64" or "System.Int64" => $"long {varName} = 0L;",
@@ -168,12 +170,18 @@ internal static partial class StubSynthesizer
             // evaluate captured parameter expressions (e.g. model.PlanningCaseId) at runtime,
             // and a null reference throws before SQL is ever produced.
             // Strip nullable-reference-type annotation ('?') — typeof() has no CLR distinction for ref types.
-            var tn => BuildUninitializedObjectStub(tn, varName, resolvedType),
+            var _ => BuildUninitializedObjectStub(normalizedTypeName, varName, resolvedType),
         };
     }
 
     private static string BuildUninitializedObjectStub(string typeName, string varName, Type? resolvedType)
     {
+        if (resolvedType?.IsInterface == true)
+        {
+            var interfaceTypeName = ToCSharpTypeName(resolvedType).TrimEnd('?');
+            return $"var {varName} = __CreateInterfaceProxy__<{interfaceTypeName}>();";
+        }
+
         var targetTypeName = resolvedType is not null
             ? ToCSharpTypeName(resolvedType).TrimEnd('?')
             : typeName.TrimEnd('?');
@@ -349,6 +357,16 @@ internal static partial class StubSynthesizer
         if (string.IsNullOrWhiteSpace(initializerExpression))
             return string.Empty;
 
+        // Initializers like `request.CreatedAfterUtc.Value` are branch-local and only
+        // safe under guards that are not preserved in the extracted query fragment.
+        // Replaying them in the eval scaffold can throw before EF translation starts.
+        if (IsUnsafeInitializerReplay(initializerExpression)
+            && !string.IsNullOrWhiteSpace(hintedTypeName)
+            && !string.Equals(hintedTypeName, "?", StringComparison.Ordinal))
+        {
+            return BuildStubFromTypeName(hintedTypeName.Trim(), variableName, dbContextType, usingAliases);
+        }
+
         if (RequiresTargetType(initializerExpression)
             && !string.IsNullOrWhiteSpace(hintedTypeName)
             && !string.Equals(hintedTypeName, "?", StringComparison.Ordinal))
@@ -369,6 +387,40 @@ internal static partial class StubSynthesizer
         var trimmed = initializerExpression.Trim();
         return string.Equals(trimmed, "default", StringComparison.Ordinal)
                || string.Equals(trimmed, "new()", StringComparison.Ordinal);
+    }
+
+    private static bool IsUnsafeInitializerReplay(string initializerExpression)
+    {
+        if (initializerExpression.Contains(".Value", StringComparison.Ordinal))
+            return true;
+
+        ExpressionSyntax parsed;
+        try
+        {
+            parsed = SyntaxFactory.ParseExpression(initializerExpression);
+        }
+        catch
+        {
+            return false;
+        }
+
+        foreach (var invocation in parsed.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
+        {
+            if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
+                continue;
+
+            // Static calls such as Math.Max(...) are safe to replay.
+            if (memberAccess.Expression is IdentifierNameSyntax identifier
+                && identifier.Identifier.ValueText.Length > 0
+                && char.IsUpper(identifier.Identifier.ValueText[0]))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
 }

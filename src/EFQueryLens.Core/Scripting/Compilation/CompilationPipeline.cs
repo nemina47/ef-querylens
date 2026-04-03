@@ -185,12 +185,9 @@ internal sealed partial class CompilationPipeline
                 compilationAssemblies,
                 knownNamespaces,
                 knownTypes,
-                dbContextType,
-                workingRequest,
                 stubs,
                 synthesizedUsingStaticTypes,
-                synthesizedUsingNamespaces,
-                ref workingExpression);
+                synthesizedUsingNamespaces);
 
             if (!changed)
             {

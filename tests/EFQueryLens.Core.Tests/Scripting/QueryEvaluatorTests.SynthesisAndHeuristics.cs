@@ -201,6 +201,65 @@ public partial class QueryEvaluatorTests
     }
 
     [Fact]
+    public void BuildStubDeclaration_LocalSymbolHintWithNullableValueInitializer_FallsBackToTypedPlaceholder()
+    {
+        var stub = BuildStubDeclarationForRequestForTest(
+            missingName: "fromUtc",
+            expression: "db.Orders.Where(o => o.CreatedUtc >= fromUtc)",
+            localSymbolHints:
+            [
+                new LocalSymbolHint
+                {
+                    Name = "fromUtc",
+                    TypeName = "DateTime",
+                    Kind = "local",
+                    InitializerExpression = "request.CreatedAfterUtc.Value",
+                },
+            ]);
+
+        Assert.Equal("System.DateTime fromUtc = System.DateTime.UtcNow;", stub);
+    }
+
+    [Fact]
+    public void BuildStubDeclaration_LocalSymbolHintWithInstanceCallInitializer_FallsBackToTypedPlaceholder()
+    {
+        var stub = BuildStubDeclarationForRequestForTest(
+            missingName: "term",
+            expression: "db.Orders.Where(o => o.Notes != null && o.Notes.ToLower().Contains(term))",
+            localSymbolHints:
+            [
+                new LocalSymbolHint
+                {
+                    Name = "term",
+                    TypeName = "string",
+                    Kind = "local",
+                    InitializerExpression = "request.NotesSearch.Trim().ToLowerInvariant()",
+                },
+            ]);
+
+        Assert.Equal("string term = \"\";", stub);
+    }
+
+    [Fact]
+    public void BuildStubDeclaration_InterfaceType_UsesInterfaceProxyStub()
+    {
+        var stub = BuildStubDeclarationForRequestForTest(
+            missingName: "clock",
+            expression: "db.Orders.Where(o => o.CreatedAt <= clock.Now)",
+            localSymbolHints:
+            [
+                new LocalSymbolHint
+                {
+                    Name = "clock",
+                    TypeName = "System.IFormatProvider",
+                    Kind = "parameter",
+                },
+            ]);
+
+        Assert.Equal("var clock = __CreateInterfaceProxy__<System.IFormatProvider>();", stub);
+    }
+
+    [Fact]
     public async Task Evaluate_MissingMinOrders_InCountComparison_IsSynthesizedAsNumeric()
     {
         var result = await TranslateStrictAsync(

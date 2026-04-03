@@ -395,7 +395,7 @@ public partial class LspSyntaxHelperTests
     }
 
     [Fact]
-    public void TryExtractLinqExpression_HelperMethodReturningQueryable_InlinesHelperLocalsUsedInSkipTake()
+    public void TryExtractLinqExpression_HelperMethodReturningQueryable_PreservesHelperFreeVariablesUsedInSkipTake()
     {
         var source = """
             public sealed class DemoService
@@ -430,10 +430,9 @@ public partial class LspSyntaxHelperTests
 
         Assert.NotNull(expression);
         Assert.Equal("_dbContext", contextVariableName);
-        Assert.DoesNotContain("Skip((page - 1) * pageSize)", expression, StringComparison.Ordinal);
-        Assert.DoesNotContain(".Take(pageSize)", expression, StringComparison.Ordinal);
-        Assert.Contains("Math.Max(customerQuery.Page, 1)", expression, StringComparison.Ordinal);
-        Assert.Contains("Math.Clamp(customerQuery.PageSize, 1, 200)", expression, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetCustomersQuery", expression, StringComparison.Ordinal);
+        Assert.Contains("Skip((page - 1) * pageSize)", expression, StringComparison.Ordinal);
+        Assert.Contains(".Take(pageSize)", expression, StringComparison.Ordinal);
     }
 
     [Fact]

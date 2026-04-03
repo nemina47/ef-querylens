@@ -61,8 +61,28 @@ internal sealed partial class HoverHandler
         if (TryCacheEntryInQueue(cacheKey, inQueueEntry))
         {
             LogHoverDebug($"hover-cache-miss-queued line={effectiveLine} char={effectiveCharacter}");
-            _ = Task.Run(() => BackgroundComputeAndCacheAsync(
+            var backgroundTask = Task.Run(() => BackgroundComputeAndCacheAsync(
                 cacheKey, filePath, sourceText, effectiveLine, effectiveCharacter, semanticContext));
+
+            // Fast-path: wait briefly on first miss so quick translations can render
+            // in the initial hover instead of requiring a second hover event.
+            var fastPathWaitMs = Math.Max(50, Math.Min(300, _hoverQueuedAdaptiveWaitMs));
+            try
+            {
+                await Task.WhenAny(backgroundTask, Task.Delay(fastPathWaitMs, cancellationToken));
+                if (TryGetCachedEntry(cacheKey, out var refreshed)
+                    && refreshed is not null
+                    && refreshed.Status is not QueryTranslationStatus.InQueue
+                    && refreshed.Hover is not null)
+                {
+                    LogHoverDebug($"hover-cache-miss-fastpath line={effectiveLine} char={effectiveCharacter} waitMs={fastPathWaitMs}");
+                    return refreshed.Hover;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Respect request cancellation; fall back to InQueue payload.
+            }
         }
         else
         {

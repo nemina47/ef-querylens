@@ -1,10 +1,14 @@
 using System.Text;
+using System.Text.Json;
 using EFQueryLens.Core.Contracts;
 using EFQueryLens.Lsp;
 using EFQueryLens.Lsp.Engine;
+using EFQueryLens.Lsp.Services;
 
 internal static class LspProgramHelpers
 {
+    private sealed record HoverReplayCase(string File, int Line, int Character);
+
     internal static TextWriter? ConfigureLspLogWriter()
     {
         var rawPath = Environment.GetEnvironmentVariable("QUERYLENS_LSP_LOG_FILE");
@@ -217,6 +221,110 @@ internal static class LspProgramHelpers
         catch (Exception ex)
         {
             Console.WriteLine($"cache-clear-error: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        return true;
+    }
+
+    internal static async Task<bool> TryRunHoverReplayCommandAsync(
+        string[] args,
+        IQueryLensEngine engine,
+        bool debugEnabled)
+    {
+        if (!args.Contains("--hover-replay", StringComparer.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        static string? ArgValue(string[] values, string name)
+        {
+            for (var i = 0; i < values.Length - 1; i++)
+            {
+                if (string.Equals(values[i], name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return values[i + 1];
+                }
+            }
+
+            return null;
+        }
+
+        var cases = new List<HoverReplayCase>();
+        var casesFile = ArgValue(args, "--cases-file");
+        if (!string.IsNullOrWhiteSpace(casesFile))
+        {
+            try
+            {
+                var json = await File.ReadAllTextAsync(casesFile);
+                var parsed = JsonSerializer.Deserialize<List<HoverReplayCase>>(json, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true,
+                });
+
+                if (parsed is not null)
+                {
+                    cases.AddRange(parsed.Where(c => !string.IsNullOrWhiteSpace(c.File)));
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"hover-replay-error: failed to read cases file '{casesFile}': {ex.GetType().Name}: {ex.Message}");
+                return true;
+            }
+        }
+
+        var file = ArgValue(args, "--file");
+        var lineText = ArgValue(args, "--line");
+        var charText = ArgValue(args, "--char") ?? ArgValue(args, "--character");
+        if (!string.IsNullOrWhiteSpace(file)
+            && int.TryParse(lineText, out var line)
+            && int.TryParse(charText, out var character))
+        {
+            cases.Add(new HoverReplayCase(file!, line, character));
+        }
+
+        if (cases.Count == 0)
+        {
+            Console.WriteLine("hover-replay-error: provide --file/--line/--char or --cases-file.");
+            return true;
+        }
+
+        var hoverService = new HoverPreviewService(engine, debugEnabled: true);
+        var jsonOptions = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+        };
+
+        foreach (var hoverCase in cases)
+        {
+            var fullFilePath = Path.GetFullPath(hoverCase.File);
+            Console.WriteLine($"hover-replay-case: {fullFilePath}:{hoverCase.Line}:{hoverCase.Character}");
+
+            if (!File.Exists(fullFilePath))
+            {
+                Console.WriteLine("hover-replay-result: file-not-found");
+                continue;
+            }
+
+            try
+            {
+                var sourceText = await File.ReadAllTextAsync(fullFilePath);
+                var combined = await hoverService.BuildCombinedAsync(
+                    fullFilePath,
+                    sourceText,
+                    hoverCase.Line,
+                    hoverCase.Character,
+                    CancellationToken.None);
+
+                Console.WriteLine("hover-replay-structured:");
+                Console.WriteLine(JsonSerializer.Serialize(combined.Structured, jsonOptions));
+                Console.WriteLine("hover-replay-markdown:");
+                Console.WriteLine(combined.Markdown.Output ?? string.Empty);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"hover-replay-error: {ex.GetType().Name}: {ex.Message}");
+            }
         }
 
         return true;

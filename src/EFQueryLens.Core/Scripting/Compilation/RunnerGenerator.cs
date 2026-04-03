@@ -68,7 +68,7 @@ internal static class RunnerGenerator
     {
         var runMethod = BuildRunMethod(
             contextVarName, contextTypeFullName, expressionNode, stubs, useAsync);
-        var helpers = useAsync ? ParseMethods(AsyncHelpersSource) : ParseMethods(SyncHelpersSource);
+        var helpers = ParseHelperMembers(BuildHelpersSource(useAsync, stubs));
         var allMembers = new[] { runMethod }.Concat(helpers).ToList();
 
         var classDecl = SyntaxFactory.ClassDeclaration("__QueryLensRunner__");
@@ -90,7 +90,7 @@ internal static class RunnerGenerator
             statementBlock,
             stubs,
             useAsync);
-        var helpers = useAsync ? ParseMethods(AsyncHelpersSource) : ParseMethods(SyncHelpersSource);
+        var helpers = ParseHelperMembers(BuildHelpersSource(useAsync, stubs));
         var allMembers = new[] { runMethod }.Concat(helpers).ToList();
 
         var classDecl = SyntaxFactory.ClassDeclaration("__QueryLensRunner__");
@@ -394,12 +394,31 @@ internal static class RunnerGenerator
 
     // ─── Static helper methods ────────────────────────────────────────────────
 
-    private static IEnumerable<MethodDeclarationSyntax> ParseMethods(string source)
+    private static IEnumerable<MemberDeclarationSyntax> ParseHelperMembers(string source)
     {
         var root = CSharpSyntaxTree
             .ParseText($"class __D__ {{ {source} }}", SParseOptions)
             .GetRoot();
-        return root.DescendantNodes().OfType<MethodDeclarationSyntax>();
+        var wrapper = root.DescendantNodes().OfType<ClassDeclarationSyntax>()
+            .FirstOrDefault(c => string.Equals(c.Identifier.Text, "__D__", StringComparison.Ordinal));
+        if (wrapper is null)
+            return [];
+
+        return wrapper.Members;
+    }
+
+    private static string BuildHelpersSource(bool useAsync, IReadOnlyList<string> stubs)
+    {
+        var includeInterfaceProxyHelpers = stubs.Any(static s =>
+            s.Contains("__CreateInterfaceProxy__<", StringComparison.Ordinal));
+
+        if (includeInterfaceProxyHelpers)
+        {
+            return InterfaceProxyHelpersSource + Environment.NewLine
+                + (useAsync ? AsyncHelpersSource : SyncHelpersSource);
+        }
+
+        return useAsync ? AsyncHelpersSource : SyncHelpersSource;
     }
 
     private static StatementSyntax Parse(string text) =>
@@ -468,6 +487,32 @@ internal static class RunnerGenerator
     }
 
     // ─── Helper method source templates ──────────────────────────────────────
+
+    private const string InterfaceProxyHelpersSource =
+        """
+        private sealed class __QueryLensInterfaceProxy__ : System.Reflection.DispatchProxy
+        {
+            protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args)
+            {
+                if (targetMethod is null)
+                    return null;
+
+                var returnType = targetMethod.ReturnType;
+                if (returnType == typeof(void))
+                    return null;
+
+                if (returnType.IsValueType)
+                    return System.Activator.CreateInstance(returnType);
+
+                return null;
+            }
+        }
+
+        private static T __CreateInterfaceProxy__<T>() where T : class
+        {
+            return System.Reflection.DispatchProxy.Create<T, __QueryLensInterfaceProxy__>();
+        }
+        """;
 
     private const string AsyncHelpersSource =
         """

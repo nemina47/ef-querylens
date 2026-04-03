@@ -30,10 +30,30 @@ public static partial class LspSyntaxHelper
             return expression;
 
         var result = expression;
+        result = ApplyCollectionExpressionReceiverNormalization(result);
         result = ApplyPatternMatchingNormalization(result);
         result = ApplyTernaryPatternNormalization(result);
         result = ApplySetOperationProjectionNormalization(result);
         return result;
+    }
+
+    private static string ApplyCollectionExpressionReceiverNormalization(string expression)
+    {
+        if (!expression.Contains('[', StringComparison.Ordinal)
+            || !expression.Contains(']', StringComparison.Ordinal))
+        {
+            return expression;
+        }
+
+        ExpressionSyntax parsed;
+        try { parsed = SyntaxFactory.ParseExpression(expression); }
+        catch { return expression; }
+
+        var rewriter = new LspCollectionExpressionReceiverRewriter();
+        var rewritten = rewriter.Visit(parsed) as ExpressionSyntax;
+        return rewriter.Changed && rewritten is not null
+            ? rewritten.NormalizeWhitespace().ToString()
+            : expression;
     }
 
     private static string ApplyPatternMatchingNormalization(string expression)
@@ -374,6 +394,47 @@ public static partial class LspSyntaxHelper
                     ? IdentifierName("__ql_param")
                     : base.VisitIdentifierName(node)!;
             }
+        }
+    }
+
+    private sealed class LspCollectionExpressionReceiverRewriter : CSharpSyntaxRewriter
+    {
+        public bool Changed { get; private set; }
+
+        public override SyntaxNode VisitMemberAccessExpression(MemberAccessExpressionSyntax node)
+        {
+            var visited = (MemberAccessExpressionSyntax)base.VisitMemberAccessExpression(node)!;
+            if (visited.Expression is not CollectionExpressionSyntax collection)
+                return visited;
+
+            if (!TryConvertCollectionExpressionToImplicitArray(collection, out var implicitArray))
+                return visited;
+
+            Changed = true;
+            return visited.WithExpression(implicitArray.WithTriviaFrom(collection));
+        }
+
+        private static bool TryConvertCollectionExpressionToImplicitArray(
+            CollectionExpressionSyntax collection,
+            out ImplicitArrayCreationExpressionSyntax implicitArray)
+        {
+            implicitArray = null!;
+
+            var elements = new List<ExpressionSyntax>();
+            foreach (var element in collection.Elements)
+            {
+                if (element is not ExpressionElementSyntax expressionElement)
+                    return false;
+
+                elements.Add(expressionElement.Expression);
+            }
+
+            var initializer = InitializerExpression(
+                SyntaxKind.ArrayInitializerExpression,
+                SeparatedList(elements));
+
+            implicitArray = ImplicitArrayCreationExpression(initializer);
+            return true;
         }
     }
 }

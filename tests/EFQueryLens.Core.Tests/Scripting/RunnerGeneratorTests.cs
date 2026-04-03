@@ -49,4 +49,32 @@ public sealed class RunnerGeneratorTests
         Assert.Contains("goto __ql_after_user_block;", source, StringComparison.Ordinal);
         Assert.Contains("__ql_after_user_block:", source, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void GenerateRunnerClass_WithoutInterfaceProxyStub_DoesNotEmitDispatchProxyHelper()
+    {
+        var source = RunnerGenerator.GenerateRunnerClass(
+            "db",
+            "My.Namespace.MyDbContext",
+            "db.Orders.Where(o => o.Id > 0)",
+            [],
+            useAsync: true);
+
+        Assert.DoesNotContain("DispatchProxy", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("__CreateInterfaceProxy__", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GenerateRunnerClass_WithInterfaceProxyStub_EmitsDispatchProxyHelper()
+    {
+        var source = RunnerGenerator.GenerateRunnerClass(
+            "db",
+            "My.Namespace.MyDbContext",
+            "db.Orders.Where(o => o.Id > 0)",
+            ["var clock = __CreateInterfaceProxy__<System.IFormatProvider>();"],
+            useAsync: true);
+
+        Assert.Contains("DispatchProxy", source, StringComparison.Ordinal);
+        Assert.Contains("__CreateInterfaceProxy__", source, StringComparison.Ordinal);
+    }
 }

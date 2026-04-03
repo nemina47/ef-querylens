@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using EFQueryLens.Core.Contracts;
 using System.Text.RegularExpressions;
+using System.Reflection;
 
 namespace EFQueryLens.Lsp.Parsing;
 
@@ -104,6 +105,140 @@ public static partial class LspSyntaxHelper
                 Scope = h.Scope,
             })
             .ToArray();
+    }
+
+    internal static IReadOnlyList<LocalSymbolGraphEntry> ExtractFreeVariableSymbolGraph(
+        string expression,
+        string contextVariableName,
+        string primarySourceText,
+        int primaryLine,
+        int primaryCharacter,
+        string? targetAssemblyPath,
+        string? secondarySourceText = null,
+        int? secondaryLine = null,
+        int? secondaryCharacter = null,
+        string? dbContextTypeName = null,
+        Action<string>? debugLog = null)
+        => ExtractFreeVariableSymbolGraph(
+            expression,
+            contextVariableName,
+            primarySourceText,
+            primaryLine,
+            primaryCharacter,
+            targetAssemblyPath,
+            out _,
+            secondarySourceText,
+            secondaryLine,
+            secondaryCharacter,
+            dbContextTypeName,
+            debugLog);
+
+    internal static IReadOnlyList<LocalSymbolGraphEntry> ExtractFreeVariableSymbolGraph(
+        string expression,
+        string contextVariableName,
+        string primarySourceText,
+        int primaryLine,
+        int primaryCharacter,
+        string? targetAssemblyPath,
+        out string rewrittenExpression,
+        string? secondarySourceText = null,
+        int? secondaryLine = null,
+        int? secondaryCharacter = null,
+        string? dbContextTypeName = null,
+        Action<string>? debugLog = null)
+    {
+        rewrittenExpression = expression;
+        if (string.IsNullOrWhiteSpace(expression))
+            return [];
+
+        try
+        {
+            var parsedExpression = SyntaxFactory.ParseExpression(expression);
+
+            var primaryContext = TryBuildScopeContext(
+                primarySourceText,
+                primaryLine,
+                primaryCharacter,
+                targetAssemblyPath);
+            debugLog?.Invoke($"primary-scope={(primaryContext is null ? "missing" : "ok")} line={primaryLine} char={primaryCharacter}");
+
+            ScopeResolutionContext? secondaryContext = null;
+            if (!string.IsNullOrWhiteSpace(secondarySourceText)
+                && secondaryLine is not null
+                && secondaryCharacter is not null)
+            {
+                secondaryContext = TryBuildScopeContext(
+                    secondarySourceText!,
+                    secondaryLine.Value,
+                    secondaryCharacter.Value,
+                    targetAssemblyPath);
+                debugLog?.Invoke($"secondary-scope={(secondaryContext is null ? "missing" : "ok")} line={secondaryLine.Value} char={secondaryCharacter.Value}");
+            }
+
+            var inferredLambdaMemberTypes = BuildLambdaParameterMemberTypeMap(
+                parsedExpression,
+                contextVariableName,
+                targetAssemblyPath,
+                dbContextTypeName,
+                debugLog);
+
+            parsedExpression = RewriteReceiverMemberAccessCaptures(
+                parsedExpression,
+                contextVariableName,
+                primaryContext,
+                secondaryContext,
+                out var memberCaptureEntries,
+                debugLog,
+                inferredLambdaMemberTypes);
+            rewrittenExpression = parsedExpression.WithoutTrivia().NormalizeWhitespace().ToString();
+            debugLog?.Invoke($"rewrite-result changed={(!string.Equals(rewrittenExpression, expression, StringComparison.Ordinal))} captureCount={memberCaptureEntries.Count}");
+
+            var freeVariableNames = CollectFreeVariableNames(parsedExpression, contextVariableName);
+            debugLog?.Invoke($"free-vars count={freeVariableNames.Count} names={string.Join(",", freeVariableNames)}");
+            if (freeVariableNames.Count == 0 && memberCaptureEntries.Count == 0)
+                return [];
+
+            var resolved = new Dictionary<string, LocalSymbolGraphEntry>(StringComparer.Ordinal);
+            var unresolved = new HashSet<string>(StringComparer.Ordinal);
+            var visiting = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var name in freeVariableNames)
+            {
+                TryPopulateSymbolGraphEntry(
+                    name,
+                    contextVariableName,
+                    primaryContext,
+                    secondaryContext,
+                    resolved,
+                    unresolved,
+                    visiting);
+            }
+            if (unresolved.Count > 0)
+            {
+                debugLog?.Invoke($"unresolved-vars count={unresolved.Count} names={string.Join(",", unresolved.OrderBy(x => x, StringComparer.Ordinal))}");
+            }
+
+            foreach (var memberCaptureEntry in memberCaptureEntries)
+            {
+                resolved[memberCaptureEntry.Name] = memberCaptureEntry;
+            }
+
+            foreach (var entry in resolved.Values.OrderBy(s => s.DeclarationOrder).ThenBy(s => s.Name, StringComparer.Ordinal))
+            {
+                debugLog?.Invoke(
+                    $"entry name={entry.Name} type={entry.TypeName} policy={entry.ReplayPolicy} deps={string.Join(",", entry.Dependencies)} kind={entry.Kind}");
+            }
+
+            return resolved.Values
+                .OrderBy(s => s.DeclarationOrder)
+                .ThenBy(s => s.Name, StringComparer.Ordinal)
+                .ToArray();
+        }
+        catch
+        {
+            rewrittenExpression = expression;
+            return [];
+        }
     }
 
     internal static IReadOnlyList<MemberTypeHint> BuildMemberTypeHints(
@@ -393,15 +528,1447 @@ public static partial class LspSyntaxHelper
         foreach (var id in init.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>())
         {
             var symbol = semanticModel.GetSymbolInfo(id).Symbol;
-            if (symbol is ILocalSymbol or IParameterSymbol)
+            if (symbol is not (ILocalSymbol or IParameterSymbol))
             {
-                var name = id.Identifier.ValueText;
-                if (!string.Equals(name, variable.Identifier.ValueText, StringComparison.Ordinal))
-                    names.Add(name);
+                continue;
             }
+
+            // Ignore lambda/query-range locals declared inside the initializer itself.
+            // Example: `query = _dbContext.Orders.Where(o => o.IsNotDeleted)` should not
+            // record `o` as a dependency of `query`.
+            if (IsDeclaredWithinInitializer(symbol, init))
+            {
+                continue;
+            }
+
+            var name = id.Identifier.ValueText;
+            if (!string.Equals(name, variable.Identifier.ValueText, StringComparison.Ordinal))
+                names.Add(name);
         }
 
         return names.OrderBy(n => n, StringComparer.Ordinal).ToArray();
+    }
+
+    private static bool IsDeclaredWithinInitializer(ISymbol symbol, ExpressionSyntax initializer)
+    {
+        foreach (var syntaxRef in symbol.DeclaringSyntaxReferences)
+        {
+            var syntax = syntaxRef.GetSyntax();
+            if (initializer.Span.Contains(syntax.Span))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private sealed record ScopeResolutionContext(
+        string SourceText,
+        SemanticModel SemanticModel,
+        StatementSyntax AnchorStatement,
+        string? ScopeId,
+        IReadOnlyDictionary<(string Receiver, string Member), string> MemberTypeMap,
+        IReadOnlyDictionary<string, string> MemberNameTypeMap);
+
+    private static ScopeResolutionContext? TryBuildScopeContext(
+        string sourceText,
+        int line,
+        int character,
+        string? targetAssemblyPath)
+    {
+        if (!TryCreateSemanticModel(sourceText, targetAssemblyPath, out var tree, out var root, out var semanticModel))
+            return null;
+
+        var textLines = tree.GetText().Lines;
+        if (line < 0 || line >= textLines.Count)
+            return null;
+
+        var lineStart = textLines[line].Start;
+        var charOffset = Math.Min(Math.Max(character, 0), textLines[line].End - lineStart);
+        var cursorPosition = lineStart + charOffset;
+        var node = root.FindNode(new Microsoft.CodeAnalysis.Text.TextSpan(cursorPosition, 0));
+        var anchorStatement = node.FirstAncestorOrSelf<StatementSyntax>();
+        if (anchorStatement is null)
+            return null;
+
+        var (memberTypeMap, memberNameTypeMap) = BuildMemberTypeMapsFromAnchorStatement(anchorStatement, semanticModel);
+
+        return new ScopeResolutionContext(
+            sourceText,
+            semanticModel,
+            anchorStatement,
+            anchorStatement.FirstAncestorOrSelf<MemberDeclarationSyntax>()?.ToString(),
+            memberTypeMap,
+            memberNameTypeMap);
+    }
+
+    private static ExpressionSyntax RewriteReceiverMemberAccessCaptures(
+        ExpressionSyntax expression,
+        string contextVariableName,
+        ScopeResolutionContext? primaryContext,
+        ScopeResolutionContext? secondaryContext,
+        out IReadOnlyList<LocalSymbolGraphEntry> captures,
+        Action<string>? debugLog = null,
+        IReadOnlyDictionary<(string Receiver, string Member), string>? inferredLambdaMemberTypes = null)
+    {
+        captures = [];
+        var usedNames = expression
+            .DescendantNodesAndSelf()
+            .OfType<IdentifierNameSyntax>()
+            .Select(id => id.Identifier.ValueText)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var declaredInsideExpression = new HashSet<string>(StringComparer.Ordinal)
+        {
+            contextVariableName,
+        };
+        foreach (var parameter in expression.DescendantNodesAndSelf().OfType<ParameterSyntax>())
+        {
+            var name = parameter.Identifier.ValueText;
+            if (!string.IsNullOrWhiteSpace(name))
+                declaredInsideExpression.Add(name);
+        }
+
+        var captureMap = new Dictionary<(string Receiver, string Member), LocalSymbolGraphEntry>();
+        var nextDeclarationOrder = -1_000_000;
+        var collisionIndex = 0;
+
+        string AllocateCaptureName(string receiver, string member)
+        {
+            var baseName = $"__qlm_{receiver}_{member}";
+            var candidate = baseName;
+            while (usedNames.Contains(candidate))
+            {
+                candidate = $"{baseName}_{collisionIndex++}";
+            }
+
+            usedNames.Add(candidate);
+            return candidate;
+        }
+
+        var rewriter = new ReceiverMemberCaptureRewriter(node =>
+        {
+            if (node.Expression is not IdentifierNameSyntax receiverIdentifier)
+            {
+                debugLog?.Invoke($"capture-skip reason=receiver-not-identifier access={node}");
+                return null;
+            }
+
+            var receiverName = receiverIdentifier.Identifier.ValueText;
+            if (string.IsNullOrWhiteSpace(receiverName))
+            {
+                debugLog?.Invoke($"capture-skip reason=empty-receiver access={node}");
+                return null;
+            }
+            if (declaredInsideExpression.Contains(receiverName))
+            {
+                debugLog?.Invoke($"capture-skip reason=declared-inside-expression receiver={receiverName} access={node}");
+                return null;
+            }
+            if (IsStaticTypeOrNamespaceReceiver(receiverName, primaryContext, secondaryContext))
+            {
+                debugLog?.Invoke($"capture-skip reason=receiver-is-type-or-namespace receiver={receiverName} access={node}");
+                return null;
+            }
+            if (receiverName.StartsWith("__qlm_", StringComparison.Ordinal))
+            {
+                debugLog?.Invoke($"capture-skip reason=synthetic-receiver receiver={receiverName} access={node}");
+                return null;
+            }
+
+            var memberName = node.Name.Identifier.ValueText;
+            if (string.IsNullOrWhiteSpace(memberName))
+            {
+                debugLog?.Invoke($"capture-skip reason=empty-member receiver={receiverName} access={node}");
+                return null;
+            }
+
+            string? memberTypeName;
+            var resolvedFromComparison = TryResolveMemberTypeFromComparisonPartner(
+                node,
+                primaryContext,
+                secondaryContext,
+                inferredLambdaMemberTypes,
+                out memberTypeName);
+
+            if (resolvedFromComparison)
+            {
+                debugLog?.Invoke(
+                    $"capture-type-from-comparison receiver={receiverName} member={memberName} inferredType={memberTypeName}");
+            }
+
+            if (!resolvedFromComparison
+                && !TryResolveReceiverMemberTypeName(
+                    receiverName,
+                    memberName,
+                    primaryContext,
+                    secondaryContext,
+                    out memberTypeName))
+            {
+                if (!TryResolveMemberTypeFromDeclarationChain(
+                        receiverName,
+                        memberName,
+                        primaryContext,
+                        secondaryContext,
+                        out memberTypeName))
+                {
+                    string? primaryByNameType = null;
+                    string? secondaryByNameType = null;
+                    var primaryHasByName = primaryContext?.MemberNameTypeMap.TryGetValue(memberName, out primaryByNameType!) == true;
+                    var secondaryHasByName = secondaryContext?.MemberNameTypeMap.TryGetValue(memberName, out secondaryByNameType!) == true;
+                    var primaryKeys = primaryContext?.MemberTypeMap.Count ?? 0;
+                    var secondaryKeys = secondaryContext?.MemberTypeMap.Count ?? 0;
+                    debugLog?.Invoke(
+                        $"capture-unresolved-detail receiver={receiverName} member={memberName} " +
+                        $"primaryMapKeys={primaryKeys} secondaryMapKeys={secondaryKeys} " +
+                        $"primaryByName={(primaryHasByName ? primaryByNameType : "none")} " +
+                        $"secondaryByName={(secondaryHasByName ? secondaryByNameType : "none")}");
+                    debugLog?.Invoke($"capture-skip reason=member-type-unresolved receiver={receiverName} member={memberName} access={node}");
+                    return null;
+                }
+
+            }
+
+            if (string.IsNullOrWhiteSpace(memberTypeName))
+            {
+                debugLog?.Invoke($"capture-skip reason=member-type-empty receiver={receiverName} member={memberName} access={node}");
+                return null;
+            }
+
+            var key = (receiverName, memberName);
+            if (!captureMap.TryGetValue(key, out var entry))
+            {
+                entry = new LocalSymbolGraphEntry
+                {
+                    Name = AllocateCaptureName(receiverName, memberName),
+                    TypeName = memberTypeName!,
+                    Kind = "member-capture",
+                    InitializerExpression = null,
+                    DeclarationOrder = nextDeclarationOrder++,
+                    Dependencies = [],
+                    Scope = primaryContext?.ScopeId ?? secondaryContext?.ScopeId,
+                    ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+                };
+                captureMap[key] = entry;
+                debugLog?.Invoke($"capture-add receiver={receiverName} member={memberName} capture={entry.Name} type={entry.TypeName}");
+            }
+            else
+            {
+                debugLog?.Invoke($"capture-reuse receiver={receiverName} member={memberName} capture={entry.Name}");
+            }
+
+            return entry.Name;
+        });
+
+        var rewritten = rewriter.Visit(expression) as ExpressionSyntax ?? expression;
+        captures = captureMap.Values
+            .OrderBy(c => c.DeclarationOrder)
+            .ThenBy(c => c.Name, StringComparer.Ordinal)
+            .ToArray();
+        return rewritten;
+    }
+
+    private static bool TryResolveMemberTypeFromDeclarationChain(
+        string receiverName,
+        string memberName,
+        ScopeResolutionContext? primaryContext,
+        ScopeResolutionContext? secondaryContext,
+        out string? memberTypeName)
+    {
+        memberTypeName = null;
+        return TryResolveMemberTypeFromDeclarationChain(receiverName, memberName, primaryContext, out memberTypeName)
+               || TryResolveMemberTypeFromDeclarationChain(receiverName, memberName, secondaryContext, out memberTypeName);
+    }
+
+    private static bool TryResolveMemberTypeFromDeclarationChain(
+        string receiverName,
+        string memberName,
+        ScopeResolutionContext? context,
+        out string? memberTypeName)
+    {
+        memberTypeName = null;
+        if (context is null)
+            return false;
+
+        if (!TryFindLocalDeclarationBeforeAnchor(context, receiverName, context.AnchorStatement, out var receiverDeclaration))
+            return false;
+
+        var receiverInitializer = receiverDeclaration.Initializer?.Value;
+        if (receiverInitializer is null)
+            return false;
+
+        // Common pattern:
+        //   var item = items.FirstOrDefault();
+        //   item.Member == ...
+        if (receiverInitializer is InvocationExpressionSyntax receiverInvocation
+            && receiverInvocation.Expression is MemberAccessExpressionSyntax receiverMemberAccess
+            && string.Equals(receiverMemberAccess.Name.Identifier.ValueText, "FirstOrDefault", StringComparison.Ordinal)
+            && receiverMemberAccess.Expression is IdentifierNameSyntax sourceIdentifier)
+        {
+            var sourceName = sourceIdentifier.Identifier.ValueText;
+            if (string.IsNullOrWhiteSpace(sourceName))
+                return false;
+
+            if (!TryFindLocalDeclarationBeforeAnchor(
+                    context,
+                    sourceName,
+                    receiverDeclaration.FirstAncestorOrSelf<StatementSyntax>() ?? context.AnchorStatement,
+                    out var sourceDeclaration))
+            {
+                return false;
+            }
+
+            var sourceInitializer = sourceDeclaration.Initializer?.Value;
+            if (sourceInitializer is null)
+                return false;
+
+            foreach (var anonymous in sourceInitializer.DescendantNodesAndSelf().OfType<AnonymousObjectCreationExpressionSyntax>())
+            {
+                foreach (var init in anonymous.Initializers)
+                {
+                    var anonMemberName = init.NameEquals?.Name.Identifier.ValueText
+                        ?? (init.Expression as MemberAccessExpressionSyntax)?.Name.Identifier.ValueText;
+                    if (!string.Equals(anonMemberName, memberName, StringComparison.Ordinal))
+                        continue;
+
+                    var inferredType = context.SemanticModel.GetTypeInfo(init.Expression).Type;
+                    memberTypeName = ToDeterministicTypeName(inferredType);
+                    if (!string.IsNullOrWhiteSpace(memberTypeName))
+                        return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsStaticTypeOrNamespaceReceiver(
+        string receiverName,
+        ScopeResolutionContext? primaryContext,
+        ScopeResolutionContext? secondaryContext)
+    {
+        // A real in-scope local/parameter should win over type/namespace symbols.
+        if (TryResolveAccessibleReceiverType(receiverName, primaryContext, secondaryContext, out _))
+            return false;
+
+        return IsTypeOrNamespaceInScope(receiverName, primaryContext)
+               || IsTypeOrNamespaceInScope(receiverName, secondaryContext);
+    }
+
+    private static bool IsTypeOrNamespaceInScope(string receiverName, ScopeResolutionContext? context)
+    {
+        if (context is null || string.IsNullOrWhiteSpace(receiverName))
+            return false;
+
+        var lookupPositions = new[]
+        {
+            context.AnchorStatement.SpanStart,
+            context.AnchorStatement.Span.End,
+            context.AnchorStatement.FullSpan.Start,
+            context.AnchorStatement.FullSpan.End,
+        };
+
+        foreach (var position in lookupPositions.Distinct())
+        {
+            var symbols = context.SemanticModel.LookupSymbols(position, name: receiverName);
+            foreach (var symbol in symbols)
+            {
+                if (symbol is INamedTypeSymbol or INamespaceSymbol)
+                    return true;
+
+                if (symbol is IAliasSymbol alias
+                    && alias.Target is INamedTypeSymbol or INamespaceSymbol)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryFindLocalDeclarationBeforeAnchor(
+        ScopeResolutionContext context,
+        string variableName,
+        StatementSyntax anchorStatement,
+        out VariableDeclaratorSyntax variable)
+    {
+        variable = null!;
+        var visited = anchorStatement;
+        for (SyntaxNode? scope = anchorStatement.Parent; scope is not null; scope = scope.Parent)
+        {
+            if (!TryGetStatementContainer(scope, out var statements))
+                continue;
+
+            var anchorIndex = FindAnchorIndexForVisitedStatement(statements, visited);
+            if (anchorIndex < 0)
+                continue;
+
+            for (var i = anchorIndex - 1; i >= 0; i--)
+            {
+                if (statements[i] is not LocalDeclarationStatementSyntax localDeclaration)
+                    continue;
+
+                foreach (var candidate in localDeclaration.Declaration.Variables)
+                {
+                    if (string.Equals(candidate.Identifier.ValueText, variableName, StringComparison.Ordinal))
+                    {
+                        variable = candidate;
+                        return true;
+                    }
+                }
+            }
+
+            if (scope is StatementSyntax statementScope)
+                visited = statementScope;
+        }
+
+        return false;
+    }
+
+    private static IReadOnlyDictionary<(string Receiver, string Member), string> BuildLambdaParameterMemberTypeMap(
+        ExpressionSyntax expression,
+        string contextVariableName,
+        string? targetAssemblyPath,
+        string? dbContextTypeName,
+        Action<string>? debugLog = null)
+    {
+        var result = new Dictionary<(string Receiver, string Member), string>();
+
+        try
+        {
+            var dbSetName = expression.DescendantNodesAndSelf()
+                .OfType<MemberAccessExpressionSyntax>()
+                .Where(ma => ma.Expression is IdentifierNameSyntax id
+                             && string.Equals(id.Identifier.ValueText, contextVariableName, StringComparison.Ordinal))
+                .Select(ma => ma.Name.Identifier.ValueText)
+                .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name));
+
+            if (string.IsNullOrWhiteSpace(dbSetName))
+            {
+                debugLog?.Invoke("lambda-map-skip reason=no-dbset-root");
+                return result;
+            }
+
+            if (!TryResolveDbSetEntityMemberTypes(targetAssemblyPath, dbContextTypeName, dbSetName!, out var memberTypes))
+            {
+                debugLog?.Invoke($"lambda-map-skip reason=dbset-entity-types-unresolved dbset={dbSetName} dbContext={dbContextTypeName}");
+                return result;
+            }
+
+            foreach (var memberAccess in expression.DescendantNodesAndSelf().OfType<MemberAccessExpressionSyntax>())
+            {
+                if (memberAccess.Expression is not IdentifierNameSyntax receiverIdentifier)
+                    continue;
+
+                var receiverName = receiverIdentifier.Identifier.ValueText;
+                if (string.IsNullOrWhiteSpace(receiverName))
+                    continue;
+
+                var memberName = memberAccess.Name.Identifier.ValueText;
+                if (string.IsNullOrWhiteSpace(memberName))
+                    continue;
+
+                if (!memberTypes.TryGetValue(memberName, out var memberTypeName))
+                    continue;
+
+                result[(receiverName, memberName)] = memberTypeName;
+            }
+
+            if (result.Count > 0)
+            {
+                debugLog?.Invoke(
+                    $"lambda-map-built dbset={dbSetName} count={result.Count} keys={string.Join(",", result.Keys.Select(k => $"{k.Receiver}.{k.Member}"))}");
+            }
+            else
+            {
+                debugLog?.Invoke($"lambda-map-empty dbset={dbSetName}");
+            }
+        }
+        catch (Exception ex)
+        {
+            debugLog?.Invoke($"lambda-map-error type={ex.GetType().Name} message={ex.Message}");
+        }
+
+        return result;
+    }
+
+    private static bool TryResolveDbSetEntityMemberTypes(
+        string? targetAssemblyPath,
+        string? dbContextTypeName,
+        string dbSetName,
+        out IReadOnlyDictionary<string, string> memberTypes)
+    {
+        memberTypes = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        if (string.IsNullOrWhiteSpace(targetAssemblyPath) || !File.Exists(targetAssemblyPath))
+            return false;
+
+        try
+        {
+            var assembly = Assembly.LoadFrom(targetAssemblyPath);
+            var dbContextType = ResolveDbContextType(assembly, targetAssemblyPath, dbContextTypeName);
+            if (dbContextType is null)
+                return false;
+
+            var dbSetProperty = dbContextType
+                .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .FirstOrDefault(p =>
+                    string.Equals(p.Name, dbSetName, StringComparison.Ordinal)
+                    && p.PropertyType.IsGenericType
+                    && string.Equals(
+                        p.PropertyType.GetGenericTypeDefinition().FullName,
+                        "Microsoft.EntityFrameworkCore.DbSet`1",
+                        StringComparison.Ordinal));
+            if (dbSetProperty is null)
+                return false;
+
+            var entityType = dbSetProperty.PropertyType.GetGenericArguments()[0];
+            var map = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            foreach (var prop in entityType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                var typeName = ToDeterministicTypeNameFromSystemType(prop.PropertyType);
+                if (!string.IsNullOrWhiteSpace(typeName))
+                    map[prop.Name] = typeName!;
+            }
+
+            foreach (var field in entityType.GetFields(BindingFlags.Public | BindingFlags.Instance))
+            {
+                var typeName = ToDeterministicTypeNameFromSystemType(field.FieldType);
+                if (!string.IsNullOrWhiteSpace(typeName))
+                    map[field.Name] = typeName!;
+            }
+
+            memberTypes = map;
+            return map.Count > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static Type? ResolveDbContextType(Assembly assembly, string? targetAssemblyPath, string? dbContextTypeName)
+    {
+        static string NormalizeTypeLookupName(string value)
+            => value.Trim()
+                .TrimEnd('?')
+                .Replace("global::", string.Empty, StringComparison.Ordinal)
+                .Trim();
+
+        static bool IsDbContextType(Type t)
+        {
+            for (var current = t; current is not null; current = current.BaseType)
+            {
+                if (string.Equals(current.FullName, "Microsoft.EntityFrameworkCore.DbContext", StringComparison.Ordinal)
+                    || string.Equals(current.Name, "DbContext", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        var allTypes = new List<Type>();
+        allTypes.AddRange(GetLoadableTypes(assembly));
+
+        var assemblyDir = string.IsNullOrWhiteSpace(targetAssemblyPath)
+            ? null
+            : Path.GetDirectoryName(targetAssemblyPath);
+        if (!string.IsNullOrWhiteSpace(assemblyDir) && Directory.Exists(assemblyDir))
+        {
+            foreach (var dll in Directory.EnumerateFiles(assemblyDir, "*.dll", SearchOption.TopDirectoryOnly))
+            {
+                try
+                {
+                    var loaded = Assembly.LoadFrom(dll);
+                    allTypes.AddRange(GetLoadableTypes(loaded));
+                }
+                catch
+                {
+                    // Best effort.
+                }
+            }
+        }
+
+        var distinctTypes = allTypes
+            .Where(static t => t is not null)
+            .DistinctBy(static t => t.AssemblyQualifiedName ?? t.FullName ?? t.Name)
+            .ToArray();
+
+        if (!string.IsNullOrWhiteSpace(dbContextTypeName))
+        {
+            var normalized = NormalizeTypeLookupName(dbContextTypeName);
+            var simpleName = normalized;
+            var dotIndex = simpleName.LastIndexOf('.');
+            if (dotIndex >= 0 && dotIndex < simpleName.Length - 1)
+                simpleName = simpleName[(dotIndex + 1)..];
+
+            var direct = distinctTypes.FirstOrDefault(t =>
+                             string.Equals(
+                                 NormalizeTypeLookupName(t.FullName ?? string.Empty),
+                                 normalized,
+                                 StringComparison.Ordinal))
+                         ?? distinctTypes.FirstOrDefault(t =>
+                             string.Equals(
+                                 NormalizeTypeLookupName(t.Name),
+                                 simpleName,
+                                 StringComparison.Ordinal));
+            if (direct is not null && IsDbContextType(direct))
+                return direct;
+        }
+
+        return distinctTypes.FirstOrDefault(IsDbContextType);
+    }
+
+    private static IReadOnlyList<Type> GetLoadableTypes(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            return ex.Types.Where(t => t is not null).Cast<Type>().ToArray();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static string? ToDeterministicTypeNameFromSystemType(Type type)
+    {
+        if (type.IsGenericType)
+        {
+            var genericDef = type.GetGenericTypeDefinition();
+            var genericDefName = genericDef.FullName;
+            if (string.IsNullOrWhiteSpace(genericDefName))
+                return null;
+
+            var tickIndex = genericDefName.IndexOf('`');
+            var trimmed = tickIndex >= 0 ? genericDefName[..tickIndex] : genericDefName;
+            var args = string.Join(", ", type.GetGenericArguments()
+                .Select(arg => ToDeterministicTypeNameFromSystemType(arg) ?? "global::System.Object"));
+            return $"global::{trimmed}<{args}>";
+        }
+
+        var fullName = type.FullName;
+        return string.IsNullOrWhiteSpace(fullName) ? null : $"global::{fullName}";
+    }
+
+    private static bool TryResolveMemberTypeFromComparisonPartner(
+        MemberAccessExpressionSyntax memberAccess,
+        ScopeResolutionContext? primaryContext,
+        ScopeResolutionContext? secondaryContext,
+        IReadOnlyDictionary<(string Receiver, string Member), string>? inferredLambdaMemberTypes,
+        out string? memberTypeName)
+    {
+        memberTypeName = null;
+
+        var comparison = memberAccess.Ancestors().OfType<BinaryExpressionSyntax>()
+            .FirstOrDefault(static b =>
+                b.IsKind(SyntaxKind.EqualsExpression)
+                || b.IsKind(SyntaxKind.NotEqualsExpression)
+                || b.IsKind(SyntaxKind.GreaterThanExpression)
+                || b.IsKind(SyntaxKind.GreaterThanOrEqualExpression)
+                || b.IsKind(SyntaxKind.LessThanExpression)
+                || b.IsKind(SyntaxKind.LessThanOrEqualExpression));
+        if (comparison is null)
+            return false;
+
+        ExpressionSyntax counterpart;
+        if (comparison.Left.Span.Contains(memberAccess.Span))
+        {
+            counterpart = comparison.Right;
+        }
+        else if (comparison.Right.Span.Contains(memberAccess.Span))
+        {
+            counterpart = comparison.Left;
+        }
+        else
+        {
+            return false;
+        }
+
+        if (counterpart is ParenthesizedExpressionSyntax parenthesized)
+            counterpart = parenthesized.Expression;
+
+        if (counterpart is MemberAccessExpressionSyntax counterpartMember
+            && counterpartMember.Expression is IdentifierNameSyntax counterpartReceiverIdentifier)
+        {
+            var counterpartReceiver = counterpartReceiverIdentifier.Identifier.ValueText;
+            var counterpartMemberName = counterpartMember.Name.Identifier.ValueText;
+            if (string.IsNullOrWhiteSpace(counterpartReceiver) || string.IsNullOrWhiteSpace(counterpartMemberName))
+                return false;
+
+            if (inferredLambdaMemberTypes is not null
+                && inferredLambdaMemberTypes.TryGetValue((counterpartReceiver, counterpartMemberName), out var inferredTypeName)
+                && !string.IsNullOrWhiteSpace(inferredTypeName))
+            {
+                memberTypeName = inferredTypeName;
+                return true;
+            }
+
+            return TryResolveReceiverMemberTypeName(
+                counterpartReceiver,
+                counterpartMemberName,
+                primaryContext,
+                secondaryContext,
+                out memberTypeName);
+        }
+
+        if (counterpart is IdentifierNameSyntax counterpartIdentifier)
+        {
+            if (TryResolveAccessibleReceiverType(
+                    counterpartIdentifier.Identifier.ValueText,
+                    primaryContext,
+                    secondaryContext,
+                    out var counterpartType))
+            {
+                memberTypeName = ToDeterministicTypeName(counterpartType);
+                return !string.IsNullOrWhiteSpace(memberTypeName);
+            }
+        }
+
+        if (TryResolveTypeFromExpression(counterpart, out var inferredCounterpartType))
+        {
+            memberTypeName = inferredCounterpartType;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryResolveTypeFromExpression(ExpressionSyntax expression, out string? typeName)
+    {
+        typeName = null;
+        expression = expression is ParenthesizedExpressionSyntax parenthesized
+            ? parenthesized.Expression
+            : expression;
+
+        switch (expression)
+        {
+            case LiteralExpressionSyntax literal:
+                typeName = literal.Kind() switch
+                {
+                    SyntaxKind.StringLiteralExpression => "global::System.String",
+                    SyntaxKind.CharacterLiteralExpression => "global::System.Char",
+                    SyntaxKind.TrueLiteralExpression or SyntaxKind.FalseLiteralExpression => "global::System.Boolean",
+                    SyntaxKind.NumericLiteralExpression => TryResolveNumericLiteralTypeName(literal.Token),
+                    _ => null,
+                };
+                return !string.IsNullOrWhiteSpace(typeName);
+
+            case ObjectCreationExpressionSyntax objectCreation:
+                typeName = objectCreation.Type.ToString();
+                return !string.IsNullOrWhiteSpace(typeName);
+
+            case DefaultExpressionSyntax defaultExpression:
+                typeName = defaultExpression.Type.ToString();
+                return !string.IsNullOrWhiteSpace(typeName);
+
+            case CastExpressionSyntax castExpression:
+                typeName = castExpression.Type.ToString();
+                return !string.IsNullOrWhiteSpace(typeName);
+        }
+
+        return false;
+    }
+
+    private static string? TryResolveNumericLiteralTypeName(SyntaxToken token)
+    {
+        return token.Value switch
+        {
+            byte => "global::System.Byte",
+            sbyte => "global::System.SByte",
+            short => "global::System.Int16",
+            ushort => "global::System.UInt16",
+            int => "global::System.Int32",
+            uint => "global::System.UInt32",
+            long => "global::System.Int64",
+            ulong => "global::System.UInt64",
+            float => "global::System.Single",
+            double => "global::System.Double",
+            decimal => "global::System.Decimal",
+            _ => null,
+        };
+    }
+
+    private static bool TryResolveReceiverMemberTypeName(
+        string receiverName,
+        string memberName,
+        ScopeResolutionContext? primaryContext,
+        ScopeResolutionContext? secondaryContext,
+        out string? memberTypeName)
+    {
+        memberTypeName = null;
+
+        if (TryResolveReceiverMemberTypeName(receiverName, memberName, primaryContext, out memberTypeName))
+            return true;
+
+        return TryResolveReceiverMemberTypeName(receiverName, memberName, secondaryContext, out memberTypeName);
+    }
+
+    private static bool TryResolveReceiverMemberTypeName(
+        string receiverName,
+        string memberName,
+        ScopeResolutionContext? context,
+        out string? memberTypeName)
+    {
+        memberTypeName = null;
+        if (context is null)
+            return false;
+
+        if (context.MemberTypeMap.TryGetValue((receiverName, memberName), out var mappedTypeName)
+            && !string.IsNullOrWhiteSpace(mappedTypeName))
+        {
+            memberTypeName = mappedTypeName;
+            return true;
+        }
+
+        if (context.MemberNameTypeMap.TryGetValue(memberName, out var byMemberNameType)
+            && !string.IsNullOrWhiteSpace(byMemberNameType))
+        {
+            memberTypeName = byMemberNameType;
+            return true;
+        }
+
+        if (!TryResolveAccessibleReceiverType(receiverName, context, out var receiverType))
+            return false;
+
+        ITypeSymbol? memberType = receiverType
+            .GetMembers(memberName)
+            .OfType<IPropertySymbol>()
+            .Where(m => !m.IsStatic)
+            .Select(m => m.Type)
+            .FirstOrDefault();
+
+        memberType ??= receiverType
+            .GetMembers(memberName)
+            .OfType<IFieldSymbol>()
+            .Where(m => !m.IsStatic)
+            .Select(m => m.Type)
+            .FirstOrDefault();
+
+        memberTypeName = ToDeterministicTypeName(memberType);
+        return !string.IsNullOrWhiteSpace(memberTypeName);
+    }
+
+    private static (IReadOnlyDictionary<(string Receiver, string Member), string> ByReceiverMember, IReadOnlyDictionary<string, string> ByMemberName) BuildMemberTypeMapsFromAnchorStatement(
+        StatementSyntax anchorStatement,
+        SemanticModel semanticModel)
+    {
+        var byReceiverMember = new Dictionary<(string Receiver, string Member), string>();
+        var byMemberNameCandidates = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
+        foreach (var memberAccess in anchorStatement.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
+        {
+            var memberName = memberAccess.Name.Identifier.ValueText;
+            if (string.IsNullOrWhiteSpace(memberName))
+                continue;
+
+            // Prefer Roslyn's resolved member-access type directly; this works for many
+            // anonymous/lambda flows where receiver symbol lookup can be fragile.
+            ITypeSymbol? memberType = semanticModel.GetTypeInfo(memberAccess).Type;
+
+            // Fallback to receiver-member lookup when direct type info is unavailable.
+            if (memberType is null || memberType.TypeKind == TypeKind.Error)
+            {
+                if (memberAccess.Expression is IdentifierNameSyntax receiverIdentifier)
+                {
+                    var receiverSymbol = semanticModel.GetSymbolInfo(receiverIdentifier).Symbol;
+                    ITypeSymbol? receiverType = receiverSymbol switch
+                    {
+                        ILocalSymbol local => local.Type,
+                        IParameterSymbol parameter => parameter.Type,
+                        _ => null,
+                    };
+
+                    if (receiverType is not null && receiverType.TypeKind != TypeKind.Error)
+                    {
+                        memberType = receiverType
+                            .GetMembers(memberName)
+                            .OfType<IPropertySymbol>()
+                            .Where(m => !m.IsStatic)
+                            .Select(m => m.Type)
+                            .FirstOrDefault();
+
+                        memberType ??= receiverType
+                            .GetMembers(memberName)
+                            .OfType<IFieldSymbol>()
+                            .Where(m => !m.IsStatic)
+                            .Select(m => m.Type)
+                            .FirstOrDefault();
+                    }
+                }
+            }
+
+            var memberTypeName = ToDeterministicTypeName(memberType);
+            if (string.IsNullOrWhiteSpace(memberTypeName))
+                continue;
+
+            if (memberAccess.Expression is IdentifierNameSyntax receiverIdentifierForMap)
+            {
+                byReceiverMember[(receiverIdentifierForMap.Identifier.ValueText, memberName)] = memberTypeName!;
+            }
+
+            if (!byMemberNameCandidates.TryGetValue(memberName, out var set))
+            {
+                set = new HashSet<string>(StringComparer.Ordinal);
+                byMemberNameCandidates[memberName] = set;
+            }
+
+            set.Add(memberTypeName!);
+        }
+
+        var byMemberName = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (memberName, typeCandidates) in byMemberNameCandidates)
+        {
+            if (typeCandidates.Count == 1)
+            {
+                byMemberName[memberName] = typeCandidates.First();
+            }
+        }
+
+        return (byReceiverMember, byMemberName);
+    }
+
+    private static bool TryResolveAccessibleReceiverType(
+        string receiverName,
+        ScopeResolutionContext? primaryContext,
+        ScopeResolutionContext? secondaryContext,
+        out ITypeSymbol receiverType)
+    {
+        receiverType = null!;
+        return TryResolveAccessibleReceiverType(receiverName, primaryContext, out receiverType)
+               || TryResolveAccessibleReceiverType(receiverName, secondaryContext, out receiverType);
+    }
+
+    private static bool TryResolveAccessibleReceiverType(
+        string receiverName,
+        ScopeResolutionContext? context,
+        out ITypeSymbol receiverType)
+    {
+        receiverType = null!;
+        if (context is null)
+            return false;
+
+        var lookupPositions = new[]
+        {
+            context.AnchorStatement.SpanStart,
+            context.AnchorStatement.Span.End,
+            context.AnchorStatement.FullSpan.Start,
+            context.AnchorStatement.FullSpan.End,
+        };
+
+        foreach (var position in lookupPositions.Distinct())
+        {
+            var symbolsAtPosition = context.SemanticModel
+                .LookupSymbols(position)
+                .Where(s => string.Equals(s.Name, receiverName, StringComparison.Ordinal));
+
+            foreach (var symbol in symbolsAtPosition)
+            {
+                switch (symbol)
+                {
+                    case ILocalSymbol local when local.Type is not null && local.Type.TypeKind != TypeKind.Error:
+                        receiverType = local.Type;
+                        return true;
+                    case IParameterSymbol parameter when parameter.Type is not null && parameter.Type.TypeKind != TypeKind.Error:
+                        receiverType = parameter.Type;
+                        return true;
+                }
+            }
+        }
+
+        // Fallback: resolve from preceding local declarations in the current scope chain.
+        var visited = context.AnchorStatement;
+        for (SyntaxNode? scope = context.AnchorStatement.Parent; scope is not null; scope = scope.Parent)
+        {
+            if (!TryGetStatementContainer(scope, out var statements))
+                continue;
+
+            var anchorIndex = FindAnchorIndexForVisitedStatement(statements, visited);
+            if (anchorIndex < 0)
+                continue;
+
+            for (var i = anchorIndex - 1; i >= 0; i--)
+            {
+                if (statements[i] is not LocalDeclarationStatementSyntax localDeclaration)
+                    continue;
+
+                foreach (var variable in localDeclaration.Declaration.Variables)
+                {
+                    if (!string.Equals(variable.Identifier.ValueText, receiverName, StringComparison.Ordinal))
+                        continue;
+
+                    if (context.SemanticModel.GetDeclaredSymbol(variable) is ILocalSymbol local
+                        && local.Type is not null
+                        && local.Type.TypeKind != TypeKind.Error)
+                    {
+                        receiverType = local.Type;
+                        return true;
+                    }
+                }
+            }
+
+            if (scope is StatementSyntax statementScope)
+                visited = statementScope;
+        }
+
+        return false;
+    }
+
+    private sealed class ReceiverMemberCaptureRewriter : CSharpSyntaxRewriter
+    {
+        private readonly Func<MemberAccessExpressionSyntax, string?> _resolver;
+
+        public ReceiverMemberCaptureRewriter(Func<MemberAccessExpressionSyntax, string?> resolver)
+        {
+            _resolver = resolver;
+        }
+
+        public override SyntaxNode? VisitMemberAccessExpression(MemberAccessExpressionSyntax node)
+        {
+            var visited = (MemberAccessExpressionSyntax)base.VisitMemberAccessExpression(node)!;
+            var replacement = _resolver(visited);
+            if (string.IsNullOrWhiteSpace(replacement))
+                return visited;
+
+            return SyntaxFactory.IdentifierName(replacement).WithTriviaFrom(visited);
+        }
+    }
+
+    private static IReadOnlyList<string> CollectFreeVariableNames(
+        ExpressionSyntax expression,
+        string contextVariableName)
+    {
+        var declared = new HashSet<string>(StringComparer.Ordinal)
+        {
+            contextVariableName,
+        };
+
+        foreach (var parameter in expression.DescendantNodesAndSelf().OfType<ParameterSyntax>())
+        {
+            var name = parameter.Identifier.ValueText;
+            if (!string.IsNullOrWhiteSpace(name))
+                declared.Add(name);
+        }
+
+        foreach (var fromClause in expression.DescendantNodesAndSelf().OfType<FromClauseSyntax>())
+        {
+            var name = fromClause.Identifier.ValueText;
+            if (!string.IsNullOrWhiteSpace(name))
+                declared.Add(name);
+        }
+
+        foreach (var joinClause in expression.DescendantNodesAndSelf().OfType<JoinClauseSyntax>())
+        {
+            var name = joinClause.Identifier.ValueText;
+            if (!string.IsNullOrWhiteSpace(name))
+                declared.Add(name);
+        }
+
+        foreach (var letClause in expression.DescendantNodesAndSelf().OfType<LetClauseSyntax>())
+        {
+            var name = letClause.Identifier.ValueText;
+            if (!string.IsNullOrWhiteSpace(name))
+                declared.Add(name);
+        }
+
+        foreach (var continuation in expression.DescendantNodesAndSelf().OfType<QueryContinuationSyntax>())
+        {
+            var name = continuation.Identifier.ValueText;
+            if (!string.IsNullOrWhiteSpace(name))
+                declared.Add(name);
+        }
+
+        foreach (var local in expression.DescendantNodesAndSelf().OfType<VariableDeclaratorSyntax>())
+        {
+            var name = local.Identifier.ValueText;
+            if (!string.IsNullOrWhiteSpace(name))
+                declared.Add(name);
+        }
+
+        var free = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var id in expression.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>())
+        {
+            if (id.Parent is MemberAccessExpressionSyntax memberAccess
+                && ReferenceEquals(memberAccess.Name, id))
+            {
+                continue;
+            }
+
+            if (id.Parent is InvocationExpressionSyntax invocation
+                && ReferenceEquals(invocation.Expression, id))
+            {
+                continue;
+            }
+
+            if (id.Parent is TypeArgumentListSyntax or QualifiedNameSyntax or NameColonSyntax)
+            {
+                continue;
+            }
+
+            var name = id.Identifier.ValueText;
+            if (string.IsNullOrWhiteSpace(name))
+                continue;
+            if (declared.Contains(name))
+                continue;
+            if (char.IsUpper(name[0]))
+                continue;
+
+            free.Add(name);
+        }
+
+        return free.OrderBy(x => x, StringComparer.Ordinal).ToArray();
+    }
+
+    private static bool TryPopulateSymbolGraphEntry(
+        string name,
+        string contextVariableName,
+        ScopeResolutionContext? primaryContext,
+        ScopeResolutionContext? secondaryContext,
+        IDictionary<string, LocalSymbolGraphEntry> resolved,
+        ISet<string> unresolved,
+        ISet<string> visiting)
+    {
+        if (resolved.ContainsKey(name))
+            return true;
+        if (visiting.Contains(name))
+            return false;
+
+        visiting.Add(name);
+        try
+        {
+            if (!TryResolveAccessibleSymbolEntry(name, contextVariableName, primaryContext, out var entry)
+                && !TryResolveAccessibleSymbolEntry(name, contextVariableName, secondaryContext, out entry))
+            {
+                unresolved.Add(name);
+                return false;
+            }
+
+            foreach (var dependency in entry.Dependencies)
+            {
+                TryPopulateSymbolGraphEntry(
+                    dependency,
+                    contextVariableName,
+                    primaryContext,
+                    secondaryContext,
+                    resolved,
+                    unresolved,
+                    visiting);
+            }
+
+            resolved[name] = entry;
+            return true;
+        }
+        finally
+        {
+            visiting.Remove(name);
+        }
+    }
+
+    private static bool TryResolveAccessibleSymbolEntry(
+        string name,
+        string contextVariableName,
+        ScopeResolutionContext? context,
+        out LocalSymbolGraphEntry entry)
+    {
+        entry = null!;
+        if (context is null)
+            return false;
+
+        var visited = context.AnchorStatement;
+        for (SyntaxNode? scope = context.AnchorStatement.Parent; scope is not null; scope = scope.Parent)
+        {
+            if (TryGetStatementContainer(scope, out var statements))
+            {
+                var anchorIndex = FindAnchorIndexForVisitedStatement(statements, visited);
+                if (anchorIndex >= 0)
+                {
+                    for (var i = anchorIndex - 1; i >= 0; i--)
+                    {
+                        if (TryCreateEntryFromStatement(
+                                statements[i],
+                                name,
+                                contextVariableName,
+                                context.SemanticModel,
+                                context.ScopeId,
+                                out entry))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            if (TryCreateEntryFromScopeParameter(scope, name, context.SemanticModel, context.ScopeId, out entry))
+                return true;
+
+            if (scope is StatementSyntax statementScope)
+                visited = statementScope;
+        }
+
+        return false;
+    }
+
+    private static int FindAnchorIndexForVisitedStatement(
+        IReadOnlyList<StatementSyntax> statements,
+        StatementSyntax visited)
+    {
+        for (var i = 0; i < statements.Count; i++)
+        {
+            if (ReferenceEquals(statements[i], visited))
+                return i;
+        }
+
+        // When the active statement is nested inside an `if`/`foreach`/`using` block,
+        // find the immediate container statement in this statement list.
+        for (var i = 0; i < statements.Count; i++)
+        {
+            if (statements[i].Span.Contains(visited.Span))
+                return i;
+        }
+
+        return -1;
+    }
+
+    private static bool TryCreateEntryFromStatement(
+        StatementSyntax statement,
+        string name,
+        string contextVariableName,
+        SemanticModel semanticModel,
+        string? scopeId,
+        out LocalSymbolGraphEntry entry)
+    {
+        entry = null!;
+
+        if (statement is LocalDeclarationStatementSyntax localDeclaration)
+        {
+            foreach (var variable in localDeclaration.Declaration.Variables)
+            {
+                if (!string.Equals(variable.Identifier.ValueText, name, StringComparison.Ordinal))
+                    continue;
+
+                var localSymbol = semanticModel.GetDeclaredSymbol(variable) as ILocalSymbol;
+                var typeName = ToDeterministicTypeName(localSymbol?.Type)
+                    ?? GetTypeStringForDeclaration(localDeclaration.Declaration.Type, variable, semanticModel);
+                var initializer = variable.Initializer?.Value;
+                var replayPolicy = initializer is null
+                    ? LocalSymbolReplayPolicies.UsePlaceholder
+                    : DetermineReplayPolicy(initializer);
+                if (typeName is null)
+                {
+                    if (initializer is null || !string.Equals(replayPolicy, LocalSymbolReplayPolicies.ReplayInitializer, StringComparison.Ordinal))
+                        return false;
+
+                    typeName = "?";
+                }
+
+                entry = new LocalSymbolGraphEntry
+                {
+                    Name = name,
+                    TypeName = typeName,
+                    Kind = "local",
+                    InitializerExpression = initializer is null ? null : NormalizeInitializerExpression(initializer),
+                    DeclarationOrder = variable.SpanStart,
+                    Dependencies = initializer is null
+                        ? []
+                        : ExtractExpressionDependencies(initializer, name, contextVariableName, semanticModel),
+                    Scope = scopeId,
+                    ReplayPolicy = replayPolicy,
+                };
+                return true;
+            }
+        }
+
+        if (statement is ExpressionStatementSyntax
+            {
+                Expression: AssignmentExpressionSyntax assignment
+            }
+            && assignment.Left is IdentifierNameSyntax leftIdentifier
+            && string.Equals(leftIdentifier.Identifier.ValueText, name, StringComparison.Ordinal))
+        {
+            var type = semanticModel.GetTypeInfo(assignment.Right).Type;
+            var typeName = ToDeterministicTypeName(type);
+            var replayPolicy = DetermineReplayPolicy(assignment.Right);
+            if (string.IsNullOrWhiteSpace(typeName))
+            {
+                if (!string.Equals(replayPolicy, LocalSymbolReplayPolicies.ReplayInitializer, StringComparison.Ordinal))
+                    return false;
+
+                typeName = "?";
+            }
+
+            entry = new LocalSymbolGraphEntry
+            {
+                Name = name,
+                TypeName = typeName!,
+                Kind = "local",
+                InitializerExpression = NormalizeInitializerExpression(assignment.Right),
+                DeclarationOrder = assignment.SpanStart,
+                Dependencies = ExtractExpressionDependencies(assignment.Right, name, contextVariableName, semanticModel),
+                Scope = scopeId,
+                ReplayPolicy = replayPolicy,
+            };
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryCreateEntryFromScopeParameter(
+        SyntaxNode scope,
+        string name,
+        SemanticModel semanticModel,
+        string? scopeId,
+        out LocalSymbolGraphEntry entry)
+    {
+        entry = null!;
+
+        ParameterSyntax? parameterSyntax = scope switch
+        {
+            MethodDeclarationSyntax method => method.ParameterList.Parameters
+                .FirstOrDefault(p => string.Equals(p.Identifier.ValueText, name, StringComparison.Ordinal)),
+            ConstructorDeclarationSyntax ctor => ctor.ParameterList.Parameters
+                .FirstOrDefault(p => string.Equals(p.Identifier.ValueText, name, StringComparison.Ordinal)),
+            LocalFunctionStatementSyntax localFunction => localFunction.ParameterList.Parameters
+                .FirstOrDefault(p => string.Equals(p.Identifier.ValueText, name, StringComparison.Ordinal)),
+            ParenthesizedLambdaExpressionSyntax lambda => lambda.ParameterList.Parameters
+                .FirstOrDefault(p => string.Equals(p.Identifier.ValueText, name, StringComparison.Ordinal)),
+            SimpleLambdaExpressionSyntax simpleLambda
+                when string.Equals(simpleLambda.Parameter.Identifier.ValueText, name, StringComparison.Ordinal)
+                => simpleLambda.Parameter,
+            _ => null,
+        };
+
+        if (parameterSyntax is null)
+            return false;
+
+        var symbol = semanticModel.GetDeclaredSymbol(parameterSyntax) as IParameterSymbol;
+        var typeName = ToDeterministicTypeName(symbol?.Type)
+            ?? parameterSyntax.Type?.ToString();
+        if (string.IsNullOrWhiteSpace(typeName))
+            return false;
+
+        var openTypeParams = scope switch
+        {
+            MethodDeclarationSyntax { TypeParameterList: { } tpl } =>
+                tpl.Parameters.Select(p => p.Identifier.ValueText).ToHashSet(StringComparer.Ordinal),
+            LocalFunctionStatementSyntax { TypeParameterList: { } tpl } =>
+                tpl.Parameters.Select(p => p.Identifier.ValueText).ToHashSet(StringComparer.Ordinal),
+            _ => null,
+        };
+        if (openTypeParams is not null && openTypeParams.Count > 0)
+            typeName = ReplaceOpenGenericTypeParameters(typeName!, openTypeParams);
+
+        entry = new LocalSymbolGraphEntry
+        {
+            Name = name,
+            TypeName = typeName!,
+            Kind = scope is SimpleLambdaExpressionSyntax or ParenthesizedLambdaExpressionSyntax
+                ? "lambda-parameter"
+                : "parameter",
+            DeclarationOrder = parameterSyntax.SpanStart,
+            Scope = scopeId,
+            ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+        };
+        return true;
+    }
+
+    private static IReadOnlyList<string> ExtractExpressionDependencies(
+        ExpressionSyntax expression,
+        string selfName,
+        string contextVariableName,
+        SemanticModel semanticModel)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var id in expression.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>())
+        {
+            var symbol = semanticModel.GetSymbolInfo(id).Symbol;
+            if (symbol is not (ILocalSymbol or IParameterSymbol))
+                continue;
+
+            if (IsDeclaredWithinInitializer(symbol, expression))
+                continue;
+
+            var name = id.Identifier.ValueText;
+            if (!string.Equals(name, selfName, StringComparison.Ordinal)
+                && !string.Equals(name, contextVariableName, StringComparison.Ordinal))
+                names.Add(name);
+        }
+
+        return names.OrderBy(n => n, StringComparer.Ordinal).ToArray();
+    }
+
+    private static string DetermineReplayPolicy(ExpressionSyntax initializer)
+    {
+        if (initializer.DescendantNodesAndSelf().OfType<ConditionalAccessExpressionSyntax>().Any())
+            return LocalSymbolReplayPolicies.UsePlaceholder;
+
+        if (IsQueryableInitializerExpression(initializer))
+            return LocalSymbolReplayPolicies.ReplayInitializer;
+
+        foreach (var memberAccess in initializer.DescendantNodesAndSelf().OfType<MemberAccessExpressionSyntax>())
+        {
+            if (string.Equals(memberAccess.Name.Identifier.ValueText, "Value", StringComparison.Ordinal))
+                return LocalSymbolReplayPolicies.UsePlaceholder;
+        }
+
+        foreach (var invocation in initializer.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
+        {
+            if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
+                continue;
+
+            if (memberAccess.Expression is IdentifierNameSyntax identifier
+                && identifier.Identifier.ValueText.Length > 0
+                && char.IsUpper(identifier.Identifier.ValueText[0]))
+            {
+                continue;
+            }
+
+            return LocalSymbolReplayPolicies.UsePlaceholder;
+        }
+
+        return LocalSymbolReplayPolicies.ReplayInitializer;
+    }
+
+    private static bool IsQueryableInitializerExpression(ExpressionSyntax initializer)
+    {
+        var outermostInvocations = initializer.DescendantNodesAndSelf()
+            .OfType<InvocationExpressionSyntax>()
+            .Select(GetOutermostInvocationChain)
+            .GroupBy(i => (i.SpanStart, i.Span.Length))
+            .Select(g => g.First());
+
+        foreach (var invocation in outermostInvocations)
+        {
+            var methodNames = GetInvocationChainMethodNames(invocation).ToArray();
+            if (methodNames.Length == 0)
+                continue;
+
+            if (methodNames.Any(name => QueryChainMethods.Contains(name))
+                || methodNames.Any(name => TerminalMethods.Contains(name)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string? ToDeterministicTypeName(ITypeSymbol? type)
+    {
+        if (type is null || type.TypeKind == TypeKind.Error)
+            return null;
+
+        return type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
     }
 
 }
