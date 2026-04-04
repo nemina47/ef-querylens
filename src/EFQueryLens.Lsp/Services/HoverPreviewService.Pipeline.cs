@@ -1,7 +1,7 @@
-using EFQueryLens.Core;
-using EFQueryLens.Lsp.Parsing;
 using System.Diagnostics;
+using EFQueryLens.Core;
 using EFQueryLens.Core.Contracts;
+using EFQueryLens.Lsp.Parsing;
 
 namespace EFQueryLens.Lsp.Services;
 
@@ -189,25 +189,53 @@ internal sealed partial class HoverPreviewService
         }
 
         var helperSubstitutionApplied = string.Equals(origin.Scope, "helper-method", StringComparison.Ordinal);
-        var localSymbolGraph = LspSyntaxHelper.ExtractFreeVariableSymbolGraph(
+        
+        // Build v2 extraction plan (slice 1: extraction IR)
+        var extractionPlanSuccess = LspSyntaxHelper.TryBuildV2ExtractionPlan(
+            extractionSourceText,
+            extractionFilePath ?? filePath,
+            extractionLine,
+            extractionChar,
+            out var extractionPlan,
+            out var extractionDiagnostics,
+            sourceIndex: null,
+            targetAssemblyPath: targetAssembly);
+
+        if (!extractionPlanSuccess)
+        {
+            var firstDiagnostic = extractionDiagnostics.FirstOrDefault();
+            var reason = firstDiagnostic?.Code ?? "extraction-plan-failed";
+            log($"preview-info line={line} char={character} reason={reason} (falling back to capture-plan-only)");
+        }
+        
+        var capturePlanSuccess = LspSyntaxHelper.TryBuildV2CapturePlan(
             expression,
             contextVariableName!,
             extractionSourceText,
             extractionLine,
             extractionChar,
             targetAssembly,
-            out var executableExpression,
+            out var capturePlan,
             secondarySourceText: helperSubstitutionApplied ? sourceText : null,
             secondaryLine: helperSubstitutionApplied ? line : null,
             secondaryCharacter: helperSubstitutionApplied ? character : null,
             dbContextTypeName: dbContextTypeName,
-            debugLog: detail => log($"symbol-graph {detail}"));
-        localSymbolGraph = DowngradeReplayInitializersWithMissingDependencies(localSymbolGraph, out var downgradedReplayInitializers);
-        if (downgradedReplayInitializers > 0)
+            debugLog: detail => log($"capture-plan {detail}"));
+
+        if (!capturePlanSuccess || capturePlan is null)
         {
-            log($"extract-local-types-adjusted line={line} char={character} downgradedReplayInit={downgradedReplayInitializers}");
+            var firstDiagnostic = capturePlan?.Diagnostics.FirstOrDefault();
+            var reason = firstDiagnostic is null
+                ? "capture-plan-failed"
+                : $"{firstDiagnostic.Code}:{firstDiagnostic.SymbolName}";
+            log($"preview-blocked line={line} char={character} reason={reason}");
+            return Fail(
+                firstDiagnostic?.Message ?? "No preview: capture plan failed.",
+                sourceLine);
         }
 
+        var executableExpression = capturePlan.ExecutableExpression;
+        var localSymbolGraph = LspSyntaxHelper.AdaptCapturePlanToLocalSymbolGraph(capturePlan);
         var unresolvedNames = FindUnresolvedSymbols(executableExpression, contextVariableName!, localSymbolGraph);
         var declaredNames = new HashSet<string>(
             localSymbolGraph.Select(s => s.Name),
@@ -216,23 +244,32 @@ internal sealed partial class HoverPreviewService
             .SelectMany(s => s.Dependencies.Select(d => (symbol: s.Name, dep: d)))
             .Where(p => !declaredNames.Contains(p.dep))
             .ToArray();
-        var graphComplete = unresolvedNames.Count == 0
+        var graphComplete = capturePlan.IsComplete
+                            && unresolvedNames.Count == 0
                             && unresolvedDependencies.Length == 0;
-        var replayInitializerCount = localSymbolGraph.Count(s =>
-            string.Equals(s.ReplayPolicy, LocalSymbolReplayPolicies.ReplayInitializer, StringComparison.Ordinal));
-        var placeholderCount = localSymbolGraph.Count - replayInitializerCount;
+        var replayInitializerCount = capturePlan.Entries.Count(s =>
+            string.Equals(s.CapturePolicy, LocalSymbolReplayPolicies.ReplayInitializer, StringComparison.Ordinal));
+        var placeholderCount = capturePlan.Entries.Count(s =>
+            string.Equals(s.CapturePolicy, LocalSymbolReplayPolicies.UsePlaceholder, StringComparison.Ordinal));
+        var rejectedCount = capturePlan.Entries.Count(s =>
+            string.Equals(s.CapturePolicy, LocalSymbolReplayPolicies.Reject, StringComparison.Ordinal));
         log(
             $"extract-local-types line={line} char={character} originLine={extractionLine} originChar={extractionChar} " +
             $"count={localSymbolGraph.Count} vars={string.Join(",", localSymbolGraph.Select(s => s.Name))} " +
             $"unresolved={unresolvedNames.Count} unresolvedDeps={unresolvedDependencies.Length} graphComplete={graphComplete} " +
-            $"helperSubstitution={helperSubstitutionApplied} replayInit={replayInitializerCount} placeholder={placeholderCount} " +
+            $"helperSubstitution={helperSubstitutionApplied} replayInit={replayInitializerCount} placeholder={placeholderCount} rejected={rejectedCount} " +
             $"rewritten={(string.Equals(executableExpression, expression, StringComparison.Ordinal) ? "False" : "True")} " +
             $"hasMemberCapture={(executableExpression.Contains("__qlm_", StringComparison.Ordinal) ? "True" : "False")}");
 
         if (!graphComplete)
         {
             string reason;
-            if (localSymbolGraph.Count == 0 && unresolvedNames.Count > 0)
+            if (capturePlan.Diagnostics.Count > 0)
+            {
+                var top = capturePlan.Diagnostics.First();
+                reason = $"capture-plan:{top.Code}:{top.SymbolName}";
+            }
+            else if (localSymbolGraph.Count == 0 && unresolvedNames.Count > 0)
             {
                 reason = "incomplete-symbol-graph:empty";
             }
@@ -268,6 +305,22 @@ internal sealed partial class HoverPreviewService
                 UsingAliases = new Dictionary<string, string>(usingContext.Aliases, StringComparer.Ordinal),
                 UsingStaticTypes = usingContext.StaticTypes.ToArray(),
                 LocalSymbolGraph = localSymbolGraph,
+                V2CapturePlan = capturePlan,
+                V2ExtractionPlan = extractionPlanSuccess && extractionPlan is not null
+                    ? new Core.Contracts.V2QueryExtractionPlanSnapshot
+                    {
+                        Expression = extractionPlan.Expression,
+                        ContextVariableName = extractionPlan.ContextVariableName,
+                        RootContextVariableName = extractionPlan.RootContextVariableName,
+                        RootMemberName = extractionPlan.RootMemberName,
+                        CallSiteExpression = extractionPlan.CallSiteExpression,
+                        Origin = extractionPlan.Origin,
+                        BoundaryKind = extractionPlan.BoundaryKind.ToString(),
+                        NeedsMaterialization = extractionPlan.NeedsMaterialization,
+                        AppliedHelperMethods = extractionPlan.AppliedHelperMethods,
+                        Diagnostics = extractionPlan.Diagnostics.Select(d => new Core.Contracts.V2ExtractionDiagnostic { Code = d.Code, Message = d.Message }).ToList(),
+                    }
+                    : null,
                 UseAsyncRunner = true,
                 ExtractionOrigin = extraction?.Origin,
                 UsingContextSnapshot = new UsingContextSnapshot

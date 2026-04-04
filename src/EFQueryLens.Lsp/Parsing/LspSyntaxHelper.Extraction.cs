@@ -21,8 +21,28 @@ public static partial class LspSyntaxHelper
         int line,
         int character,
         ProjectSourceIndex? sourceIndex = null,
-        string? targetAssemblyPath = null)
+        string? targetAssemblyPath = null,
+        bool skipV2Plan = false)
     {
+        if (!skipV2Plan
+            && TryBuildV2ExtractionPlan(
+                sourceText,
+                filePath,
+                line,
+                character,
+                out var v2Plan,
+                out _,
+                sourceIndex,
+                targetAssemblyPath)
+            && v2Plan is not null)
+        {
+            return new LinqExtractionResult(
+                v2Plan.Expression,
+                v2Plan.ContextVariableName,
+                v2Plan.CallSiteExpression,
+                v2Plan.Origin);
+        }
+
         var expression = TryExtractLinqExpression(
             sourceText,
             line,

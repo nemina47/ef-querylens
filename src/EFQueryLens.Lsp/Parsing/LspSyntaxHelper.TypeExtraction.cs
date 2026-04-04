@@ -1,9 +1,9 @@
+using System.Reflection;
+using System.Text.RegularExpressions;
+using EFQueryLens.Core.Contracts;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using EFQueryLens.Core.Contracts;
-using System.Text.RegularExpressions;
-using System.Reflection;
 
 namespace EFQueryLens.Lsp.Parsing;
 
@@ -1562,9 +1562,15 @@ public static partial class LspSyntaxHelper
         return false;
     }
 
-    private static bool IsAnonymousTypeName(string? typeName) =>
-        !string.IsNullOrWhiteSpace(typeName)
-        && typeName.Contains("<anonymous type:", StringComparison.Ordinal);
+    private static bool IsAnonymousTypeName(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+            return false;
+
+        return typeName.Contains("<anonymous type:", StringComparison.Ordinal)
+               || typeName.Contains("AnonymousType", StringComparison.Ordinal)
+               || typeName.Contains("<>", StringComparison.Ordinal);
+    }
 
     private static bool TryResolveAccessibleSymbolEntry(
         string name,

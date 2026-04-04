@@ -98,6 +98,65 @@ internal sealed class DaemonRuntime(IMemoryCache cache)
                 sb.Append("dep:").Append(hint.Name).Append("->").Append(dep).Append('\0');
         }
 
+        if (r.V2CapturePlan is not null)
+        {
+            sb.Append("v2Capture:")
+                .Append(r.V2CapturePlan.IsComplete ? '1' : '0')
+                .Append(':')
+                .Append(r.V2CapturePlan.ExecutableExpression)
+                .Append('\0');
+
+            foreach (var entry in r.V2CapturePlan.Entries
+                         .OrderBy(x => x.DeclarationOrder)
+                         .ThenBy(x => x.Name, StringComparer.Ordinal))
+            {
+                sb.Append("v2sym:")
+                    .Append(entry.DeclarationOrder).Append(':')
+                    .Append(entry.Name).Append(':')
+                    .Append(entry.TypeName).Append(':')
+                    .Append(entry.Kind).Append(':')
+                    .Append(entry.Scope ?? string.Empty).Append(':')
+                    .Append(entry.CapturePolicy).Append(':')
+                    .Append(entry.InitializerExpression ?? string.Empty).Append(':')
+                    .Append(entry.RejectCode ?? string.Empty)
+                    .Append('\0');
+                foreach (var dep in entry.Dependencies.OrderBy(x => x, StringComparer.Ordinal))
+                    sb.Append("v2dep:").Append(entry.Name).Append("->").Append(dep).Append('\0');
+            }
+
+            foreach (var diagnostic in r.V2CapturePlan.Diagnostics
+                         .OrderBy(x => x.Code, StringComparer.Ordinal)
+                         .ThenBy(x => x.SymbolName, StringComparer.Ordinal))
+            {
+                sb.Append("v2diag:")
+                    .Append(diagnostic.Code).Append(':')
+                    .Append(diagnostic.SymbolName).Append(':')
+                    .Append(diagnostic.Message)
+                    .Append('\0');
+            }
+        }
+
+        if (r.V2ExtractionPlan is not null)
+        {
+            sb.Append("v2Extract:")
+                .Append(r.V2ExtractionPlan.BoundaryKind).Append(':')
+                .Append(r.V2ExtractionPlan.NeedsMaterialization ? '1' : '0').Append(':')
+                .Append(r.V2ExtractionPlan.RootContextVariableName).Append(':')
+                .Append(r.V2ExtractionPlan.RootMemberName)
+                .Append('\0');
+
+            foreach (var helper in r.V2ExtractionPlan.AppliedHelperMethods.OrderBy(x => x, StringComparer.Ordinal))
+            {
+                sb.Append("v2helper:").Append(helper).Append('\0');
+            }
+
+            foreach (var diagnostic in r.V2ExtractionPlan.Diagnostics
+                         .OrderBy(x => x.Code, StringComparer.Ordinal))
+            {
+                sb.Append("v2ExtDiag:").Append(diagnostic.Code).Append(':').Append(diagnostic.Message).Append('\0');
+            }
+        }
+
         if (r.DbContextResolution is not null)
         {
             sb.Append("dbContextResolution=")
@@ -167,6 +226,22 @@ internal sealed class DaemonRuntime(IMemoryCache cache)
             || request.ExtractionOrigin.EndCharacter < 0)
         {
             throw new InvalidOperationException("Missing or invalid extraction origin in translation request.");
+        }
+
+        // Validate v2 extraction plan if present (slice 3 support)
+        if (request.V2ExtractionPlan is not null)
+        {
+            if (string.IsNullOrWhiteSpace(request.V2ExtractionPlan.Expression))
+                throw new InvalidOperationException("V2 extraction plan has empty expression.");
+            
+            if (string.IsNullOrWhiteSpace(request.V2ExtractionPlan.ContextVariableName))
+                throw new InvalidOperationException("V2 extraction plan missing context variable name.");
+                
+            if (string.IsNullOrWhiteSpace(request.V2ExtractionPlan.RootContextVariableName))
+                throw new InvalidOperationException("V2 extraction plan missing root context variable name.");
+                
+            if (request.V2ExtractionPlan.BoundaryKind != "Materialized" && request.V2ExtractionPlan.BoundaryKind != "Queryable")
+                throw new InvalidOperationException($"V2 extraction plan invalid boundary kind: {request.V2ExtractionPlan.BoundaryKind}.");
         }
 
         if (request.UsingContextSnapshot is null)
