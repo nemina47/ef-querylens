@@ -158,7 +158,12 @@ public sealed partial class QueryEvaluator
         // Compile -> emit -> load into user ALC -> invoke Run.
         // Stubs are synthesized deterministically from the LSP-provided symbol graph.
         var workingExpression = request.Expression;
+        LogDebug(
+            $"symbol-graph count={request.LocalSymbolGraph.Count} " +
+            $"entries={string.Join(",", request.LocalSymbolGraph.Select(s => $"{s.Name}:{s.TypeName}:{s.Kind}:{s.ReplayPolicy}"))}");
         var stubs = StubSynthesizer.BuildInitialStubs(request, dbContextType);
+        LogDebug(
+            $"stub-list count={stubs.Count} entries={string.Join(" || ", stubs)}");
         var synthesizedUsingStaticTypes = new HashSet<string>(StringComparer.Ordinal);
         var synthesizedUsingNamespaces = new HashSet<string>(StringComparer.Ordinal);
         var roslynCompilationWatch = Stopwatch.StartNew();
@@ -189,28 +194,69 @@ public sealed partial class QueryEvaluator
         // Emit to MemoryStream and load into the user's isolated ALC.
         var evalAssemblyLoadWatch = Stopwatch.StartNew();
         Assembly evalAssembly;
-        using (var ms = new MemoryStream())
+        for (var emitAttempt = 0; ; emitAttempt++)
         {
+            using var ms = new MemoryStream();
             var emitResult = compilation.Emit(ms);
-            if (!emitResult.Success)
+            if (emitResult.Success)
             {
-                var emitErrors = emitResult.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
-                var sourceToDump = compilation.SyntaxTrees.FirstOrDefault()?.ToString() ?? string.Empty;
-                var dumpPath = string.IsNullOrWhiteSpace(sourceToDump)
-                    ? "<empty>"
-                    : DumpGeneratedSourceToTemp(sourceToDump);
-                return FailureFromDiagnostics(
-                    stage: "Emit error",
-                    errors: emitErrors,
-                    elapsed: elapsed,
-                    dbContextType: dbContextType,
-                    userAssemblies: alcCtx.LoadedAssemblies,
-                    softDiagnostics: false,
-                    sourceDumpPath: dumpPath);
+                ms.Position = 0;
+                evalAssembly = alcCtx.LoadEvalAssembly(ms);
+                break;
             }
 
-            ms.Position = 0;
-            evalAssembly = alcCtx.LoadEvalAssembly(ms);
+            var emitErrors = emitResult.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+            var normalizedExpression = workingExpression;
+            var canRetryInaccessibleProjection =
+                emitAttempt == 0
+                && emitErrors.Count > 0
+                && emitErrors.All(d => d.Id == "CS0122")
+                && CompilationPipeline.TryNormalizeInaccessibleProjectionTypeFromErrors(
+                    emitErrors,
+                    workingExpression,
+                    out normalizedExpression)
+                && !string.Equals(normalizedExpression, workingExpression, StringComparison.Ordinal);
+
+            if (canRetryInaccessibleProjection)
+            {
+                workingExpression = normalizedExpression;
+                compilationRetryCount++;
+                var emitRetryCompileFailure = _compilationPipeline.TryBuildCompilationWithRetries(
+                    request,
+                    dbContextType,
+                    compilationAssemblyList,
+                    refs,
+                    knownNamespaces,
+                    knownTypes,
+                    stubs,
+                    synthesizedUsingStaticTypes,
+                    synthesizedUsingNamespaces,
+                    elapsed,
+                    alcCtx.LoadedAssemblies,
+                    ct,
+                    ref workingExpression,
+                    ref compilationRetryCount,
+                    out compilation);
+                if (emitRetryCompileFailure is not null)
+                {
+                    return emitRetryCompileFailure;
+                }
+
+                continue;
+            }
+
+            var sourceToDump = compilation.SyntaxTrees.FirstOrDefault()?.ToString() ?? string.Empty;
+            var dumpPath = string.IsNullOrWhiteSpace(sourceToDump)
+                ? "<empty>"
+                : DumpGeneratedSourceToTemp(sourceToDump);
+            return FailureFromDiagnostics(
+                stage: "Emit error",
+                errors: emitErrors,
+                elapsed: elapsed,
+                dbContextType: dbContextType,
+                userAssemblies: alcCtx.LoadedAssemblies,
+                softDiagnostics: false,
+                sourceDumpPath: dumpPath);
         }
 
         evalAssemblyLoadWatch.Stop();

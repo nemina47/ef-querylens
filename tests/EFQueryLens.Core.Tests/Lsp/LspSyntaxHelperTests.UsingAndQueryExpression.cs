@@ -114,6 +114,35 @@ public partial class LspSyntaxHelperTests
     }
 
     [Fact]
+    public void TryExtractLinqExpression_QueryExpression_FromLocalQueryableRoot_InlinesToDbContextRoot()
+    {
+        var source = """
+            var query = _context.PlusCases
+                .Where(w => w.IsNotDeleted());
+
+            var dashboard = await (
+                from @case in query
+                select new { @case.CaseStatus, @case.CaseType }
+            ).SingleOrDefaultAsync(cancellationToken);
+            """;
+
+        var (line, character) = FindPosition(source, "from @case in query");
+
+        var expression = LspSyntaxHelper.TryExtractLinqExpression(
+            source,
+            line,
+            character,
+            out var contextVariableName,
+            out _);
+
+        Assert.NotNull(expression);
+        Assert.Equal("_context", contextVariableName);
+        Assert.DoesNotContain("from @case in query", expression, StringComparison.Ordinal);
+        Assert.Contains("from @case in _context.PlusCases", expression, StringComparison.Ordinal);
+        Assert.Contains("SingleOrDefaultAsync", expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FindAllLinqChains_QueryExpressionWithoutTerminal_ReturnsCandidate()
     {
         var source = """

@@ -148,6 +148,45 @@ public static partial class LspSyntaxHelper
             if (!TryGetLeftMostExpression(currentExpression, out var leftMostExpression)
                 || leftMostExpression is not IdentifierNameSyntax identifier)
             {
+                if (leftMostExpression is QueryExpressionSyntax queryExpression
+                    && queryExpression.FromClause.Expression is IdentifierNameSyntax fromIdentifier)
+                {
+                    var fromIdentifierName = fromIdentifier.Identifier.ValueText;
+                    if (!string.IsNullOrWhiteSpace(fromIdentifierName))
+                    {
+                        if (depth == 0
+                            && TryCollectQueryVariableFlow(
+                                fromIdentifierName,
+                                currentAnchorStatement,
+                                out var queryFlowExpression,
+                                out var queryFlowBaseStatement)
+                            && queryFlowBaseStatement is not null
+                            && IsLikelyQueryableExpression(queryFlowExpression))
+                        {
+                            var replacedQuery = queryExpression.WithFromClause(
+                                queryExpression.FromClause.WithExpression(queryFlowExpression.WithoutTrivia()));
+                            currentExpression = currentExpression.ReplaceNode(leftMostExpression, replacedQuery.WithoutTrivia());
+                            currentAnchorStatement = queryFlowBaseStatement;
+                            continue;
+                        }
+
+                        if (TryResolveLocalExpressionCore(
+                                fromIdentifierName,
+                                currentAnchorStatement,
+                                out var resolvedQueryExpression,
+                                out var resolvedQueryAtStatement)
+                            && resolvedQueryAtStatement is not null
+                            && IsLikelyQueryableExpression(resolvedQueryExpression))
+                        {
+                            var replacedQuery = queryExpression.WithFromClause(
+                                queryExpression.FromClause.WithExpression(resolvedQueryExpression.WithoutTrivia()));
+                            currentExpression = currentExpression.ReplaceNode(leftMostExpression, replacedQuery.WithoutTrivia());
+                            currentAnchorStatement = resolvedQueryAtStatement;
+                            continue;
+                        }
+                    }
+                }
+
                 break;
             }
 

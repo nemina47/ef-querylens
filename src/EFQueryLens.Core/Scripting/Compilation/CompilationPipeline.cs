@@ -189,6 +189,14 @@ internal sealed partial class CompilationPipeline
                 synthesizedUsingStaticTypes,
                 synthesizedUsingNamespaces);
 
+            if (TryNormalizeInaccessibleProjectionTypeFromErrors(errors, workingExpression, out var normalizedExpression)
+                && !string.Equals(normalizedExpression, workingExpression, StringComparison.Ordinal))
+            {
+                workingExpression = normalizedExpression;
+                LogDebug($"compile-retry iteration={compilationRetryCount} normalize-inaccessible-projection applied");
+                changed = true;
+            }
+
             if (!changed)
             {
                 LogDebug($"compile-retry iteration={compilationRetryCount} no-changes-made");

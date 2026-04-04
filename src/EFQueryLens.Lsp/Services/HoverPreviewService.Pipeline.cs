@@ -396,9 +396,52 @@ internal sealed partial class HoverPreviewService
                 declared.Add(lambdaParam);
         }
 
+        foreach (var fromClause in parsed.DescendantNodesAndSelf()
+                     .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.FromClauseSyntax>())
+        {
+            var name = fromClause.Identifier.ValueText;
+            if (!string.IsNullOrWhiteSpace(name))
+                declared.Add(name);
+        }
+
+        foreach (var joinClause in parsed.DescendantNodesAndSelf()
+                     .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.JoinClauseSyntax>())
+        {
+            var name = joinClause.Identifier.ValueText;
+            if (!string.IsNullOrWhiteSpace(name))
+                declared.Add(name);
+        }
+
+        foreach (var letClause in parsed.DescendantNodesAndSelf()
+                     .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.LetClauseSyntax>())
+        {
+            var name = letClause.Identifier.ValueText;
+            if (!string.IsNullOrWhiteSpace(name))
+                declared.Add(name);
+        }
+
+        foreach (var continuation in parsed.DescendantNodesAndSelf()
+                     .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.QueryContinuationSyntax>())
+        {
+            var name = continuation.Identifier.ValueText;
+            if (!string.IsNullOrWhiteSpace(name))
+                declared.Add(name);
+        }
+
         var unresolved = new HashSet<string>(StringComparer.Ordinal);
         foreach (var id in parsed.DescendantNodesAndSelf().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax>())
         {
+            if (id.Parent is Microsoft.CodeAnalysis.CSharp.Syntax.NameEqualsSyntax nameEquals
+                && ReferenceEquals(nameEquals.Name, id))
+            {
+                continue;
+            }
+            if (id.Parent is Microsoft.CodeAnalysis.CSharp.Syntax.AssignmentExpressionSyntax assignment
+                && ReferenceEquals(assignment.Left, id)
+                && assignment.Parent is Microsoft.CodeAnalysis.CSharp.Syntax.InitializerExpressionSyntax)
+            {
+                continue;
+            }
             if (id.Parent is Microsoft.CodeAnalysis.CSharp.Syntax.MemberAccessExpressionSyntax member
                 && ReferenceEquals(member.Name, id))
             {

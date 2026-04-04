@@ -6,7 +6,7 @@ namespace EFQueryLens.Core.Scripting.Evaluation;
 
 internal sealed partial class CompilationPipeline
 {
-    private static bool TryNormalizeInaccessibleProjectionTypeFromErrors(
+    internal static bool TryNormalizeInaccessibleProjectionTypeFromErrors(
         IReadOnlyCollection<Diagnostic> errors,
         string expression,
         out string normalizedExpression)
@@ -16,9 +16,7 @@ internal sealed partial class CompilationPipeline
         // Private/internal projection DTOs (for example Program.BlogDto) are not visible
         // to the generated eval assembly. Rewrite terminal Select new Type(...) to
         // Select new { ... } so SQL translation can proceed.
-        var hasProtectionLevelError = errors.Any(d =>
-            d.Id == "CS0122" &&
-            d.GetMessage().Contains("inaccessible due to its protection level", StringComparison.OrdinalIgnoreCase));
+        var hasProtectionLevelError = errors.Any(d => d.Id == "CS0122");
         if (!hasProtectionLevelError)
             return false;
 

@@ -797,6 +797,74 @@ public class TypeExtractionTests
     }
 
     [Fact]
+    public void ExtractFreeVariableSymbolGraph_DoesNotRewriteInvocationTargetMemberAccess()
+    {
+        var source = """
+            using System;
+            class Customer { public Guid CustomerId { get; set; } }
+            class Order { public bool IsNotDeleted { get; set; } public DateTime CreatedUtc { get; set; } public Customer Customer { get; set; } = new(); }
+            class Demo
+            {
+                void Run(Guid customerId, DateTime utcNow)
+                {
+                    _ = dbContext.Orders
+                        .Where(o => o.IsNotDeleted && o.Customer.CustomerId == customerId)
+                        .Where(o => o.CreatedUtc >= utcNow.AddDays(-7));
+                }
+            }
+            """;
+
+        var expression =
+            "dbContext.Orders.Where(o => o.IsNotDeleted && o.Customer.CustomerId == customerId).Where(o => o.CreatedUtc >= utcNow.AddDays(-7))";
+        var (line, character) = FindPosition(source, "utcNow.AddDays(-7)");
+        var graph = LspSyntaxHelper.ExtractFreeVariableSymbolGraph(
+            expression,
+            "dbContext",
+            source,
+            line,
+            character,
+            targetAssemblyPath: null,
+            out var rewrittenExpression);
+
+        Assert.Contains(graph, g => g.Name == "customerId");
+        Assert.Contains(graph, g => g.Name == "utcNow");
+        Assert.DoesNotContain(graph, g => g.Kind == "member-capture" && g.Name.Contains("AddDays", StringComparison.Ordinal));
+        Assert.Contains("utcNow.AddDays(-7)", rewrittenExpression, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExtractFreeVariableSymbolGraph_QueryRangeVariable_DoesNotBecomeMemberCapture()
+    {
+        var source = """
+            using System.Linq;
+            class Item { public int CaseStatus { get; set; } }
+            class Demo
+            {
+                void Run(IQueryable<Item> query)
+                {
+                    _ = (from @case in query
+                         select new { Status = @case.CaseStatus });
+                }
+            }
+            """;
+
+        var expression = "(from @case in query select new { Status = @case.CaseStatus })";
+        var (line, character) = FindPosition(source, "@case.CaseStatus");
+        var graph = LspSyntaxHelper.ExtractFreeVariableSymbolGraph(
+            expression,
+            "query",
+            source,
+            line,
+            character,
+            targetAssemblyPath: null,
+            out var rewrittenExpression);
+
+        Assert.DoesNotContain(graph, g => g.Kind == "member-capture");
+        Assert.DoesNotContain("__qlm_case_", rewrittenExpression, StringComparison.Ordinal);
+        Assert.Contains("@case.CaseStatus", rewrittenExpression, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ExtractFreeVariableSymbolGraph_QueryInsideNestedIf_ResolvesOuterLocal()
     {
         var source = """
@@ -873,6 +941,171 @@ public class TypeExtractionTests
         Assert.DoesNotContain("__qlm_Enums_AmendmentChangeStatus", rewrittenExpression, StringComparison.Ordinal);
         Assert.Contains("Enums.AmendmentChangeStatus.New", rewrittenExpression, StringComparison.Ordinal);
         Assert.Contains(graph, g => g.Name == "ct");
+    }
+
+    [Fact]
+    public void ExtractFreeVariableSymbolGraph_AnonymousProjectionNameEquals_DoesNotBecomeFreeVariable()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            static class Enums { public enum ColApprovalStatus { Approved } }
+            class UtilityCloseCaseCondition { public Enums.ColApprovalStatus ColApprovalStatus { get; set; } public DateTime? ColApprovalDate { get; set; } }
+            class PlusCase { public Guid PlusCaseId { get; set; } public UtilityCloseCaseCondition UtilityCloseCaseCondition { get; set; } = new(); public bool IsNotDeleted() => true; }
+            class Demo
+            {
+                Task Run(Guid caseId, CancellationToken cancellationToken)
+                {
+                    _ = dbContext.PlusCases
+                        .Where(w => w.IsNotDeleted())
+                        .Where(w => w.PlusCaseId == caseId)
+                        .Select(s => new
+                        {
+                            isColApproved = s.UtilityCloseCaseCondition.ColApprovalStatus == Enums.ColApprovalStatus.Approved,
+                            s.UtilityCloseCaseCondition.ColApprovalDate
+                        })
+                        .SingleAsync(cancellationToken);
+
+                    return Task.CompletedTask;
+                }
+            }
+            """;
+
+        var expression = "dbContext.PlusCases.Where(w => w.IsNotDeleted()).Where(w => w.PlusCaseId == caseId).Select(s => new { isColApproved = s.UtilityCloseCaseCondition.ColApprovalStatus == Enums.ColApprovalStatus.Approved, s.UtilityCloseCaseCondition.ColApprovalDate }).SingleAsync(cancellationToken)";
+        var (line, character) = FindPosition(source, "isColApproved =");
+        var graph = LspSyntaxHelper.ExtractFreeVariableSymbolGraph(
+            expression,
+            "dbContext",
+            source,
+            line,
+            character,
+            targetAssemblyPath: null);
+
+        Assert.DoesNotContain(graph, g => g.Name == "isColApproved");
+        Assert.Contains(graph, g => g.Name == "caseId");
+        Assert.Contains(graph, g => g.Name == "cancellationToken");
+    }
+
+    [Fact]
+    public void ExtractFreeVariableSymbolGraph_ReplayInitializer_DowngradesWhenDependencyIsAnonymousType()
+    {
+        var source = """
+            using System;
+            using System.Linq;
+            using System.Threading;
+            using System.Threading.Tasks;
+            class UserGroup { public string UserGroupId { get; set; } = ""; public bool IsNotDeleted() => true; public string Name { get; set; } = ""; }
+            class Demo
+            {
+                Task Run(CancellationToken cancellationToken)
+                {
+                    var query = dbContext.UserGroups.Select(w => new { groupId = w.UserGroupId, groupName = w.Name });
+                    var filteredQuery = query.ToList();
+                    var groupIds = filteredQuery.Select(x => x.groupId).ToArray();
+
+                    _ = dbContext.UserGroups
+                        .Where(w => w.IsNotDeleted() && groupIds.Contains(w.UserGroupId))
+                        .ToListAsync(cancellationToken);
+
+                    return Task.CompletedTask;
+                }
+            }
+            """;
+
+        var expression = "dbContext.UserGroups.Where(w => w.IsNotDeleted() && groupIds.Contains(w.UserGroupId)).ToListAsync(cancellationToken)";
+        var (line, character) = FindPosition(source, "groupIds.Contains");
+        var graph = LspSyntaxHelper.ExtractFreeVariableSymbolGraph(
+            expression,
+            "dbContext",
+            source,
+            line,
+            character,
+            targetAssemblyPath: null);
+
+        Assert.DoesNotContain(graph, g => g.Name == "query");
+        Assert.DoesNotContain(graph, g => g.Name == "filteredQuery");
+
+        var groupIds = Assert.Single(graph.Where(g => g.Name == "groupIds"));
+        Assert.Equal(LocalSymbolReplayPolicies.UsePlaceholder, groupIds.ReplayPolicy);
+        Assert.Empty(groupIds.Dependencies);
+        Assert.Null(groupIds.InitializerExpression);
+    }
+
+    [Fact]
+    public void ExtractFreeVariableSymbolGraph_QueryExpression_CapturesPrecedingVarLocal()
+    {
+        var source = """
+            using Microsoft.EntityFrameworkCore;
+
+            class Order { public bool IsNotDeleted { get; set; } public DateTime CreatedUtc { get; set; } }
+            class Demo
+            {
+                Task Run(DateTime utcNow, int lookbackDays, CancellationToken ct)
+                {
+                    var safeLookbackDays = Math.Clamp(lookbackDays, 1, 365);
+                    var fromUtc = utcNow.Date.AddDays(-safeLookbackDays);
+
+                    _ = (from o in dbContext.Orders
+                        where o.IsNotDeleted && o.CreatedUtc >= fromUtc
+                        orderby o.CreatedUtc descending
+                        select o.CreatedUtc).ToListAsync(ct);
+
+                    return Task.CompletedTask;
+                }
+            }
+            """;
+
+        var expression = "(from o in dbContext.Orders where o.IsNotDeleted && o.CreatedUtc >= fromUtc orderby o.CreatedUtc descending select o.CreatedUtc).ToListAsync(ct)";
+        var (line, character) = FindPosition(source, "where o.IsNotDeleted");
+        var graph = LspSyntaxHelper.ExtractFreeVariableSymbolGraph(
+            expression,
+            "dbContext",
+            source,
+            line,
+            character,
+            targetAssemblyPath: null);
+
+        Assert.DoesNotContain(graph, g => g.Name == "o");
+        Assert.Contains(graph, g => g.Name == "ct");
+        Assert.Contains(graph, g => g.Name == "fromUtc");
+    }
+
+    [Fact]
+    public void ExtractFreeVariableSymbolGraph_Assignment_UsesLeftHandTypeWhenRightHandUnknown()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            class Order { public bool IsNotDeleted { get; set; } public DateTime CreatedUtc { get; set; } }
+            class Demo
+            {
+                Task Run(CancellationToken ct)
+                {
+                    DateTime fromUtc;
+                    fromUtc = UnknownFactory();
+                    _ = dbContext.Orders.Where(o => o.IsNotDeleted && o.CreatedUtc >= fromUtc).ToListAsync(ct);
+                    return Task.CompletedTask;
+                }
+            }
+            """;
+
+        var expression = "dbContext.Orders.Where(o => o.IsNotDeleted && o.CreatedUtc >= fromUtc).ToListAsync(ct)";
+        var (line, character) = FindPosition(source, "fromUtc).ToListAsync");
+        var graph = LspSyntaxHelper.ExtractFreeVariableSymbolGraph(
+            expression,
+            "dbContext",
+            source,
+            line,
+            character,
+            targetAssemblyPath: null);
+
+        var fromUtc = Assert.Single(graph, g => g.Name == "fromUtc");
+        Assert.Equal("global::System.DateTime", fromUtc.TypeName);
+        Assert.Equal(LocalSymbolReplayPolicies.UsePlaceholder, fromUtc.ReplayPolicy);
+        Assert.Null(fromUtc.InitializerExpression);
+        Assert.Empty(fromUtc.Dependencies);
     }
 
     [Fact]

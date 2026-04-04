@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "node .github/hooks/tsp-log-event.js",
+        "timeout": 5
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node .github/hooks/tsp-log-event.js",
+        "timeout": 5
+      }
+    ],
+    "SubagentStart": [
+      {
+        "type": "command",
+        "command": "node .github/hooks/tsp-log-event.js",
+        "timeout": 5
+      }
+    ],
+    "SubagentStop": [
+      {
+        "type": "command",
+        "command": "node .github/hooks/tsp-log-event.js",
+        "timeout": 5
+      }
+    ]
+  }
+}

@@ -89,6 +89,20 @@ public sealed partial class QueryEvaluator
             ? exception.ToString()
             : exception.Message;
 
+        if (exception.InnerException is not null)
+        {
+            var innerMessages = new List<string>();
+            for (var inner = exception.InnerException; inner is not null; inner = inner.InnerException)
+            {
+                innerMessages.Add($"{inner.GetType().Name}: {inner.Message}");
+            }
+
+            if (innerMessages.Count > 0)
+            {
+                message += "\nInner exceptions: " + string.Join(" | ", innerMessages);
+            }
+        }
+
         if (message.Contains("does not have a type mapping assigned", StringComparison.OrdinalIgnoreCase))
         {
             message += "\n\nHint: A variable in your query has a type that EF Core cannot map to a SQL parameter type. " +

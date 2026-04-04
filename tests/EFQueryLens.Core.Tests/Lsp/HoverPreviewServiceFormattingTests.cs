@@ -432,6 +432,45 @@ public class HoverPreviewServiceFormattingTests : IDisposable
         Assert.DoesNotContain("cancellationToken", unresolved, StringComparer.Ordinal);
     }
 
+    [Fact]
+    public void FindUnresolvedSymbols_IgnoresQueryExpressionRangeVariable()
+    {
+        var method = GetStaticMethod(
+            "FindUnresolvedSymbols",
+            typeof(string),
+            typeof(string),
+            typeof(IReadOnlyList<LocalSymbolGraphEntry>));
+
+        IReadOnlyList<LocalSymbolGraphEntry> graph =
+        [
+            new()
+            {
+                Name = "fromUtc",
+                TypeName = "global::System.DateTime",
+                Kind = "local",
+                DeclarationOrder = 1,
+                ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+            },
+            new()
+            {
+                Name = "ct",
+                TypeName = "global::System.Threading.CancellationToken",
+                Kind = "parameter",
+                DeclarationOrder = 2,
+                ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+            },
+        ];
+
+        var unresolved = (IReadOnlyList<string>)method.Invoke(null, [
+            "(from o in dbContext.Orders where o.IsNotDeleted && o.CreatedUtc >= fromUtc orderby o.CreatedUtc descending select o.Id).ToListAsync(ct)",
+            "dbContext",
+            graph,
+        ])!;
+
+        Assert.DoesNotContain("o", unresolved, StringComparer.Ordinal);
+        Assert.DoesNotContain("fromUtc", unresolved, StringComparer.Ordinal);
+    }
+
     private static MethodInfo GetStaticMethod(string name, params Type[] parameterTypes) =>
         typeof(HoverPreviewService).GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic, null, parameterTypes, null)
         ?? throw new InvalidOperationException($"Method {name} not found.");

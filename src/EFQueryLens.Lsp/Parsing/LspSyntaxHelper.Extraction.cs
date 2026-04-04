@@ -278,6 +278,16 @@ public static partial class LspSyntaxHelper
 
         targetExpression = StripTransparentQueryableCasts(targetExpression);
 
+        // Preserve the source-authored chain for hover display. Later extraction-time
+        // rewrites (for example inaccessible projection type normalization) are for
+        // execution resilience only and should surface under Executed LINQ instead.
+        if (string.IsNullOrWhiteSpace(callSiteExpression))
+        {
+            callSiteExpression = targetExpression.ToString();
+        }
+
+        targetExpression = RewriteInaccessibleProjectionTypes(targetExpression, helperSemanticModel);
+
         // Identify the root variable from the left-most chain segment.
         // Using DescendantNodes().FirstOrDefault() can pick lambda identifiers
         // (e.g. "s") depending on cursor position and trivia layout.
@@ -303,6 +313,17 @@ public static partial class LspSyntaxHelper
 
         var candidateExpression = targetExpression.ToString();
         return PreNormalizeExtractedExpression(candidateExpression);
+    }
+
+    private static ExpressionSyntax RewriteInaccessibleProjectionTypes(
+        ExpressionSyntax expression,
+        SemanticModel? semanticModel)
+    {
+        if (semanticModel is null)
+            return expression;
+
+        var rewriter = new InaccessibleProjectionTypeRewriter(semanticModel);
+        return rewriter.Visit(expression) as ExpressionSyntax ?? expression;
     }
 
     public static SourceUsingContext ExtractUsingContext(string sourceText)
@@ -1494,5 +1515,196 @@ public static partial class LspSyntaxHelper
 
             return base.VisitIdentifierName(node);
         }
+    }
+
+    private sealed class InaccessibleProjectionTypeRewriter : CSharpSyntaxRewriter
+    {
+        private readonly SemanticModel _semanticModel;
+        private readonly Compilation _compilation;
+
+        public InaccessibleProjectionTypeRewriter(SemanticModel semanticModel)
+        {
+            _semanticModel = semanticModel;
+            _compilation = semanticModel.Compilation;
+        }
+
+        public override SyntaxNode? VisitInvocationExpression(InvocationExpressionSyntax node)
+        {
+            var visited = (InvocationExpressionSyntax?)base.VisitInvocationExpression(node);
+            if (visited?.Expression is not MemberAccessExpressionSyntax memberAccess
+                || !string.Equals(memberAccess.Name.Identifier.ValueText, "Select", StringComparison.Ordinal)
+                || visited.ArgumentList.Arguments.Count != 1)
+            {
+                return visited;
+            }
+
+            var argument = visited.ArgumentList.Arguments[0];
+            var rewrittenLambda = TryRewriteProjectionLambda(argument.Expression);
+            if (rewrittenLambda is null)
+                return visited;
+
+            var rewrittenArgument = argument.WithExpression(rewrittenLambda);
+            return visited.WithArgumentList(
+                visited.ArgumentList.WithArguments(
+                    SyntaxFactory.SingletonSeparatedList(rewrittenArgument)));
+        }
+
+        private ExpressionSyntax? TryRewriteProjectionLambda(ExpressionSyntax lambdaExpression)
+        {
+            return lambdaExpression switch
+            {
+                SimpleLambdaExpressionSyntax simple when simple.Body is ObjectCreationExpressionSyntax objectCreation
+                    => TryRewriteObjectCreation(simple, objectCreation),
+                ParenthesizedLambdaExpressionSyntax parenthesized when parenthesized.Body is ObjectCreationExpressionSyntax objectCreation
+                    => TryRewriteObjectCreation(parenthesized, objectCreation),
+                _ => null,
+            };
+        }
+
+        private ExpressionSyntax? TryRewriteObjectCreation(
+            LambdaExpressionSyntax lambda,
+            ObjectCreationExpressionSyntax objectCreation)
+        {
+            var semanticModel = ResolveSemanticModel(objectCreation);
+            var createdType = semanticModel?.GetTypeInfo(objectCreation).Type as INamedTypeSymbol;
+            if (createdType is not null && IsPubliclyAccessibleType(createdType))
+                return null;
+
+            if (createdType is null && !IsLikelyInaccessibleDeclaredType(objectCreation))
+                return null;
+
+            var anonymousProjection = BuildAnonymousProjection(objectCreation, semanticModel);
+            return lambda switch
+            {
+                SimpleLambdaExpressionSyntax simple => simple.WithBody(anonymousProjection),
+                ParenthesizedLambdaExpressionSyntax parenthesized => parenthesized.WithBody(anonymousProjection),
+                _ => null,
+            };
+        }
+
+        private SemanticModel? ResolveSemanticModel(SyntaxNode node)
+        {
+            if (node.SyntaxTree == _semanticModel.SyntaxTree)
+                return _semanticModel;
+
+            return _compilation.SyntaxTrees.Contains(node.SyntaxTree)
+                ? _compilation.GetSemanticModel(node.SyntaxTree)
+                : null;
+        }
+
+        private static bool IsLikelyInaccessibleDeclaredType(ObjectCreationExpressionSyntax objectCreation)
+        {
+            var typeName = objectCreation.Type switch
+            {
+                IdentifierNameSyntax id => id.Identifier.ValueText,
+                GenericNameSyntax generic => generic.Identifier.ValueText,
+                QualifiedNameSyntax qualified => qualified.Right.Identifier.ValueText,
+                AliasQualifiedNameSyntax aliasQualified => aliasQualified.Name.Identifier.ValueText,
+                _ => null,
+            };
+
+            if (string.IsNullOrWhiteSpace(typeName))
+                return false;
+
+            var containingType = objectCreation.FirstAncestorOrSelf<TypeDeclarationSyntax>();
+            if (containingType is null)
+                return false;
+
+            foreach (var nestedType in containingType.Members.OfType<BaseTypeDeclarationSyntax>())
+            {
+                if (!string.Equals(nestedType.Identifier.ValueText, typeName, StringComparison.Ordinal))
+                    continue;
+
+                if (nestedType.Modifiers.Any(SyntaxKind.PublicKeyword))
+                    return false;
+
+                return true;
+            }
+
+            return false;
+        }
+
+        private AnonymousObjectCreationExpressionSyntax BuildAnonymousProjection(
+            ObjectCreationExpressionSyntax objectCreation,
+            SemanticModel? semanticModel)
+        {
+            if (objectCreation.Initializer is not null)
+            {
+                var membersFromInitializer = objectCreation.Initializer.Expressions
+                    .OfType<AssignmentExpressionSyntax>()
+                    .Select(a =>
+                    {
+                        var memberName = a.Left switch
+                        {
+                            IdentifierNameSyntax id => id.Identifier.ValueText,
+                            MemberAccessExpressionSyntax m => m.Name.Identifier.ValueText,
+                            _ => null,
+                        };
+                        return string.IsNullOrWhiteSpace(memberName)
+                            ? null
+                            : SyntaxFactory.AnonymousObjectMemberDeclarator(
+                                SyntaxFactory.NameEquals(memberName),
+                                a.Right.WithoutTrivia());
+                    })
+                    .Where(m => m is not null)
+                    .Cast<AnonymousObjectMemberDeclaratorSyntax>()
+                    .ToList();
+
+                if (membersFromInitializer.Count > 0)
+                {
+                    return SyntaxFactory.AnonymousObjectCreationExpression(
+                        SyntaxFactory.SeparatedList(membersFromInitializer));
+                }
+            }
+
+            var ctor = semanticModel?.GetSymbolInfo(objectCreation).Symbol as IMethodSymbol;
+            var args = objectCreation.ArgumentList?.Arguments ?? default;
+            var members = new List<AnonymousObjectMemberDeclaratorSyntax>();
+
+            for (var i = 0; i < args.Count; i++)
+            {
+                var arg = args[i];
+                var memberName = arg.NameColon?.Name.Identifier.ValueText;
+                if (string.IsNullOrWhiteSpace(memberName) && ctor is not null && i < ctor.Parameters.Length)
+                    memberName = ctor.Parameters[i].Name;
+                if (string.IsNullOrWhiteSpace(memberName))
+                    memberName = TryInferMemberName(arg.Expression) ?? $"__ql{i}";
+
+                members.Add(
+                    SyntaxFactory.AnonymousObjectMemberDeclarator(
+                        SyntaxFactory.NameEquals(memberName!),
+                        arg.Expression.WithoutTrivia()));
+            }
+
+            if (members.Count == 0)
+            {
+                members.Add(
+                    SyntaxFactory.AnonymousObjectMemberDeclarator(
+                        SyntaxFactory.NameEquals("__ql0"),
+                        SyntaxFactory.LiteralExpression(SyntaxKind.NullLiteralExpression)));
+            }
+
+            return SyntaxFactory.AnonymousObjectCreationExpression(
+                SyntaxFactory.SeparatedList(members));
+        }
+
+        private static bool IsPubliclyAccessibleType(INamedTypeSymbol type)
+        {
+            for (INamedTypeSymbol? current = type; current is not null; current = current.ContainingType)
+            {
+                if (current.DeclaredAccessibility != Accessibility.Public)
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static string? TryInferMemberName(ExpressionSyntax expression)
+            => expression switch
+            {
+                IdentifierNameSyntax id => id.Identifier.ValueText,
+                MemberAccessExpressionSyntax m => m.Name.Identifier.ValueText,
+                _ => null,
+            };
     }
 }

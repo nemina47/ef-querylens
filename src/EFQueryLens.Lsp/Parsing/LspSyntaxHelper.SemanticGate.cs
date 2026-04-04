@@ -6,6 +6,15 @@ namespace EFQueryLens.Lsp.Parsing;
 
 public static partial class LspSyntaxHelper
 {
+    private static readonly string[] DefaultImplicitUsings =
+    [
+        "System",
+        "System.Collections.Generic",
+        "System.Linq",
+        "System.Threading",
+        "System.Threading.Tasks",
+    ];
+
     internal static bool TryCreateSemanticModel(
         string sourceText,
         string? targetAssemblyPath,
@@ -20,7 +29,9 @@ public static partial class LspSyntaxHelper
             assemblyName: "__ql_semantic_gate__",
             syntaxTrees: [tree],
             references: references,
-            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            options: new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                usings: DefaultImplicitUsings));
         model = compilation.GetSemanticModel(tree, ignoreAccessibility: true);
         return true;
     }

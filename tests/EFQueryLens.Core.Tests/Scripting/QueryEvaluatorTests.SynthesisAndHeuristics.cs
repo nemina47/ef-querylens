@@ -241,6 +241,73 @@ public partial class QueryEvaluatorTests
     }
 
     [Fact]
+    public void BuildStubDeclaration_LocalCollectionInitializer_QualifiesTypeChainsFromHint()
+    {
+        var stub = BuildStubDeclarationForRequestForTest(
+            missingName: "categoryList",
+            expression: "db.Orders.Where(o => categoryList.Contains(o.Status))",
+            localSymbolHints:
+            [
+                new LocalSymbolHint
+                {
+                    Name = "categoryList",
+                    TypeName = "global::System.Collections.Generic.List<global::Sla.Plus.Domain.Enums.MlrRequestCategory>",
+                    Kind = "local",
+                    InitializerExpression = "new List<Domain.Enums.MlrRequestCategory> { Domain.Enums.MlrRequestCategory.Api }",
+                },
+            ]);
+
+        Assert.Equal(
+            "var categoryList = new List<Sla.Plus.Domain.Enums.MlrRequestCategory> { Sla.Plus.Domain.Enums.MlrRequestCategory.Api };",
+            stub);
+    }
+
+    [Fact]
+    public void BuildStubDeclaration_LocalNullableEnumCollectionInitializer_DoesNotProduceInvalidNullableTypeAccess()
+    {
+        var stub = BuildStubDeclarationForRequestForTest(
+            missingName: "checkTransactionDateStatus",
+            expression: "db.Orders.Where(o => checkTransactionDateStatus.Contains(o.Status))",
+            localSymbolHints:
+            [
+                new LocalSymbolHint
+                {
+                    Name = "checkTransactionDateStatus",
+                    TypeName = "global::System.Collections.Generic.List<global::Sla.Plus.Domain.Enums.GssDemolitionSubmissionStatus?>",
+                    Kind = "local",
+                    InitializerExpression = "new List<Enums.GssDemolitionSubmissionStatus?> { Enums.GssDemolitionSubmissionStatus.Defunct }",
+                },
+            ]);
+
+        Assert.DoesNotContain("??>", stub, StringComparison.Ordinal);
+        Assert.DoesNotContain("?.Defunct", stub, StringComparison.Ordinal);
+        Assert.Contains("new List<Sla.Plus.Domain.Enums.GssDemolitionSubmissionStatus?>", stub, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildStubDeclaration_LocalCollectionExpressionInitializer_UsesTypedAssignment()
+    {
+        var stub = BuildStubDeclarationForRequestForTest(
+            missingName: "validAppStatus",
+            expression: "db.Orders.Where(o => validAppStatus.Contains(o.Status)).Select(o => o.Id)",
+            localSymbolHints:
+            [
+                new LocalSymbolHint
+                {
+                    Name = "validAppStatus",
+                    TypeName = "System.Collections.Generic.List<SampleMySqlApp.Domain.Enums.OrderStatus>",
+                    Kind = "local",
+                    InitializerExpression = "[SampleMySqlApp.Domain.Enums.OrderStatus.Pending]",
+                },
+            ]);
+
+        Assert.StartsWith(
+            "System.Collections.Generic.List<SampleMySqlApp.Domain.Enums.OrderStatus> validAppStatus = [",
+            stub,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BuildStubDeclaration_InterfaceType_UsesInterfaceProxyStub()
     {
         var stub = BuildStubDeclarationForRequestForTest(
@@ -594,6 +661,38 @@ public partial class QueryEvaluatorTests
     }
 
     [Fact]
+    public void BuildStubDeclaration_GlobalQualifiedCollectionElementType_UsesDeterministicQualifiedType()
+    {
+        var stub = BuildStubDeclarationForRequestForTest(
+            missingName: "categoryList",
+            expression: "db.Orders.Where(o => categoryList.Contains(System.DayOfWeek.Monday))",
+            localVariableTypes: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["categoryList"] = "global::System.Collections.Generic.List<global::System.DayOfWeek>",
+            });
+
+        Assert.Equal(
+            "System.Collections.Generic.List<System.DayOfWeek> categoryList = new() { default(System.DayOfWeek), default(System.DayOfWeek) };",
+            stub);
+    }
+
+    [Fact]
+    public void BuildStubDeclaration_ArrayVariable_UsesAtLeastTwoPlaceholderValues()
+    {
+        var stub = BuildStubDeclarationForRequestForTest(
+            missingName: "ids",
+            expression: "db.Orders.Where(o => ids.Contains(o.Id))",
+            localVariableTypes: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["ids"] = "System.Guid[]",
+            });
+
+        Assert.Equal(
+            "System.Guid[] ids = new System.Guid[] { default(System.Guid), default(System.Guid) };",
+            stub);
+    }
+
+    [Fact]
     public async Task Evaluate_MissingGuidCollectionVariable_InContains_UsesAtLeastTwoPlaceholderValues()
     {
         var result = await TranslateStrictAsync(
@@ -735,5 +834,22 @@ public partial class QueryEvaluatorTests
         Assert.True(result.Success, result.ErrorMessage);
         Assert.NotNull(result.Sql);
         Assert.DoesNotContain("Compilation error", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Evaluate_NonCtCancellationTokenName_InAsyncTerminal_IsSynthesized()
+    {
+        var result = await TranslateStrictAsync(
+            "db.Orders.SingleOrDefaultAsync(cancellationToken)",
+            localVariableTypes: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["cancellationToken"] = "System.Threading.CancellationToken",
+            },
+            useAsyncRunner: true,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.DoesNotContain("CS0103", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 }

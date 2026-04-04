@@ -557,4 +557,5 @@ public partial class LspSyntaxHelperTests
         Assert.Contains("filter", expression, StringComparison.Ordinal);
         Assert.Contains("ToListAsync", expression, StringComparison.Ordinal);
     }
+
 }

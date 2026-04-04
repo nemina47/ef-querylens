@@ -1,0 +1,12 @@
+# SonarQube scan steps for .NET projects
+# One command per line. Placeholders: ${SQ_URL}, ${SQ_TOKEN}, ${SQ_PROJECT_KEY}
+# Lines starting with # are ignored.
+#
+# Prerequisites:
+#   dotnet tool install --global dotnet-sonarscanner
+#   NuGet: coverlet.collector in each test project (for coverage)
+
+dotnet sonarscanner begin /k:"${SQ_PROJECT_KEY}" /d:sonar.host.url="${SQ_URL}" /d:sonar.token="${SQ_TOKEN}" /d:sonar.exclusions=".github/**,.vscode/**" /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml"
+dotnet build
+dotnet test --no-build --collect:"XPlat Code Coverage" -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+dotnet sonarscanner end /d:sonar.token="${SQ_TOKEN}"

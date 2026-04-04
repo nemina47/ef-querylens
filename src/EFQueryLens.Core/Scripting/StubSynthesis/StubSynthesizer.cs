@@ -3,6 +3,7 @@ using EFQueryLens.Core.Scripting.Compilation;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Reflection;
+using System.Text.RegularExpressions;
 
 namespace EFQueryLens.Core.Scripting.Evaluation;
 
@@ -22,6 +23,7 @@ internal static partial class StubSynthesizer
         var seenNames = new HashSet<string>(StringComparer.Ordinal);
         var rootId = ImportResolver.TryExtractRootIdentifier(request.Expression);
         var graph = request.LocalSymbolGraph;
+        var referencedNames = CollectReferencedIdentifierNames(request.Expression);
 
         foreach (var hint in graph.OrderBy(h => h.DeclarationOrder))
         {
@@ -31,7 +33,12 @@ internal static partial class StubSynthesizer
                 continue;
             if (string.Equals(hint.Name, request.ContextVariableName, StringComparison.Ordinal))
                 continue;
-            if (request.UseAsyncRunner && IsCancellationTokenTypeName(hint.TypeName))
+            if (request.UseAsyncRunner
+                && IsCancellationTokenTypeName(hint.TypeName)
+                && string.Equals(hint.Name, "ct", StringComparison.Ordinal))
+                continue;
+            if (IsAnonymousTypeName(hint.TypeName)
+                && !referencedNames.Contains(hint.Name))
                 continue;
 
             var stub = BuildStubDeclaration(hint.Name, rootId, request, dbContextType);
@@ -43,6 +50,34 @@ internal static partial class StubSynthesizer
         }
 
         return stubs;
+    }
+
+    private static bool IsAnonymousTypeName(string? typeName) =>
+        !string.IsNullOrWhiteSpace(typeName)
+        && typeName.Contains("<anonymous type:", StringComparison.Ordinal);
+
+    private static HashSet<string> CollectReferencedIdentifierNames(string expression)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(expression))
+            return names;
+
+        try
+        {
+            var parsed = SyntaxFactory.ParseExpression(expression);
+            foreach (var identifier in parsed.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>())
+            {
+                var name = identifier.Identifier.ValueText;
+                if (!string.IsNullOrWhiteSpace(name))
+                    names.Add(name);
+            }
+        }
+        catch
+        {
+            // Best effort only.
+        }
+
+        return names;
     }
 
     private static bool IsCancellationTokenTypeName(string? typeName)
@@ -67,6 +102,13 @@ internal static partial class StubSynthesizer
             .FirstOrDefault(h => string.Equals(h.Name, name, StringComparison.Ordinal));
 
         var hintedTypeName = localHint?.TypeName;
+        if (request.UseAsyncRunner
+            && IsCancellationTokenTypeName(hintedTypeName)
+            && !string.Equals(name, "ct", StringComparison.Ordinal))
+        {
+            return $"System.Threading.CancellationToken {name} = ct;";
+        }
+
         if (string.Equals(localHint?.ReplayPolicy, LocalSymbolReplayPolicies.ReplayInitializer, StringComparison.Ordinal)
             && !string.IsNullOrWhiteSpace(localHint?.InitializerExpression))
         {
@@ -152,9 +194,9 @@ internal static partial class StubSynthesizer
             "TimeOnly" or "System.TimeOnly" => $"System.TimeOnly {varName} = System.TimeOnly.MinValue;",
             "CancellationToken" or "System.Threading.CancellationToken" => $"System.Threading.CancellationToken {varName} = default;",
             var tn when tn.EndsWith("[]", StringComparison.Ordinal)
-                => $"{tn[..^2]}[] {varName} = System.Array.Empty<{tn[..^2]}>();",
-            var tn when TryExtractCollectionElementType(tn, out var elem)
-                => $"System.Collections.Generic.List<{elem}> {varName} = new() {{ default({elem}) }};",
+                => $"{tn[..^2]}[] {varName} = new {tn[..^2]}[] {{ default({tn[..^2]}), default({tn[..^2]}) }};",
+            _ when TryExtractCollectionElementType(normalizedTypeName, out var elem)
+                => $"System.Collections.Generic.List<{elem}> {varName} = new() {{ default({elem}), default({elem}) }};",
             // Expression<Func<...>> — generate a typed lambda rather than GetUninitializedObject.
             // An uninitialized Expression has null internal nodes (Body, Parameters, etc.);
             // EF Core walks the expression tree to produce SQL and will throw on any null node.
@@ -307,18 +349,19 @@ internal static partial class StubSynthesizer
     private static bool TryExtractCollectionElementType(string typeName, out string elementType)
     {
         elementType = string.Empty;
-        var lt = typeName.IndexOf('<');
-        var gt = typeName.LastIndexOf('>');
+        var normalizedTypeName = typeName.Replace("global::", string.Empty, StringComparison.Ordinal).Trim();
+        var lt = normalizedTypeName.IndexOf('<');
+        var gt = normalizedTypeName.LastIndexOf('>');
         if (lt < 0 || gt < 0 || gt <= lt) return false;
 
-        var outer = typeName[..lt].Trim();
+        var outer = normalizedTypeName[..lt].Trim();
         if (outer is not ("List" or "IList" or "ICollection" or "IEnumerable"
             or "IReadOnlyList" or "IReadOnlyCollection" or "ISet" or "HashSet"
             or "System.Collections.Generic.List" or "System.Collections.Generic.IList"
             or "System.Collections.Generic.IEnumerable" or "System.Collections.Generic.IReadOnlyList"))
             return false;
 
-        var inner = typeName[(lt + 1)..gt].Trim();
+        var inner = normalizedTypeName[(lt + 1)..gt].Trim();
         if (string.IsNullOrWhiteSpace(inner)) return false;
 
         elementType = inner;
@@ -357,6 +400,12 @@ internal static partial class StubSynthesizer
         if (string.IsNullOrWhiteSpace(initializerExpression))
             return string.Empty;
 
+        if (!string.IsNullOrWhiteSpace(hintedTypeName)
+            && TryExtractCollectionElementType(hintedTypeName.Trim(), out var elementTypeName))
+        {
+            initializerExpression = QualifyTypeChains(initializerExpression, elementTypeName);
+        }
+
         // Initializers like `request.CreatedAfterUtc.Value` are branch-local and only
         // safe under guards that are not preserved in the extracted query fragment.
         // Replaying them in the eval scaffold can throw before EF translation starts.
@@ -382,11 +431,69 @@ internal static partial class StubSynthesizer
         return $"var {variableName} = {initializerExpression};";
     }
 
+    private static string QualifyTypeChains(string expression, string fullyQualifiedTypeName)
+    {
+        if (string.IsNullOrWhiteSpace(expression) || string.IsNullOrWhiteSpace(fullyQualifiedTypeName))
+            return expression;
+
+        var replacementTypeName = fullyQualifiedTypeName.Trim();
+        var replacementIsNullable = replacementTypeName.EndsWith("?", StringComparison.Ordinal);
+        var replacementNonNullable = replacementTypeName.TrimEnd('?');
+
+        var simpleTypeName = replacementNonNullable;
+        var genericTickIndex = simpleTypeName.IndexOf('<');
+        if (genericTickIndex >= 0)
+            simpleTypeName = simpleTypeName[..genericTickIndex];
+        var lastDot = simpleTypeName.LastIndexOf('.');
+        if (lastDot >= 0 && lastDot + 1 < simpleTypeName.Length)
+            simpleTypeName = simpleTypeName[(lastDot + 1)..];
+        simpleTypeName = simpleTypeName.Replace("global::", string.Empty, StringComparison.Ordinal).TrimEnd('?');
+        if (string.IsNullOrWhiteSpace(simpleTypeName))
+            return expression;
+
+        // Normalize chains like Domain.Enums.MyType or Foo.Bar.MyType to the
+        // deterministic hinted type to avoid namespace/type-shadowing ambiguities.
+        // Preserve nullable marker from the original source (if present) and avoid
+        // introducing null-conditional type forms like `MyType?.Member`.
+        var pattern = $@"\b(?:[A-Za-z_]\w*\.)+{Regex.Escape(simpleTypeName)}(?<nullable>\?)?";
+        return Regex.Replace(
+            expression,
+            pattern,
+            match =>
+            {
+                var nullableSuffix = match.Groups["nullable"].Success && replacementIsNullable ? "?" : string.Empty;
+                return replacementNonNullable + nullableSuffix;
+            },
+            RegexOptions.CultureInvariant);
+    }
+
     private static bool RequiresTargetType(string initializerExpression)
     {
         var trimmed = initializerExpression.Trim();
-        return string.Equals(trimmed, "default", StringComparison.Ordinal)
-               || string.Equals(trimmed, "new()", StringComparison.Ordinal);
+        if (string.Equals(trimmed, "default", StringComparison.Ordinal)
+            || string.Equals(trimmed, "new()", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        // Collection expressions (`[...]`) require target typing.
+        // In some parser/language-version combinations ParseExpression may not
+        // surface CollectionExpressionSyntax reliably, so keep a lexical guard.
+        if (trimmed.StartsWith("[", StringComparison.Ordinal)
+            && trimmed.EndsWith("]", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        try
+        {
+            var parsed = SyntaxFactory.ParseExpression(trimmed);
+            return parsed is CollectionExpressionSyntax;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool IsUnsafeInitializerReplay(string initializerExpression)

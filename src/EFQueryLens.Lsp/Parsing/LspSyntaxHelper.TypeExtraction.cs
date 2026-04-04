@@ -631,6 +631,34 @@ public static partial class LspSyntaxHelper
                 declaredInsideExpression.Add(name);
         }
 
+        foreach (var fromClause in expression.DescendantNodesAndSelf().OfType<FromClauseSyntax>())
+        {
+            var name = fromClause.Identifier.ValueText;
+            if (!string.IsNullOrWhiteSpace(name))
+                declaredInsideExpression.Add(name);
+        }
+
+        foreach (var joinClause in expression.DescendantNodesAndSelf().OfType<JoinClauseSyntax>())
+        {
+            var name = joinClause.Identifier.ValueText;
+            if (!string.IsNullOrWhiteSpace(name))
+                declaredInsideExpression.Add(name);
+        }
+
+        foreach (var letClause in expression.DescendantNodesAndSelf().OfType<LetClauseSyntax>())
+        {
+            var name = letClause.Identifier.ValueText;
+            if (!string.IsNullOrWhiteSpace(name))
+                declaredInsideExpression.Add(name);
+        }
+
+        foreach (var continuation in expression.DescendantNodesAndSelf().OfType<QueryContinuationSyntax>())
+        {
+            var name = continuation.Identifier.ValueText;
+            if (!string.IsNullOrWhiteSpace(name))
+                declaredInsideExpression.Add(name);
+        }
+
         var captureMap = new Dictionary<(string Receiver, string Member), LocalSymbolGraphEntry>();
         var nextDeclarationOrder = -1_000_000;
         var collisionIndex = 0;
@@ -650,6 +678,13 @@ public static partial class LspSyntaxHelper
 
         var rewriter = new ReceiverMemberCaptureRewriter(node =>
         {
+            if (node.Parent is InvocationExpressionSyntax invocation
+                && ReferenceEquals(invocation.Expression, node))
+            {
+                debugLog?.Invoke($"capture-skip reason=invocation-target access={node}");
+                return null;
+            }
+
             if (node.Expression is not IdentifierNameSyntax receiverIdentifier)
             {
                 debugLog?.Invoke($"capture-skip reason=receiver-not-identifier access={node}");
@@ -926,239 +961,6 @@ public static partial class LspSyntaxHelper
         }
 
         return false;
-    }
-
-    private static IReadOnlyDictionary<(string Receiver, string Member), string> BuildLambdaParameterMemberTypeMap(
-        ExpressionSyntax expression,
-        string contextVariableName,
-        string? targetAssemblyPath,
-        string? dbContextTypeName,
-        Action<string>? debugLog = null)
-    {
-        var result = new Dictionary<(string Receiver, string Member), string>();
-
-        try
-        {
-            var dbSetName = expression.DescendantNodesAndSelf()
-                .OfType<MemberAccessExpressionSyntax>()
-                .Where(ma => ma.Expression is IdentifierNameSyntax id
-                             && string.Equals(id.Identifier.ValueText, contextVariableName, StringComparison.Ordinal))
-                .Select(ma => ma.Name.Identifier.ValueText)
-                .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name));
-
-            if (string.IsNullOrWhiteSpace(dbSetName))
-            {
-                debugLog?.Invoke("lambda-map-skip reason=no-dbset-root");
-                return result;
-            }
-
-            if (!TryResolveDbSetEntityMemberTypes(targetAssemblyPath, dbContextTypeName, dbSetName!, out var memberTypes))
-            {
-                debugLog?.Invoke($"lambda-map-skip reason=dbset-entity-types-unresolved dbset={dbSetName} dbContext={dbContextTypeName}");
-                return result;
-            }
-
-            foreach (var memberAccess in expression.DescendantNodesAndSelf().OfType<MemberAccessExpressionSyntax>())
-            {
-                if (memberAccess.Expression is not IdentifierNameSyntax receiverIdentifier)
-                    continue;
-
-                var receiverName = receiverIdentifier.Identifier.ValueText;
-                if (string.IsNullOrWhiteSpace(receiverName))
-                    continue;
-
-                var memberName = memberAccess.Name.Identifier.ValueText;
-                if (string.IsNullOrWhiteSpace(memberName))
-                    continue;
-
-                if (!memberTypes.TryGetValue(memberName, out var memberTypeName))
-                    continue;
-
-                result[(receiverName, memberName)] = memberTypeName;
-            }
-
-            if (result.Count > 0)
-            {
-                debugLog?.Invoke(
-                    $"lambda-map-built dbset={dbSetName} count={result.Count} keys={string.Join(",", result.Keys.Select(k => $"{k.Receiver}.{k.Member}"))}");
-            }
-            else
-            {
-                debugLog?.Invoke($"lambda-map-empty dbset={dbSetName}");
-            }
-        }
-        catch (Exception ex)
-        {
-            debugLog?.Invoke($"lambda-map-error type={ex.GetType().Name} message={ex.Message}");
-        }
-
-        return result;
-    }
-
-    private static bool TryResolveDbSetEntityMemberTypes(
-        string? targetAssemblyPath,
-        string? dbContextTypeName,
-        string dbSetName,
-        out IReadOnlyDictionary<string, string> memberTypes)
-    {
-        memberTypes = new Dictionary<string, string>(StringComparer.Ordinal);
-
-        if (string.IsNullOrWhiteSpace(targetAssemblyPath) || !File.Exists(targetAssemblyPath))
-            return false;
-
-        try
-        {
-            var assembly = Assembly.LoadFrom(targetAssemblyPath);
-            var dbContextType = ResolveDbContextType(assembly, targetAssemblyPath, dbContextTypeName);
-            if (dbContextType is null)
-                return false;
-
-            var dbSetProperty = dbContextType
-                .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .FirstOrDefault(p =>
-                    string.Equals(p.Name, dbSetName, StringComparison.Ordinal)
-                    && p.PropertyType.IsGenericType
-                    && string.Equals(
-                        p.PropertyType.GetGenericTypeDefinition().FullName,
-                        "Microsoft.EntityFrameworkCore.DbSet`1",
-                        StringComparison.Ordinal));
-            if (dbSetProperty is null)
-                return false;
-
-            var entityType = dbSetProperty.PropertyType.GetGenericArguments()[0];
-            var map = new Dictionary<string, string>(StringComparer.Ordinal);
-
-            foreach (var prop in entityType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
-            {
-                var typeName = ToDeterministicTypeNameFromSystemType(prop.PropertyType);
-                if (!string.IsNullOrWhiteSpace(typeName))
-                    map[prop.Name] = typeName!;
-            }
-
-            foreach (var field in entityType.GetFields(BindingFlags.Public | BindingFlags.Instance))
-            {
-                var typeName = ToDeterministicTypeNameFromSystemType(field.FieldType);
-                if (!string.IsNullOrWhiteSpace(typeName))
-                    map[field.Name] = typeName!;
-            }
-
-            memberTypes = map;
-            return map.Count > 0;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static Type? ResolveDbContextType(Assembly assembly, string? targetAssemblyPath, string? dbContextTypeName)
-    {
-        static string NormalizeTypeLookupName(string value)
-            => value.Trim()
-                .TrimEnd('?')
-                .Replace("global::", string.Empty, StringComparison.Ordinal)
-                .Trim();
-
-        static bool IsDbContextType(Type t)
-        {
-            for (var current = t; current is not null; current = current.BaseType)
-            {
-                if (string.Equals(current.FullName, "Microsoft.EntityFrameworkCore.DbContext", StringComparison.Ordinal)
-                    || string.Equals(current.Name, "DbContext", StringComparison.Ordinal))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        var allTypes = new List<Type>();
-        allTypes.AddRange(GetLoadableTypes(assembly));
-
-        var assemblyDir = string.IsNullOrWhiteSpace(targetAssemblyPath)
-            ? null
-            : Path.GetDirectoryName(targetAssemblyPath);
-        if (!string.IsNullOrWhiteSpace(assemblyDir) && Directory.Exists(assemblyDir))
-        {
-            foreach (var dll in Directory.EnumerateFiles(assemblyDir, "*.dll", SearchOption.TopDirectoryOnly))
-            {
-                try
-                {
-                    var loaded = Assembly.LoadFrom(dll);
-                    allTypes.AddRange(GetLoadableTypes(loaded));
-                }
-                catch
-                {
-                    // Best effort.
-                }
-            }
-        }
-
-        var distinctTypes = allTypes
-            .Where(static t => t is not null)
-            .DistinctBy(static t => t.AssemblyQualifiedName ?? t.FullName ?? t.Name)
-            .ToArray();
-
-        if (!string.IsNullOrWhiteSpace(dbContextTypeName))
-        {
-            var normalized = NormalizeTypeLookupName(dbContextTypeName);
-            var simpleName = normalized;
-            var dotIndex = simpleName.LastIndexOf('.');
-            if (dotIndex >= 0 && dotIndex < simpleName.Length - 1)
-                simpleName = simpleName[(dotIndex + 1)..];
-
-            var direct = distinctTypes.FirstOrDefault(t =>
-                             string.Equals(
-                                 NormalizeTypeLookupName(t.FullName ?? string.Empty),
-                                 normalized,
-                                 StringComparison.Ordinal))
-                         ?? distinctTypes.FirstOrDefault(t =>
-                             string.Equals(
-                                 NormalizeTypeLookupName(t.Name),
-                                 simpleName,
-                                 StringComparison.Ordinal));
-            if (direct is not null && IsDbContextType(direct))
-                return direct;
-        }
-
-        return distinctTypes.FirstOrDefault(IsDbContextType);
-    }
-
-    private static IReadOnlyList<Type> GetLoadableTypes(Assembly assembly)
-    {
-        try
-        {
-            return assembly.GetTypes();
-        }
-        catch (ReflectionTypeLoadException ex)
-        {
-            return ex.Types.Where(t => t is not null).Cast<Type>().ToArray();
-        }
-        catch
-        {
-            return [];
-        }
-    }
-
-    private static string? ToDeterministicTypeNameFromSystemType(Type type)
-    {
-        if (type.IsGenericType)
-        {
-            var genericDef = type.GetGenericTypeDefinition();
-            var genericDefName = genericDef.FullName;
-            if (string.IsNullOrWhiteSpace(genericDefName))
-                return null;
-
-            var tickIndex = genericDefName.IndexOf('`');
-            var trimmed = tickIndex >= 0 ? genericDefName[..tickIndex] : genericDefName;
-            var args = string.Join(", ", type.GetGenericArguments()
-                .Select(arg => ToDeterministicTypeNameFromSystemType(arg) ?? "global::System.Object"));
-            return $"global::{trimmed}<{args}>";
-        }
-
-        var fullName = type.FullName;
-        return string.IsNullOrWhiteSpace(fullName) ? null : $"global::{fullName}";
     }
 
     private static bool TryResolveMemberTypeFromComparisonPartner(
@@ -1598,6 +1400,19 @@ public static partial class LspSyntaxHelper
         var free = new HashSet<string>(StringComparer.Ordinal);
         foreach (var id in expression.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>())
         {
+            if (id.Parent is NameEqualsSyntax nameEquals
+                && ReferenceEquals(nameEquals.Name, id))
+            {
+                continue;
+            }
+
+            if (id.Parent is AssignmentExpressionSyntax assignment
+                && ReferenceEquals(assignment.Left, id)
+                && assignment.Parent is InitializerExpressionSyntax)
+            {
+                continue;
+            }
+
             if (id.Parent is MemberAccessExpressionSyntax memberAccess
                 && ReferenceEquals(memberAccess.Name, id))
             {
@@ -1653,6 +1468,12 @@ public static partial class LspSyntaxHelper
                 return false;
             }
 
+            entry = DowngradeReplayInitializerWhenAnonymousDependenciesPresent(
+                entry,
+                contextVariableName,
+                primaryContext,
+                secondaryContext);
+
             foreach (var dependency in entry.Dependencies)
             {
                 TryPopulateSymbolGraphEntry(
@@ -1673,6 +1494,77 @@ public static partial class LspSyntaxHelper
             visiting.Remove(name);
         }
     }
+
+    private static LocalSymbolGraphEntry DowngradeReplayInitializerWhenAnonymousDependenciesPresent(
+        LocalSymbolGraphEntry entry,
+        string contextVariableName,
+        ScopeResolutionContext? primaryContext,
+        ScopeResolutionContext? secondaryContext)
+    {
+        if (!string.Equals(entry.ReplayPolicy, LocalSymbolReplayPolicies.ReplayInitializer, StringComparison.Ordinal))
+            return entry;
+
+        if (entry.Dependencies.Count == 0)
+            return entry;
+
+        foreach (var dependency in entry.Dependencies)
+        {
+            if (!TryResolveAccessibleSymbolEntry(
+                    dependency,
+                    contextVariableName,
+                    primaryContext,
+                    out var depEntry)
+                && !TryResolveAccessibleSymbolEntry(
+                    dependency,
+                    contextVariableName,
+                    secondaryContext,
+                    out depEntry))
+            {
+                continue;
+            }
+
+            if (IsReplayUnsafeDependency(depEntry))
+            {
+                return entry with
+                {
+                    ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+                    InitializerExpression = null,
+                    Dependencies = [],
+                };
+            }
+        }
+
+        return entry;
+    }
+
+    private static bool IsReplayUnsafeDependency(LocalSymbolGraphEntry dependency)
+    {
+        if (IsAnonymousTypeName(dependency.TypeName))
+            return true;
+
+        if (!string.Equals(dependency.ReplayPolicy, LocalSymbolReplayPolicies.ReplayInitializer, StringComparison.Ordinal))
+            return false;
+
+        if (string.IsNullOrWhiteSpace(dependency.InitializerExpression))
+            return false;
+
+        try
+        {
+            var initializer = SyntaxFactory.ParseExpression(dependency.InitializerExpression);
+            if (IsQueryableInitializerExpression(initializer))
+                return true;
+        }
+        catch
+        {
+            // Best effort only.
+        }
+
+        return false;
+    }
+
+    private static bool IsAnonymousTypeName(string? typeName) =>
+        !string.IsNullOrWhiteSpace(typeName)
+        && typeName.Contains("<anonymous type:", StringComparison.Ordinal);
 
     private static bool TryResolveAccessibleSymbolEntry(
         string name,
@@ -1763,12 +1655,28 @@ public static partial class LspSyntaxHelper
                 var replayPolicy = initializer is null
                     ? LocalSymbolReplayPolicies.UsePlaceholder
                     : DetermineReplayPolicy(initializer);
+                if (typeName is null && initializer is not null)
+                {
+                    var initializerType = semanticModel.GetTypeInfo(initializer).Type
+                                          ?? semanticModel.GetTypeInfo(initializer).ConvertedType;
+                    typeName = ToDeterministicTypeName(initializerType);
+                }
                 if (typeName is null)
                 {
-                    if (initializer is null || !string.Equals(replayPolicy, LocalSymbolReplayPolicies.ReplayInitializer, StringComparison.Ordinal))
+                    if (initializer is null)
                         return false;
 
+                    replayPolicy = LocalSymbolReplayPolicies.ReplayInitializer;
                     typeName = "?";
+                }
+                var initializerExpression = initializer is null ? null : NormalizeInitializerExpression(initializer);
+                IReadOnlyList<string> dependencies = initializer is null
+                    ? []
+                    : ExtractExpressionDependencies(initializer, name, contextVariableName, semanticModel);
+                if (!string.Equals(replayPolicy, LocalSymbolReplayPolicies.ReplayInitializer, StringComparison.Ordinal))
+                {
+                    initializerExpression = null;
+                    dependencies = [];
                 }
 
                 entry = new LocalSymbolGraphEntry
@@ -1776,11 +1684,9 @@ public static partial class LspSyntaxHelper
                     Name = name,
                     TypeName = typeName,
                     Kind = "local",
-                    InitializerExpression = initializer is null ? null : NormalizeInitializerExpression(initializer),
+                    InitializerExpression = initializerExpression,
                     DeclarationOrder = variable.SpanStart,
-                    Dependencies = initializer is null
-                        ? []
-                        : ExtractExpressionDependencies(initializer, name, contextVariableName, semanticModel),
+                    Dependencies = dependencies,
                     Scope = scopeId,
                     ReplayPolicy = replayPolicy,
                 };
@@ -1796,14 +1702,35 @@ public static partial class LspSyntaxHelper
             && string.Equals(leftIdentifier.Identifier.ValueText, name, StringComparison.Ordinal))
         {
             var type = semanticModel.GetTypeInfo(assignment.Right).Type;
-            var typeName = ToDeterministicTypeName(type);
+            var typeName = ToDeterministicTypeName(type)
+                ?? ToDeterministicTypeName(semanticModel.GetTypeInfo(assignment.Right).ConvertedType);
             var replayPolicy = DetermineReplayPolicy(assignment.Right);
+            var initializerExpression = NormalizeInitializerExpression(assignment.Right);
+            IReadOnlyList<string> dependencies = ExtractExpressionDependencies(
+                assignment.Right,
+                name,
+                contextVariableName,
+                semanticModel);
+
             if (string.IsNullOrWhiteSpace(typeName))
             {
-                if (!string.Equals(replayPolicy, LocalSymbolReplayPolicies.ReplayInitializer, StringComparison.Ordinal))
-                    return false;
-
-                typeName = "?";
+                typeName = TryResolveAssignmentTargetTypeName(leftIdentifier, semanticModel);
+                if (!string.IsNullOrWhiteSpace(typeName))
+                {
+                    replayPolicy = LocalSymbolReplayPolicies.UsePlaceholder;
+                    initializerExpression = null;
+                    dependencies = [];
+                }
+                else
+                {
+                    replayPolicy = LocalSymbolReplayPolicies.ReplayInitializer;
+                    typeName = "?";
+                }
+            }
+            if (!string.Equals(replayPolicy, LocalSymbolReplayPolicies.ReplayInitializer, StringComparison.Ordinal))
+            {
+                initializerExpression = null;
+                dependencies = [];
             }
 
             entry = new LocalSymbolGraphEntry
@@ -1811,9 +1738,9 @@ public static partial class LspSyntaxHelper
                 Name = name,
                 TypeName = typeName!,
                 Kind = "local",
-                InitializerExpression = NormalizeInitializerExpression(assignment.Right),
+                InitializerExpression = initializerExpression,
                 DeclarationOrder = assignment.SpanStart,
-                Dependencies = ExtractExpressionDependencies(assignment.Right, name, contextVariableName, semanticModel),
+                Dependencies = dependencies,
                 Scope = scopeId,
                 ReplayPolicy = replayPolicy,
             };
@@ -1821,6 +1748,21 @@ public static partial class LspSyntaxHelper
         }
 
         return false;
+    }
+
+    private static string? TryResolveAssignmentTargetTypeName(
+        IdentifierNameSyntax leftIdentifier,
+        SemanticModel semanticModel)
+    {
+        var leftSymbol = semanticModel.GetSymbolInfo(leftIdentifier).Symbol;
+        return leftSymbol switch
+        {
+            ILocalSymbol local => ToDeterministicTypeName(local.Type),
+            IParameterSymbol parameter => ToDeterministicTypeName(parameter.Type),
+            IFieldSymbol field => ToDeterministicTypeName(field.Type),
+            IPropertySymbol property => ToDeterministicTypeName(property.Type),
+            _ => null,
+        };
     }
 
     private static bool TryCreateEntryFromScopeParameter(
@@ -1923,8 +1865,11 @@ public static partial class LspSyntaxHelper
 
         foreach (var invocation in initializer.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
         {
+            if (invocation.Expression is IdentifierNameSyntax)
+                return LocalSymbolReplayPolicies.UsePlaceholder;
+
             if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
-                continue;
+                return LocalSymbolReplayPolicies.UsePlaceholder;
 
             if (memberAccess.Expression is IdentifierNameSyntax identifier
                 && identifier.Identifier.ValueText.Length > 0

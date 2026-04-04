@@ -80,8 +80,9 @@ internal sealed partial class HoverHandler
             var anchorToken = $"{containingChain.StatementStartLine}:{containingChain.StatementStartCharacter}-{containingChain.StatementEndLine}:{containingChain.StatementEndCharacter}";
             semanticContext = new SemanticHoverContext(
                 SemanticKey: $"{fingerprint}|{dbContextTypeToken}|{NormalizeWhitespace(containingChain.Expression)}|anchor|{anchorToken}",
-                EffectiveLine: containingChain.StatementStartLine,
-                EffectiveCharacter: containingChain.StatementStartCharacter);
+                // Use query anchor for extraction/compute stability; statement span remains in key/range matching.
+                EffectiveLine: containingChain.Line,
+                EffectiveCharacter: containingChain.Character);
             return true;
         }
 

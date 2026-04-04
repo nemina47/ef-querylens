@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "SampleDbContextFactoryApp": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:52800;http://localhost:52801"
+    }
+  }
+}

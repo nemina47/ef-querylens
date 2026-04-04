@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "node .github/hooks/tsp-insights-sync.js",
+        "timeout": 10
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node .github/hooks/tsp-insights-sync.js",
+        "timeout": 10
+      }
+    ]
+  }
+}
