@@ -64,6 +64,19 @@ public sealed partial class QueryEvaluator
                 return preCompilationFailure;
             }
 
+            // 2b. Analyze v2 extraction/capture payloads for deterministic path selection.
+            var v2Decision = V2RuntimeAnalyzer.Analyze(request);
+            if (!v2Decision.ShouldUseV2Path)
+            {
+                // V2 path blocked. Return structured diagnostic without fallback.
+                var diagnostic = V2RuntimeAnalyzer.FormatDiagnostic(v2Decision);
+                return Failure(
+                    diagnostic,
+                    sw.Elapsed,
+                    dbContextType,
+                    alcCtx.LoadedAssemblies);
+            }
+
             // 3. Build compilation assembly set and compute eval-runner cache key.
             var compilationAssemblies = BuildCompilationAssemblySet(alcCtx);
             var asmSetHash = CompilationPipeline.ComputeAssemblySetHash(
