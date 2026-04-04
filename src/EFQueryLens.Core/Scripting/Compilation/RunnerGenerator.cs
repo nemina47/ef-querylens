@@ -13,7 +13,7 @@ namespace EFQueryLens.Core.Scripting.Compilation;
 /// the risk of token substitution breaking the surrounding source structure.
 /// </para>
 /// </summary>
-internal static class RunnerGenerator
+internal static partial class RunnerGenerator
 {
     private static readonly CSharpParseOptions SParseOptions =
         new(LanguageVersion.Latest, DocumentationMode.None);
