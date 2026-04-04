@@ -66,9 +66,9 @@ public sealed partial class QueryEvaluator
 
             // 2b. Analyze v2 extraction/capture payloads for deterministic path selection.
             var v2Decision = V2RuntimeAnalyzer.Analyze(request);
-            if (!v2Decision.ShouldUseV2Path)
+            if (v2Decision.BlockReason is not null)
             {
-                // V2 path blocked. Return structured diagnostic without fallback.
+                // V2 path explicitly blocked. Return structured diagnostic without fallback.
                 var diagnostic = V2RuntimeAnalyzer.FormatDiagnostic(v2Decision);
                 return Failure(
                     diagnostic,
@@ -76,6 +76,8 @@ public sealed partial class QueryEvaluator
                     dbContextType,
                     alcCtx.LoadedAssemblies);
             }
+            
+            // If no v2 payloads or v2 path not blocked, proceed with legacy path below.
 
             // 3. Build compilation assembly set and compute eval-runner cache key.
             var compilationAssemblies = BuildCompilationAssemblySet(alcCtx);
