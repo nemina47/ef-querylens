@@ -238,6 +238,37 @@ public static class LocalSymbolReplayPolicies
 }
 
 /// <summary>
+/// Canonical hint values used in <see cref="V2CapturePlanEntry.QueryUsageHint"/>.
+/// Set by LSP operator-context analysis to select more accurate placeholder defaults.
+/// </summary>
+public static class QueryUsageHints
+{
+    /// <summary>Variable is a CancellationToken argument (ToListAsync(ct), etc.). Use CancellationToken.None.</summary>
+    public const string CancellationToken = "cancellation-token";
+
+    /// <summary>Variable is used in Skip or Take operator. Positive int is already the canonical default.</summary>
+    public const string SkipTake = "skip-take";
+
+    /// <summary>Variable is a LINQ selector Expression&lt;Func&lt;T,R&gt;&gt; argument (.Select(expression)). Generate typed lambda.</summary>
+    public const string SelectorExpression = "selector-expression";
+
+    /// <summary>String variable used in Contains(value) predicate. Default "qlstub0" is appropriate.</summary>
+    public const string StringContains = "string-contains";
+
+    /// <summary>String variable used in StartsWith(prefix) predicate. Shorter "ql" prefix is more natural.</summary>
+    public const string StringPrefix = "string-prefix";
+
+    /// <summary>String variable used in EndsWith(suffix) predicate. Shorter "stub" suffix is more natural.</summary>
+    public const string StringSuffix = "string-suffix";
+
+    /// <summary>Variable is used in a Where predicate. Standard catalog default applies.</summary>
+    public const string WherePredicate = "where-predicate";
+
+    /// <summary>Variable is a collection used for membership testing (.Contains(x)). Two-item seeding already applied.</summary>
+    public const string MembershipCollection = "membership-collection";
+}
+
+/// <summary>
 /// Deterministic capture-plan snapshot produced by the v2 extraction pipeline.
 /// </summary>
 public sealed record V2CapturePlanSnapshot
@@ -263,6 +294,14 @@ public sealed record V2CapturePlanEntry
     public string CapturePolicy { get; init; } = LocalSymbolReplayPolicies.UsePlaceholder;
     public string? RejectCode { get; init; }
     public string? RejectReason { get; init; }
+
+    /// <summary>
+    /// Optional hint from LSP operator context analysis describing how this variable is used in the query.
+    /// Values: "cancellation-token", "skip-take", "selector-expression", "string-contains", "string-prefix",
+    ///         "string-suffix", "where-predicate", "membership-collection".
+    /// Used by EvalSourceBuilder to select context-aware placeholder values.
+    /// </summary>
+    public string? QueryUsageHint { get; init; }
 }
 
 /// <summary>

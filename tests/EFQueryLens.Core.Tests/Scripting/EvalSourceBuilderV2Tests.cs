@@ -214,6 +214,132 @@ public class EvalSourceBuilderV2Tests
         Assert.Contains("{ 1, 2 }", code);
     }
 
+    // ── Operator-aware synthesis ──────────────────────────────────────────────────
+
+    [Fact]
+    public void BuildV2CaptureInitializationCode_UsePlaceholder_CancellationToken_EmitsNone()
+    {
+        var entry = new V2CapturePlanEntry
+        {
+            Name = "ct",
+            TypeName = "System.Threading.CancellationToken",
+            CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+        };
+
+        var code = EvalSourceBuilder.BuildV2CaptureInitializationCode(entry);
+
+        Assert.NotNull(code);
+        Assert.Contains("CancellationToken.None", code);
+    }
+
+    [Fact]
+    public void BuildV2CaptureInitializationCode_UsePlaceholder_TimeSpan_EmitsZero()
+    {
+        var entry = new V2CapturePlanEntry
+        {
+            Name = "timeout",
+            TypeName = "System.TimeSpan",
+            CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+        };
+
+        var code = EvalSourceBuilder.BuildV2CaptureInitializationCode(entry);
+
+        Assert.NotNull(code);
+        Assert.Contains("TimeSpan.Zero", code);
+    }
+
+    [Fact]
+    public void BuildV2CaptureInitializationCode_UsePlaceholder_Char_EmitsLiteral()
+    {
+        var entry = new V2CapturePlanEntry
+        {
+            Name = "separator",
+            TypeName = "char",
+            CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+        };
+
+        var code = EvalSourceBuilder.BuildV2CaptureInitializationCode(entry);
+
+        Assert.NotNull(code);
+        Assert.Contains("'a'", code);
+    }
+
+    [Theory]
+    [InlineData("sbyte", "(sbyte)1")]
+    [InlineData("ushort", "(ushort)1")]
+    [InlineData("uint", "1u")]
+    [InlineData("ulong", "1ul")]
+    [InlineData("nint", "(nint)1")]
+    [InlineData("nuint", "(nuint)1")]
+    public void BuildV2CaptureInitializationCode_UsePlaceholder_IntegralVariants_EmitCanonicalValues(
+        string typeName, string expected)
+    {
+        var entry = new V2CapturePlanEntry
+        {
+            Name = "value",
+            TypeName = typeName,
+            CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+        };
+
+        var code = EvalSourceBuilder.BuildV2CaptureInitializationCode(entry);
+
+        Assert.NotNull(code);
+        Assert.Contains(expected, code);
+    }
+
+    [Fact]
+    public void BuildV2CaptureInitializationCode_SelectorHint_WithObjectReturn_EmitsIdentityLambda()
+    {
+        var typeName = "global::System.Linq.Expressions.Expression<global::System.Func<global::MyApp.Order, object>>";
+        var entry = new V2CapturePlanEntry
+        {
+            Name = "expression",
+            TypeName = typeName,
+            CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+            QueryUsageHint = QueryUsageHints.SelectorExpression,
+        };
+
+        var code = EvalSourceBuilder.BuildV2CaptureInitializationCode(entry);
+
+        Assert.NotNull(code);
+        Assert.Contains("var expression =", code);
+        Assert.Contains("(object)e", code);
+    }
+
+    [Fact]
+    public void BuildV2CaptureInitializationCode_StringPrefixHint_EmitsShorterValue()
+    {
+        var entry = new V2CapturePlanEntry
+        {
+            Name = "prefix",
+            TypeName = "string",
+            CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+            QueryUsageHint = QueryUsageHints.StringPrefix,
+        };
+
+        var code = EvalSourceBuilder.BuildV2CaptureInitializationCode(entry);
+
+        Assert.NotNull(code);
+        Assert.Contains("\"ql\"", code);
+    }
+
+    [Fact]
+    public void BuildV2CaptureInitializationCode_StringSuffixHint_EmitsShorterValue()
+    {
+        var entry = new V2CapturePlanEntry
+        {
+            Name = "suffix",
+            TypeName = "string",
+            CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+            QueryUsageHint = QueryUsageHints.StringSuffix,
+        };
+
+        var code = EvalSourceBuilder.BuildV2CaptureInitializationCode(entry);
+
+        Assert.NotNull(code);
+        Assert.Contains("\"stub\"", code);
+    }
+
     [Fact]
     public void BuildV2CaptureInitializationCode_Reject_ReturnsNull()
     {

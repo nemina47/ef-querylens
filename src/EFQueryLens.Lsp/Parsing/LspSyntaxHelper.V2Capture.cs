@@ -61,6 +61,27 @@ public static partial class LspSyntaxHelper
             entries.Add(planEntry);
         }
 
+        // Apply operator-context hints to UsePlaceholder entries so EvalSourceBuilder
+        // can pick semantically accurate defaults (e.g., CancellationToken.None, typed lambdas).
+        var capturedNames = entries
+            .Where(e => string.Equals(e.CapturePolicy, LocalSymbolReplayPolicies.UsePlaceholder, StringComparison.Ordinal))
+            .Select(e => e.Name);
+
+        var usageHints = DetectQueryUsageHints(executableExpression, capturedNames);
+
+        if (usageHints.Count > 0)
+        {
+            for (int i = 0; i < entries.Count; i++)
+            {
+                var e = entries[i];
+                if (string.Equals(e.CapturePolicy, LocalSymbolReplayPolicies.UsePlaceholder, StringComparison.Ordinal)
+                    && usageHints.TryGetValue(e.Name, out var hint))
+                {
+                    entries[i] = e with { QueryUsageHint = hint };
+                }
+            }
+        }
+
         return new V2CapturePlanSnapshot
         {
             ExecutableExpression = executableExpression,

@@ -57,8 +57,19 @@ internal static partial class EvalSourceBuilder
     /// Emits a deterministic placeholder value for the symbol type.
     /// If placeholder generation fails for unsupported types, emits a diagnostic and falls back to default(T).
     /// </summary>
+    /// <summary>
+    /// Builds placeholder initialization code for a symbol.
+    /// Emits a deterministic placeholder value for the symbol type.
+    /// If placeholder generation fails for unsupported types, emits a diagnostic and falls back to default(T).
+    /// </summary>
     private static string BuildPlaceholderInitializationCode(V2CapturePlanEntry entry)
     {
+        // Hint-driven path has highest priority — operator context can select a better default
+        if (TryBuildHintDrivenPlaceholder(entry, out var hintPlaceholder))
+        {
+            return $"var {entry.Name} = {hintPlaceholder};";
+        }
+
         if (TryBuildCollectionPlaceholder(entry.TypeName, out var collectionPlaceholder))
         {
             return $"var {entry.Name} = {collectionPlaceholder};";
@@ -76,6 +87,158 @@ internal static partial class EvalSourceBuilder
         EvalSourceBuilderDiagnosticContextHolder.Current.Emit(diagnostic);
 
         return $"var {entry.Name} = default({entry.TypeName});";
+    }
+
+    /// <summary>
+    /// Attempts to build a placeholder driven by the entry's <see cref="V2CapturePlanEntry.QueryUsageHint"/>.
+    /// Provides operator-aware defaults that are more semantically accurate than type-only catalog defaults.
+    /// </summary>
+    private static bool TryBuildHintDrivenPlaceholder(V2CapturePlanEntry entry, out string placeholder)
+    {
+        placeholder = string.Empty;
+
+        switch (entry.QueryUsageHint)
+        {
+            case QueryUsageHints.SelectorExpression:
+                return TryBuildSelectorExpressionPlaceholder(entry.TypeName, out placeholder);
+
+            case QueryUsageHints.StringPrefix:
+                placeholder = "\"ql\"";
+                return true;
+
+            case QueryUsageHints.StringSuffix:
+                placeholder = "\"stub\"";
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to generate a compilable LINQ expression for <c>Expression&lt;Func&lt;T, R&gt;&gt;</c> types.
+    /// Scans for the Func type arguments and emits <c>e => (R)e</c> for value-compatible returns or
+    /// <c>e => default(R)</c> as a fallback.
+    /// </summary>
+    private static bool TryBuildSelectorExpressionPlaceholder(string? typeName, out string placeholder)
+    {
+        placeholder = string.Empty;
+
+        if (!TryExtractExpressionFuncTypeArgs(typeName, out var paramType, out var returnType))
+            return false;
+
+        // Normalize away global:: for the generated lambda body
+        var normalizedReturn = NormalizeTypeName(returnType);
+
+        if (string.Equals(normalizedReturn, "object", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedReturn, "System.Object", StringComparison.OrdinalIgnoreCase))
+        {
+            // Select * equivalent — project entity as object
+            placeholder = $"({typeName})(e => (object)e)";
+            return true;
+        }
+
+        // For a scalar return type that matches the param type, use identity selector
+        if (string.Equals(NormalizeTypeName(paramType), normalizedReturn, StringComparison.Ordinal))
+        {
+            placeholder = $"({typeName})(e => e)";
+            return true;
+        }
+
+        // Generic typed return — emit default(R) to produce a valid expression tree
+        placeholder = $"({typeName})(e => default({returnType}))";
+        return true;
+    }
+
+    /// <summary>
+    /// Extracts T and R from <c>Expression&lt;Func&lt;T, R&gt;&gt;</c> type name strings.
+    /// Handles global:: prefixes and nested generic types.
+    /// </summary>
+    private static bool TryExtractExpressionFuncTypeArgs(
+        string? typeName,
+        out string paramType,
+        out string returnType)
+    {
+        paramType = string.Empty;
+        returnType = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(typeName))
+            return false;
+
+        // Requires both "Expression" and "Func" in the type name
+        if (!typeName.Contains("Expression", StringComparison.OrdinalIgnoreCase)
+            || !typeName.Contains("Func", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // Locate innermost "Func<" — handles "Func<" from both short and fully qualified names
+        var funcIdx = typeName.LastIndexOf("Func<", StringComparison.OrdinalIgnoreCase);
+        if (funcIdx < 0)
+            return false;
+
+        var argsStart = funcIdx + "Func<".Length;
+
+        // Extract the content between angle brackets (depth-aware)
+        if (!TryExtractAngleBracketContent(typeName, argsStart - 1, out var funcArgs))
+            return false;
+
+        // Split on "," at depth 0 to get T and R
+        if (!TrySplitFirstDepthZeroComma(funcArgs, out var first, out var rest))
+            return false;
+
+        paramType = first.Trim();
+        returnType = rest.Trim();
+        return !string.IsNullOrEmpty(paramType) && !string.IsNullOrEmpty(returnType);
+    }
+
+    private static bool TryExtractAngleBracketContent(string text, int openAngleIdx, out string content)
+    {
+        content = string.Empty;
+        if (openAngleIdx < 0 || openAngleIdx >= text.Length || text[openAngleIdx] != '<')
+            return false;
+
+        int depth = 0;
+        int start = openAngleIdx + 1;
+        for (int i = openAngleIdx; i < text.Length; i++)
+        {
+            if (text[i] == '<')
+                depth++;
+            else if (text[i] == '>')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    content = text[start..i];
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TrySplitFirstDepthZeroComma(string args, out string first, out string rest)
+    {
+        first = string.Empty;
+        rest = string.Empty;
+
+        int depth = 0;
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] == '<')
+                depth++;
+            else if (args[i] == '>')
+                depth--;
+            else if (args[i] == ',' && depth == 0)
+            {
+                first = args[..i];
+                rest = args[(i + 1)..];
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool TryBuildCollectionPlaceholder(string? typeName, out string placeholder)
@@ -211,6 +374,58 @@ internal static partial class EvalSourceBuilder
             case "TimeOnly":
             case "System.TimeOnly":
                 placeholder = "global::System.TimeOnly.FromDateTime(global::System.DateTime.UtcNow)";
+                return true;
+
+            case "CancellationToken":
+            case "System.Threading.CancellationToken":
+                placeholder = "global::System.Threading.CancellationToken.None";
+                return true;
+
+            case "TimeSpan":
+            case "System.TimeSpan":
+                placeholder = "global::System.TimeSpan.Zero";
+                return true;
+
+            case "char":
+            case "Char":
+            case "System.Char":
+                placeholder = "'a'";
+                return true;
+
+            case "sbyte":
+            case "SByte":
+            case "System.SByte":
+                placeholder = "(sbyte)1";
+                return true;
+
+            case "ushort":
+            case "UInt16":
+            case "System.UInt16":
+                placeholder = "(ushort)1";
+                return true;
+
+            case "uint":
+            case "UInt32":
+            case "System.UInt32":
+                placeholder = "1u";
+                return true;
+
+            case "ulong":
+            case "UInt64":
+            case "System.UInt64":
+                placeholder = "1ul";
+                return true;
+
+            case "nint":
+            case "IntPtr":
+            case "System.IntPtr":
+                placeholder = "(nint)1";
+                return true;
+
+            case "nuint":
+            case "UIntPtr":
+            case "System.UIntPtr":
+                placeholder = "(nuint)1";
                 return true;
 
             default:
