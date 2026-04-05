@@ -144,6 +144,115 @@ public partial class LspSyntaxHelperTests
                 && string.Equals(e.CapturePolicy, LocalSymbolReplayPolicies.Reject, StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void BuildV2CapturePlanFromGraph_UnsafeInitializer_KnownType_DowngradesToPlaceholder()
+    {
+        // Mirrors the real live scenario:
+        //   var page = Math.Max(request.Page, 1);
+        // page: ReplayInitializer, type=int, depends on request (which is UsePlaceholder — in graph).
+        // ContainsUnsafeReplayInitializerSyntax fires because Math.Max() is InvocationExpressionSyntax.
+        // Expected: downgrade to UsePlaceholder (int is catalog-known); no diagnostic emitted.
+        var graph = new LocalSymbolGraphEntry[]
+        {
+            new()
+            {
+                Name = "request",
+                TypeName = "global::MyApp.OrderQueryRequest",
+                Kind = "parameter",
+                InitializerExpression = null,
+                DeclarationOrder = 0,
+                Dependencies = [],
+                ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+            },
+            new()
+            {
+                Name = "page",
+                TypeName = "global::System.Int32",
+                Kind = "local",
+                InitializerExpression = "Math.Max(request.Page, 1)",
+                DeclarationOrder = 1,
+                Dependencies = ["request"],
+                ReplayPolicy = LocalSymbolReplayPolicies.ReplayInitializer,
+            },
+        };
+
+        var capturePlan = LspSyntaxHelper.BuildV2CapturePlanFromGraph(
+            "dbContext.Orders.Skip((page - 1)).Take(10).ToListAsync(ct)",
+            graph);
+
+        var page = Assert.Single(capturePlan.Entries, e => string.Equals(e.Name, "page", StringComparison.Ordinal));
+        Assert.Equal(LocalSymbolReplayPolicies.UsePlaceholder, page.CapturePolicy);
+        Assert.Null(page.InitializerExpression);
+        Assert.Empty(page.Dependencies);
+        // Type preserved for catalog synthesis
+        Assert.Contains("Int32", page.TypeName, StringComparison.OrdinalIgnoreCase);
+        // No diagnostic for known-type downgrade — it's normal synthesis
+        Assert.Empty(capturePlan.Diagnostics);
+    }
+
+    [Fact]
+    public void BuildV2CapturePlanFromGraph_UnsafeInitializer_UnknownType_StillRejects()
+    {
+        // Unsafe initializer for a custom type — cannot use IsKnownPlaceholderType → should reject
+        var graph = new LocalSymbolGraphEntry[]
+        {
+            new()
+            {
+                Name = "filters",
+                TypeName = "global::MyApp.FilterBuilder",
+                Kind = "local",
+                InitializerExpression = "BuildFilters(request)",
+                DeclarationOrder = 1,
+                Dependencies = ["request"],
+                ReplayPolicy = LocalSymbolReplayPolicies.ReplayInitializer,
+            },
+        };
+
+        var capturePlan = LspSyntaxHelper.BuildV2CapturePlanFromGraph(
+            "dbContext.Orders.Where(filters).ToListAsync(ct)",
+            graph);
+
+        var filters = Assert.Single(capturePlan.Entries);
+        Assert.Equal(LocalSymbolReplayPolicies.Reject, filters.CapturePolicy);
+        Assert.False(capturePlan.IsComplete);
+    }
+
+    [Theory]
+    [InlineData("global::System.Int32")]
+    [InlineData("global::System.String")]
+    [InlineData("global::System.Guid")]
+    [InlineData("global::System.DateTime")]
+    [InlineData("global::System.Threading.CancellationToken")]
+    [InlineData("global::System.TimeSpan")]
+    [InlineData("global::System.Boolean")]
+    [InlineData("global::System.Decimal")]
+    public void BuildV2CapturePlanFromGraph_UnsafeInitializer_AllCatalogTypes_DowngradeToPlaceholder(string typeName)
+    {
+        var graph = new LocalSymbolGraphEntry[]
+        {
+            new()
+            {
+                Name = "value",
+                TypeName = typeName,
+                Kind = "local",
+                InitializerExpression = "ComputeValue(input)",   // method call = unsafe
+                DeclarationOrder = 1,
+                Dependencies = [],
+                ReplayPolicy = LocalSymbolReplayPolicies.ReplayInitializer,
+            },
+        };
+
+        var capturePlan = LspSyntaxHelper.BuildV2CapturePlanFromGraph(
+            "dbContext.Orders.ToListAsync(value)",
+            graph);
+
+        var entry = Assert.Single(capturePlan.Entries);
+        Assert.Equal(LocalSymbolReplayPolicies.UsePlaceholder, entry.CapturePolicy);
+        Assert.Null(entry.InitializerExpression);
+        // No diagnostic - downgrade is silent
+        Assert.Empty(capturePlan.Diagnostics);
+    }
+
     private static V2CapturePlanSnapshot BuildCapturePlanAtMarker(string source, string marker)
     {
         var (line, character) = FindPosition(source, marker);

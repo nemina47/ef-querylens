@@ -163,13 +163,33 @@ public static partial class LspSyntaxHelper
 
             if (ContainsUnsafeReplayInitializerSyntax(entry.InitializerExpression!))
             {
+                // If the type is catalog-resolvable, downgrade to UsePlaceholder rather than
+                // rejecting outright. This handles common cases like:
+                //   var page = Math.Max(request.Page, 1);  → int → synthesize 1
+                //   var pageSize = Math.Clamp(request.PageSize, 1, 200); → int → synthesize 1
+                // The initializer is unsafe to replay, but the type is fully known.
+                if (IsKnownPlaceholderType(entry.TypeName))
+                {
+                    return new V2CapturePlanEntry
+                    {
+                        Name = entry.Name,
+                        TypeName = entry.TypeName,
+                        Kind = entry.Kind,
+                        InitializerExpression = null,
+                        DeclarationOrder = entry.DeclarationOrder,
+                        Dependencies = [],
+                        Scope = entry.Scope,
+                        CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+                    };
+                }
+
                 diagnostics.Add(new V2CaptureDiagnostic
                 {
                     Code = "QLV2_CAPTURE_UNSAFE_INITIALIZER",
                     Category = "unsafe-replay-initializer",
                     SymbolName = entry.Name,
                     Reason = "non-deterministic-or-executable-syntax",
-                    Message = $"Capture '{entry.Name}' uses initializer syntax that is not allowed for deterministic replay.",
+                    Message = $"Capture '{entry.Name}' uses initializer syntax that is not allowed for deterministic replay and has no known placeholder type.",
                 });
 
                 return BuildRejectedEntry(
@@ -183,6 +203,23 @@ public static partial class LspSyntaxHelper
                 .FirstOrDefault(IsReplayUnsafeDependency);
             if (unsafeDependency is not null)
             {
+                // Same downgrade: if the type is catalog-known, synthesize a placeholder rather
+                // than propagating the unsafe-dependency rejection.
+                if (IsKnownPlaceholderType(entry.TypeName))
+                {
+                    return new V2CapturePlanEntry
+                    {
+                        Name = entry.Name,
+                        TypeName = entry.TypeName,
+                        Kind = entry.Kind,
+                        InitializerExpression = null,
+                        DeclarationOrder = entry.DeclarationOrder,
+                        Dependencies = [],
+                        Scope = entry.Scope,
+                        CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+                    };
+                }
+
                 diagnostics.Add(new V2CaptureDiagnostic
                 {
                     Code = "QLV2_CAPTURE_UNSAFE_DEPENDENCY",
@@ -275,5 +312,51 @@ public static partial class LspSyntaxHelper
         {
             return true;
         }
+    }
+
+    /// <summary>
+    /// Returns true if the type name maps to a known entry in the placeholder synthesis catalog.
+    /// Used to downgrade ReplayInitializer entries with unsafe initializers/dependencies to
+    /// UsePlaceholder when the type can be deterministically synthesized.
+    /// </summary>
+    private static bool IsKnownPlaceholderType(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+            return false;
+
+        var normalized = typeName.Replace("global::", string.Empty, StringComparison.Ordinal).Trim();
+
+        // Strip nullable suffix for catalog lookup
+        var core = normalized.EndsWith("?", StringComparison.Ordinal) ? normalized[..^1] : normalized;
+
+        return core is
+            // Strings
+            "string" or "String" or "System.String" or
+            // Booleans
+            "bool" or "Boolean" or "System.Boolean" or
+            // Integer primitives
+            "byte" or "Byte" or "System.Byte" or
+            "sbyte" or "SByte" or "System.SByte" or
+            "short" or "Int16" or "System.Int16" or
+            "ushort" or "UInt16" or "System.UInt16" or
+            "int" or "Int32" or "System.Int32" or
+            "uint" or "UInt32" or "System.UInt32" or
+            "long" or "Int64" or "System.Int64" or
+            "ulong" or "UInt64" or "System.UInt64" or
+            "nint" or "IntPtr" or "System.IntPtr" or
+            "nuint" or "UIntPtr" or "System.UIntPtr" or
+            // Floating-point
+            "float" or "Single" or "System.Single" or
+            "double" or "Double" or "System.Double" or
+            "decimal" or "Decimal" or "System.Decimal" or
+            // Char
+            "char" or "Char" or "System.Char" or
+            // Well-known structs
+            "Guid" or "System.Guid" or
+            "DateTime" or "System.DateTime" or
+            "DateOnly" or "System.DateOnly" or
+            "TimeOnly" or "System.TimeOnly" or
+            "TimeSpan" or "System.TimeSpan" or
+            "CancellationToken" or "System.Threading.CancellationToken";
     }
 }
