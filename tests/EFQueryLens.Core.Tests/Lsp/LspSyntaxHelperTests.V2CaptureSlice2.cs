@@ -253,6 +253,108 @@ public partial class LspSyntaxHelperTests
         Assert.Empty(capturePlan.Diagnostics);
     }
 
+    [Fact]
+    public void BuildV2CapturePlanFromGraph_UnsafeInitializer_UnknownTypeWithIntDependency_InferredAsIntPlaceholder()
+    {
+        var graph = new LocalSymbolGraphEntry[]
+        {
+            new()
+            {
+                Name = "lookbackDays",
+                TypeName = "global::System.Int32",
+                Kind = "parameter",
+                InitializerExpression = null,
+                DeclarationOrder = 0,
+                Dependencies = [],
+                ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+            },
+            new()
+            {
+                Name = "safeLookbackDays",
+                TypeName = "?",
+                Kind = "local",
+                InitializerExpression = "Math.Clamp(lookbackDays, 1, 365)",
+                DeclarationOrder = 1,
+                Dependencies = ["lookbackDays"],
+                ReplayPolicy = LocalSymbolReplayPolicies.ReplayInitializer,
+            },
+        };
+
+        var capturePlan = LspSyntaxHelper.BuildV2CapturePlanFromGraph(
+            "dbContext.Orders.Where(o => o.Id > safeLookbackDays).ToListAsync(ct)",
+            graph);
+
+        var safeLookbackDays = Assert.Single(capturePlan.Entries, e => string.Equals(e.Name, "safeLookbackDays", StringComparison.Ordinal));
+        Assert.Equal(LocalSymbolReplayPolicies.UsePlaceholder, safeLookbackDays.CapturePolicy);
+        Assert.Equal("int", safeLookbackDays.TypeName);
+        Assert.Null(safeLookbackDays.InitializerExpression);
+        Assert.Empty(safeLookbackDays.Dependencies);
+        Assert.Empty(capturePlan.Diagnostics);
+    }
+
+    [Fact]
+    public void BuildV2CapturePlanFromGraph_UnknownTypeDateComputation_InferredAsDateTimePlaceholder()
+    {
+        var graph = new LocalSymbolGraphEntry[]
+        {
+            new()
+            {
+                Name = "utcNow",
+                TypeName = "global::System.DateTime",
+                Kind = "parameter",
+                InitializerExpression = null,
+                DeclarationOrder = 0,
+                Dependencies = [],
+                ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+            },
+            new()
+            {
+                Name = "lookbackDays",
+                TypeName = "global::System.Int32",
+                Kind = "parameter",
+                InitializerExpression = null,
+                DeclarationOrder = 1,
+                Dependencies = [],
+                ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+            },
+            new()
+            {
+                Name = "safeLookbackDays",
+                TypeName = "?",
+                Kind = "local",
+                InitializerExpression = "Math.Clamp(lookbackDays, 1, 365)",
+                DeclarationOrder = 2,
+                Dependencies = ["lookbackDays"],
+                ReplayPolicy = LocalSymbolReplayPolicies.ReplayInitializer,
+            },
+            new()
+            {
+                Name = "fromUtc",
+                TypeName = "?",
+                Kind = "local",
+                InitializerExpression = "utcNow.Date.AddDays(-safeLookbackDays)",
+                DeclarationOrder = 3,
+                Dependencies = ["safeLookbackDays", "utcNow"],
+                ReplayPolicy = LocalSymbolReplayPolicies.ReplayInitializer,
+            },
+        };
+
+        var capturePlan = LspSyntaxHelper.BuildV2CapturePlanFromGraph(
+            "dbContext.Orders.Where(o => o.CreatedUtc >= fromUtc)",
+            graph);
+
+        var safeLookbackDays = Assert.Single(capturePlan.Entries, e => string.Equals(e.Name, "safeLookbackDays", StringComparison.Ordinal));
+        Assert.Equal(LocalSymbolReplayPolicies.UsePlaceholder, safeLookbackDays.CapturePolicy);
+        Assert.Equal("int", safeLookbackDays.TypeName);
+
+        var fromUtc = Assert.Single(capturePlan.Entries, e => string.Equals(e.Name, "fromUtc", StringComparison.Ordinal));
+        Assert.Equal(LocalSymbolReplayPolicies.UsePlaceholder, fromUtc.CapturePolicy);
+        Assert.Equal("DateTime", fromUtc.TypeName);
+        Assert.Null(fromUtc.InitializerExpression);
+        Assert.Empty(fromUtc.Dependencies);
+        Assert.Empty(capturePlan.Diagnostics);
+    }
+
     private static V2CapturePlanSnapshot BuildCapturePlanAtMarker(string source, string marker)
     {
         var (line, character) = FindPosition(source, marker);

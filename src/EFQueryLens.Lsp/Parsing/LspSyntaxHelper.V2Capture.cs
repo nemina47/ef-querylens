@@ -167,13 +167,14 @@ public static partial class LspSyntaxHelper
                 // rejecting outright. This handles common cases like:
                 //   var page = Math.Max(request.Page, 1);  → int → synthesize 1
                 //   var pageSize = Math.Clamp(request.PageSize, 1, 200); → int → synthesize 1
-                // The initializer is unsafe to replay, but the type is fully known.
-                if (IsKnownPlaceholderType(entry.TypeName))
+                // The initializer is unsafe to replay, but a known or dependency-inferred type
+                // can still be synthesized deterministically.
+                if (TryGetPlaceholderTypeForEntry(entry, byName, out var placeholderType))
                 {
                     return new V2CapturePlanEntry
                     {
                         Name = entry.Name,
-                        TypeName = entry.TypeName,
+                        TypeName = placeholderType,
                         Kind = entry.Kind,
                         InitializerExpression = null,
                         DeclarationOrder = entry.DeclarationOrder,
@@ -205,12 +206,12 @@ public static partial class LspSyntaxHelper
             {
                 // Same downgrade: if the type is catalog-known, synthesize a placeholder rather
                 // than propagating the unsafe-dependency rejection.
-                if (IsKnownPlaceholderType(entry.TypeName))
+                if (TryGetPlaceholderTypeForEntry(entry, byName, out var placeholderType))
                 {
                     return new V2CapturePlanEntry
                     {
                         Name = entry.Name,
-                        TypeName = entry.TypeName,
+                        TypeName = placeholderType,
                         Kind = entry.Kind,
                         InitializerExpression = null,
                         DeclarationOrder = entry.DeclarationOrder,
@@ -250,6 +251,25 @@ public static partial class LspSyntaxHelper
 
         if (string.IsNullOrWhiteSpace(entry.TypeName) || string.Equals(entry.TypeName, "?", StringComparison.Ordinal))
         {
+            // Try dependency-based inference before rejecting unknown type. This covers
+            // common inferred locals like:
+            //   var safeLookbackDays = Math.Clamp(lookbackDays, 1, 365); // lookbackDays:int
+            //   var fromUtc = utcNow.Date.AddDays(-safeLookbackDays);    // utcNow:DateTime
+            if (TryInferPlaceholderTypeFromDependencies(entry, byName, out var inferredType))
+            {
+                return new V2CapturePlanEntry
+                {
+                    Name = entry.Name,
+                    TypeName = inferredType,
+                    Kind = entry.Kind,
+                    InitializerExpression = null,
+                    DeclarationOrder = entry.DeclarationOrder,
+                    Dependencies = [],
+                    Scope = entry.Scope,
+                    CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+                };
+            }
+
             diagnostics.Add(new V2CaptureDiagnostic
             {
                 Code = "QLV2_CAPTURE_UNKNOWN_TYPE",
@@ -358,5 +378,121 @@ public static partial class LspSyntaxHelper
             "TimeOnly" or "System.TimeOnly" or
             "TimeSpan" or "System.TimeSpan" or
             "CancellationToken" or "System.Threading.CancellationToken";
+    }
+
+    private static bool TryGetPlaceholderTypeForEntry(
+        LocalSymbolGraphEntry entry,
+        IReadOnlyDictionary<string, LocalSymbolGraphEntry> byName,
+        out string typeName)
+    {
+        typeName = entry.TypeName;
+        if (IsKnownPlaceholderType(typeName))
+            return true;
+
+        if (TryInferPlaceholderTypeFromDependencies(entry, byName, out var inferredType)
+            && IsKnownPlaceholderType(inferredType))
+        {
+            typeName = inferredType;
+            return true;
+        }
+
+        typeName = string.Empty;
+        return false;
+    }
+
+    private static bool TryInferPlaceholderTypeFromDependencies(
+        LocalSymbolGraphEntry entry,
+        IReadOnlyDictionary<string, LocalSymbolGraphEntry> byName,
+        out string inferredType)
+    {
+        inferredType = string.Empty;
+
+        if (entry.Dependencies is null || entry.Dependencies.Count == 0)
+            return false;
+
+        var depTypes = entry.Dependencies
+            .Where(byName.ContainsKey)
+            .Select(dep => NormalizeTypeName(byName[dep].TypeName))
+            .Where(t => !string.IsNullOrWhiteSpace(t) && !string.Equals(t, "?", StringComparison.Ordinal))
+            .Select(t => t.EndsWith("?", StringComparison.Ordinal) ? t[..^1] : t)
+            .ToArray();
+
+        if (depTypes.Length == 0)
+            return false;
+
+        // Date/time precedence for expressions like utcNow.Date.AddDays(-x)
+        if (depTypes.Any(static t => t is "DateTime" or "System.DateTime"))
+        {
+            inferredType = "DateTime";
+            return true;
+        }
+
+        if (depTypes.Any(static t => t is "DateOnly" or "System.DateOnly"))
+        {
+            inferredType = "DateOnly";
+            return true;
+        }
+
+        if (depTypes.Any(static t => t is "TimeOnly" or "System.TimeOnly"))
+        {
+            inferredType = "TimeOnly";
+            return true;
+        }
+
+        if (depTypes.Any(static t => t is "CancellationToken" or "System.Threading.CancellationToken"))
+        {
+            inferredType = "CancellationToken";
+            return true;
+        }
+
+        // If all dependencies are numeric, prefer int as deterministic catalog default.
+        var numericCount = depTypes.Count(IsNumericTypeName);
+        if (numericCount == depTypes.Length)
+        {
+            inferredType = "int";
+            return true;
+        }
+
+        // Single known dependency type: propagate.
+        if (depTypes.Length == 1)
+        {
+            inferredType = depTypes[0];
+            return true;
+        }
+
+        // Homogeneous dependencies: propagate the common type.
+        if (depTypes.All(t => string.Equals(t, depTypes[0], StringComparison.Ordinal)))
+        {
+            inferredType = depTypes[0];
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string NormalizeTypeName(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+            return string.Empty;
+
+        return typeName.Replace("global::", string.Empty, StringComparison.Ordinal).Trim();
+    }
+
+    private static bool IsNumericTypeName(string typeName)
+    {
+        return typeName is
+            "byte" or "Byte" or "System.Byte" or
+            "sbyte" or "SByte" or "System.SByte" or
+            "short" or "Int16" or "System.Int16" or
+            "ushort" or "UInt16" or "System.UInt16" or
+            "int" or "Int32" or "System.Int32" or
+            "uint" or "UInt32" or "System.UInt32" or
+            "long" or "Int64" or "System.Int64" or
+            "ulong" or "UInt64" or "System.UInt64" or
+            "nint" or "IntPtr" or "System.IntPtr" or
+            "nuint" or "UIntPtr" or "System.UIntPtr" or
+            "float" or "Single" or "System.Single" or
+            "double" or "Double" or "System.Double" or
+            "decimal" or "Decimal" or "System.Decimal";
     }
 }
