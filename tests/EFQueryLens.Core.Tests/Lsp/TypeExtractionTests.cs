@@ -797,6 +797,84 @@ public class TypeExtractionTests
     }
 
     [Fact]
+    public void ExtractFreeVariableSymbolGraph_RewritesReceiverPropertyCapture_ForFieldDependency()
+    {
+        var source = """
+            using System;
+            interface IClock { DateTime Now { get; } }
+            class AppEntity { public DateTime CreatedAt { get; set; } }
+            class Demo
+            {
+                private readonly IClock dateTime;
+
+                void Run(CancellationToken ct)
+                {
+                    _ = dbContext.Applications.CountAsync(
+                        w => w.CreatedAt.Date == dateTime.Now.Date,
+                        ct);
+                }
+            }
+            """;
+
+        var expression = "dbContext.Applications.CountAsync(w => w.CreatedAt.Date == dateTime.Now.Date, ct)";
+        var (line, character) = FindPosition(source, "dateTime.Now.Date");
+        var graph = LspSyntaxHelper.ExtractFreeVariableSymbolGraph(
+            expression,
+            "dbContext",
+            source,
+            line,
+            character,
+            targetAssemblyPath: null,
+            out var rewrittenExpression);
+
+        Assert.DoesNotContain(graph, g => g.Name == "dateTime");
+        Assert.Contains(graph, g => g.Name == "ct");
+
+        var memberCapture = Assert.Single(graph, g => g.Kind == "member-capture");
+        Assert.StartsWith("__qlm_dateTime_Now", memberCapture.Name, StringComparison.Ordinal);
+        Assert.Equal("global::System.DateTime", memberCapture.TypeName);
+        Assert.DoesNotContain("dateTime.Now", rewrittenExpression, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExtractFreeVariableSymbolGraph_RewritesReceiverPropertyCapture_ForPrimaryConstructorDependency()
+    {
+        var source = """
+            using System;
+            interface IClock { DateTime Now { get; } }
+            class AppEntity { public DateTime CreatedAt { get; set; } }
+            class Demo(IClock dateTime)
+            {
+                void Run(CancellationToken ct)
+                {
+                    _ = dbContext.Applications.CountAsync(
+                        w => w.CreatedAt.Date == dateTime.Now.Date,
+                        ct);
+                }
+            }
+            """;
+
+        var expression = "dbContext.Applications.CountAsync(w => w.CreatedAt.Date == dateTime.Now.Date, ct)";
+        var (line, character) = FindPosition(source, "dateTime.Now.Date");
+        var graph = LspSyntaxHelper.ExtractFreeVariableSymbolGraph(
+            expression,
+            "dbContext",
+            source,
+            line,
+            character,
+            targetAssemblyPath: null,
+            out var rewrittenExpression);
+
+        Assert.DoesNotContain(graph, g => g.Name == "dateTime");
+        Assert.Contains(graph, g => g.Name == "ct");
+
+        var memberCapture = Assert.Single(graph, g => g.Kind == "member-capture");
+        Assert.StartsWith("__qlm_dateTime_Now", memberCapture.Name, StringComparison.Ordinal);
+        Assert.Equal("global::System.DateTime", memberCapture.TypeName);
+        Assert.DoesNotContain("dateTime.Now", rewrittenExpression, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ExtractFreeVariableSymbolGraph_DoesNotRewriteInvocationTargetMemberAccess()
     {
         var source = """

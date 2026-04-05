@@ -70,6 +70,13 @@ internal static partial class EvalSourceBuilder
             return $"var {entry.Name} = {hintPlaceholder};";
         }
 
+        // Expression placeholders should be synthesized even without hints (e.g. .Where(filter))
+        // so query operators never receive null expression arguments.
+        if (TryBuildSelectorExpressionPlaceholder(entry.TypeName, out var expressionPlaceholder))
+        {
+            return $"var {entry.Name} = {expressionPlaceholder};";
+        }
+
         if (TryBuildCollectionPlaceholder(entry.TypeName, out var collectionPlaceholder))
         {
             return $"var {entry.Name} = {collectionPlaceholder};";
@@ -135,6 +142,14 @@ internal static partial class EvalSourceBuilder
         {
             // Select * equivalent — project entity as object
             placeholder = $"({typeName})(e => (object)e)";
+            return true;
+        }
+
+        if (string.Equals(normalizedReturn, "bool", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedReturn, "System.Boolean", StringComparison.OrdinalIgnoreCase))
+        {
+            // For predicate expressions, prefer a tautology to avoid WHERE FALSE artifacts.
+            placeholder = $"({typeName})(e => true)";
             return true;
         }
 
@@ -271,6 +286,17 @@ internal static partial class EvalSourceBuilder
         {
             var (first, second) = BuildTwoSeedValues(enumerableElementType);
             placeholder = $"new {enumerableElementType}[] {{ {first}, {second} }}";
+            return true;
+        }
+
+        if (TryExtractGenericElementType(normalized, "IReadOnlyCollection", out var readonlyCollectionElementType)
+            || TryExtractGenericElementType(normalized, "System.Collections.Generic.IReadOnlyCollection", out readonlyCollectionElementType)
+            || TryExtractGenericElementType(normalized, "IReadOnlyList", out readonlyCollectionElementType)
+            || TryExtractGenericElementType(normalized, "System.Collections.Generic.IReadOnlyList", out readonlyCollectionElementType))
+        {
+            var (first, second) = BuildTwoSeedValues(readonlyCollectionElementType);
+            placeholder =
+                $"new global::System.Collections.Generic.List<{readonlyCollectionElementType}> {{ {first}, {second} }}";
             return true;
         }
 
@@ -476,8 +502,21 @@ internal static partial class EvalSourceBuilder
                         "global::System.TimeOnly.FromDateTime(global::System.DateTime.UtcNow)",
                         "global::System.TimeOnly.FromDateTime(global::System.DateTime.UtcNow.AddMinutes(1))"
                     ),
-            _ => ($"default({elementTypeName})", $"default({elementTypeName})"),
+            _ => BuildEnumAwareFallbackSeedValues(elementTypeName),
         };
+    }
+
+    private static (string First, string Second) BuildEnumAwareFallbackSeedValues(string typeName)
+    {
+        // Prefer concrete enum members when possible to avoid translating Contains(default(enum))
+        // into provider-specific degenerate SQL shapes. For non-enum types, this safely falls
+        // back to default(T) at runtime.
+        var first =
+            $"(typeof({typeName}).IsEnum ? ({typeName})global::System.Enum.GetValues(typeof({typeName})).GetValue(0)! : default({typeName}))";
+        var second =
+            $"(typeof({typeName}).IsEnum ? ({typeName})global::System.Enum.GetValues(typeof({typeName})).GetValue(global::System.Enum.GetValues(typeof({typeName})).Length > 1 ? 1 : 0)! : default({typeName}))";
+
+        return (first, second);
     }
 
     private static bool TryExtractArrayElementType(string normalizedTypeName, out string elementTypeName)
@@ -516,7 +555,10 @@ internal static partial class EvalSourceBuilder
             return string.Empty;
         }
 
-        return typeName.Replace("global::", string.Empty, StringComparison.Ordinal).Trim();
+        return typeName
+            .Replace("global::", string.Empty, StringComparison.Ordinal)
+            .Replace('+', '.')
+            .Trim();
     }
 
     private static bool IsStringTypeName(string? typeName)

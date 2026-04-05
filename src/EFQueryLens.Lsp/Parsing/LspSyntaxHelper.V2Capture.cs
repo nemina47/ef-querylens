@@ -81,6 +81,27 @@ public static partial class LspSyntaxHelper
             entries.Add(planEntry);
         }
 
+        // If executable expression accesses '<symbol>.Value', the symbol should be synthesized as
+        // nullable to keep generated replay code compilable (e.g., Guid? x; x.Value).
+        var valueReceivers = GetValueMemberAccessReceivers(executableExpression);
+        if (valueReceivers.Count > 0)
+        {
+            for (int i = 0; i < entries.Count; i++)
+            {
+                var e = entries[i];
+                if (string.Equals(e.CapturePolicy, LocalSymbolReplayPolicies.Reject, StringComparison.Ordinal))
+                    continue;
+
+                if (!valueReceivers.Contains(e.Name))
+                    continue;
+
+                if (TryPromoteToNullableType(e.TypeName, out var nullableTypeName))
+                {
+                    entries[i] = e with { TypeName = nullableTypeName };
+                }
+            }
+        }
+
         // Apply operator-context hints to UsePlaceholder entries so EvalSourceBuilder
         // can pick semantically accurate defaults (e.g., CancellationToken.None, typed lambdas).
         var capturedNames = entries
@@ -589,5 +610,83 @@ public static partial class LspSyntaxHelper
             "float" or "Single" or "System.Single" or
             "double" or "Double" or "System.Double" or
             "decimal" or "Decimal" or "System.Decimal";
+    }
+
+    private static HashSet<string> GetValueMemberAccessReceivers(string executableExpression)
+    {
+        var receivers = new HashSet<string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(executableExpression))
+            return receivers;
+
+        try
+        {
+            var root = SyntaxFactory.ParseExpression(executableExpression);
+            foreach (var access in root.DescendantNodesAndSelf().OfType<MemberAccessExpressionSyntax>())
+            {
+                if (!string.Equals(access.Name.Identifier.ValueText, "Value", StringComparison.Ordinal))
+                    continue;
+
+                if (TryExtractIdentifierReceiver(access.Expression, out var receiver))
+                {
+                    receivers.Add(receiver);
+                }
+            }
+        }
+        catch
+        {
+            // Best-effort only; do not block capture plan on parse issues.
+        }
+
+        return receivers;
+    }
+
+    private static bool TryExtractIdentifierReceiver(ExpressionSyntax expression, out string receiver)
+    {
+        receiver = string.Empty;
+
+        switch (expression)
+        {
+            case IdentifierNameSyntax id:
+                receiver = id.Identifier.ValueText;
+                return !string.IsNullOrWhiteSpace(receiver);
+
+            case ParenthesizedExpressionSyntax p:
+                return TryExtractIdentifierReceiver(p.Expression, out receiver);
+
+            case PostfixUnaryExpressionSyntax { OperatorToken.RawKind: (int)SyntaxKind.ExclamationToken } postfix:
+                return TryExtractIdentifierReceiver(postfix.Operand, out receiver);
+
+            default:
+                return false;
+        }
+    }
+
+    private static bool TryPromoteToNullableType(string? typeName, out string nullableTypeName)
+    {
+        nullableTypeName = string.Empty;
+        if (string.IsNullOrWhiteSpace(typeName))
+            return false;
+
+        var trimmed = typeName.Trim();
+        if (trimmed.EndsWith("?", StringComparison.Ordinal))
+            return false;
+
+        // Generic/array types are not nullable in this form.
+        if (trimmed.Contains('<', StringComparison.Ordinal)
+            || trimmed.Contains('[', StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var normalized = NormalizeTypeName(trimmed);
+        if (normalized is "string" or "String" or "System.String"
+            or "object" or "Object" or "System.Object"
+            or "dynamic")
+        {
+            return false;
+        }
+
+        nullableTypeName = trimmed + "?";
+        return true;
     }
 }

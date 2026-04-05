@@ -61,7 +61,8 @@ internal abstract class QueryLensFakeServices
     /// </summary>
     internal sealed class Configuration : IConfiguration, IConfigurationRoot
     {
-        private readonly IConfigurationSection _nullSection = new ConfigurationSection();
+        private const string DummyConnectionString =
+            "Server=localhost;Database=__querylens__;Encrypt=false;TrustServerCertificate=true;";
 
         public string? this[string key]
         {
@@ -70,7 +71,7 @@ internal abstract class QueryLensFakeServices
                 // Return dummy connection strings for any connection string lookup,
                 // including the canonical Name=_querylens used by generated factories.
                 if (key?.StartsWith("ConnectionStrings:", StringComparison.OrdinalIgnoreCase) == true)
-                    return "Server=localhost;Database=__querylens__;Encrypt=false;TrustServerCertificate=true;";
+                    return DummyConnectionString;
 
                 // Return null for other keys so EF Core uses its defaults
                 return null;
@@ -81,7 +82,7 @@ internal abstract class QueryLensFakeServices
         public IEnumerable<IConfigurationProvider> Providers => [];
 
         public IConfigurationSection GetSection(string key) =>
-            _nullSection;
+            new ConfigurationSection(this, key, key);
 
         public IEnumerable<IConfigurationSection> GetChildren() =>
             [];
@@ -97,24 +98,47 @@ internal abstract class QueryLensFakeServices
     /// </summary>
     internal sealed class ConfigurationSection : IConfigurationSection
     {
-        public string Key => string.Empty;
-        public string Path => string.Empty;
-        public string? Value { get; set; }
+        private readonly Configuration _root;
+
+        public ConfigurationSection(Configuration root, string key, string path)
+        {
+            _root = root;
+            Key = key;
+            Path = path;
+        }
+
+        public string Key { get; }
+        public string Path { get; }
+        public string? Value
+        {
+            get => _root[Path];
+            set => _root[Path] = value;
+        }
 
         public string? this[string key]
         {
-            get => null;
+            get => _root[$"{Path}:{key}"];
             set { }
         }
 
-        public IEnumerable<IConfigurationSection> GetChildren() =>
-            [];
+        public IEnumerable<IConfigurationSection> GetChildren()
+        {
+            if (!string.Equals(Path, "ConnectionStrings", StringComparison.OrdinalIgnoreCase))
+                return [];
+
+            // Named connection resolution is intentionally name-agnostic and handled by indexer
+            // lookup (ConnectionStrings:<any-name>) so we do not hardcode child names here.
+            return [];
+        }
 
         public IChangeToken GetReloadToken() =>
             new ChangeToken();
 
         public IConfigurationSection GetSection(string key) =>
-            this;
+            new ConfigurationSection(
+                _root,
+                key,
+                string.IsNullOrWhiteSpace(Path) ? key : $"{Path}:{key}");
     }
 
     /// <summary>

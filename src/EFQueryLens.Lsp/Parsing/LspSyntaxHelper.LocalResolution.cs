@@ -163,8 +163,9 @@ public static partial class LspSyntaxHelper
                             && queryFlowBaseStatement is not null
                             && IsLikelyQueryableExpression(queryFlowExpression))
                         {
+                            var replacementExpression = PrepareInlinedRootExpression(queryFlowExpression);
                             var replacedQuery = queryExpression.WithFromClause(
-                                queryExpression.FromClause.WithExpression(queryFlowExpression.WithoutTrivia()));
+                                queryExpression.FromClause.WithExpression(replacementExpression));
                             currentExpression = currentExpression.ReplaceNode(leftMostExpression, replacedQuery.WithoutTrivia());
                             currentAnchorStatement = queryFlowBaseStatement;
                             continue;
@@ -178,8 +179,9 @@ public static partial class LspSyntaxHelper
                             && resolvedQueryAtStatement is not null
                             && IsLikelyQueryableExpression(resolvedQueryExpression))
                         {
+                            var replacementExpression = PrepareInlinedRootExpression(resolvedQueryExpression);
                             var replacedQuery = queryExpression.WithFromClause(
-                                queryExpression.FromClause.WithExpression(resolvedQueryExpression.WithoutTrivia()));
+                                queryExpression.FromClause.WithExpression(replacementExpression));
                             currentExpression = currentExpression.ReplaceNode(leftMostExpression, replacedQuery.WithoutTrivia());
                             currentAnchorStatement = resolvedQueryAtStatement;
                             continue;
@@ -198,7 +200,8 @@ public static partial class LspSyntaxHelper
                     out var flowBaseStatement)
                 && flowBaseStatement is not null)
             {
-                currentExpression = currentExpression.ReplaceNode(leftMostExpression, flowExpression.WithoutTrivia());
+                var replacementExpression = PrepareInlinedRootExpression(flowExpression);
+                currentExpression = currentExpression.ReplaceNode(leftMostExpression, replacementExpression);
                 currentAnchorStatement = flowBaseStatement;
                 continue;
             }
@@ -213,7 +216,8 @@ public static partial class LspSyntaxHelper
                 break;
             }
 
-            currentExpression = currentExpression.ReplaceNode(leftMostExpression, resolvedExpression.WithoutTrivia());
+            var replacement = PrepareInlinedRootExpression(resolvedExpression);
+            currentExpression = currentExpression.ReplaceNode(leftMostExpression, replacement);
             currentAnchorStatement = resolvedAtStatement;
         }
 
@@ -222,6 +226,16 @@ public static partial class LspSyntaxHelper
         // left-most declaration statement.
         currentExpression = InlineSetOperationIdentifierArguments(currentExpression, rootAnchorStatement);
         return currentExpression;
+    }
+
+    private static ExpressionSyntax PrepareInlinedRootExpression(ExpressionSyntax expression)
+    {
+        var replacement = expression.WithoutTrivia();
+        // Preserve semantics when an awaited DbContext factory result is used as
+        // the receiver of a member-access chain: (await factory.Create...).DbSet.
+        return replacement is AwaitExpressionSyntax
+            ? SyntaxFactory.ParenthesizedExpression(replacement)
+            : replacement;
     }
 
     private static ExpressionSyntax InlineSetOperationIdentifierArguments(

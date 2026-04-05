@@ -111,6 +111,17 @@ public partial class LspSyntaxHelperTests
         Assert.Contains(".Contains(m.ProductOwnerId)", result, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void PreNormalizeExtractedExpression_CollectionExpressionSpreadReceiver_RewritesToSourceExpression()
+    {
+        var input = "db.ProductModels.Where(m => [.. deviceIds].Contains(m.ProductId)).Select(c => c.ProductModelId).ToListAsync(ct)";
+        var result = LspSyntaxHelper.PreNormalizeExtractedExpression(input);
+
+        Assert.DoesNotContain("[.. deviceIds].Contains", result, StringComparison.Ordinal);
+        Assert.Contains("deviceIds.Contains(m.ProductId)", result, StringComparison.Ordinal);
+        Assert.Contains("Select", result, StringComparison.Ordinal);
+    }
+
     // ── PreNormalization: extraction pipeline integration ────────────────────
 
     [Fact]

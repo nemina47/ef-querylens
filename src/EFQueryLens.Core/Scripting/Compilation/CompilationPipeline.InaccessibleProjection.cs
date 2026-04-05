@@ -91,6 +91,36 @@ internal sealed partial class CompilationPipeline
             ObjectCreationExpressionSyntax objectCreation,
             IReadOnlyList<string> expectedNames)
         {
+            if (objectCreation.Initializer is not null)
+            {
+                var membersFromInitializer = objectCreation.Initializer.Expressions
+                    .OfType<AssignmentExpressionSyntax>()
+                    .Select(a =>
+                    {
+                        var memberName = a.Left switch
+                        {
+                            IdentifierNameSyntax id => id.Identifier.ValueText,
+                            MemberAccessExpressionSyntax m => m.Name.Identifier.ValueText,
+                            _ => null,
+                        };
+
+                        return string.IsNullOrWhiteSpace(memberName)
+                            ? null
+                            : SyntaxFactory.AnonymousObjectMemberDeclarator(
+                                SyntaxFactory.NameEquals(memberName),
+                                a.Right.WithoutTrivia());
+                    })
+                    .Where(static m => m is not null)
+                    .Cast<AnonymousObjectMemberDeclaratorSyntax>()
+                    .ToList();
+
+                if (membersFromInitializer.Count > 0)
+                {
+                    return SyntaxFactory.AnonymousObjectCreationExpression(
+                        SyntaxFactory.SeparatedList(membersFromInitializer));
+                }
+            }
+
             var args = objectCreation.ArgumentList?.Arguments ?? [];
             var members = new List<AnonymousObjectMemberDeclaratorSyntax>();
 
@@ -112,7 +142,9 @@ internal sealed partial class CompilationPipeline
                 members.Add(
                     SyntaxFactory.AnonymousObjectMemberDeclarator(
                         SyntaxFactory.NameEquals("__ql0"),
-                        SyntaxFactory.LiteralExpression(SyntaxKind.NullLiteralExpression)));
+                        SyntaxFactory.CastExpression(
+                            SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.ObjectKeyword)),
+                            SyntaxFactory.LiteralExpression(SyntaxKind.NullLiteralExpression))));
             }
 
             return SyntaxFactory.AnonymousObjectCreationExpression(

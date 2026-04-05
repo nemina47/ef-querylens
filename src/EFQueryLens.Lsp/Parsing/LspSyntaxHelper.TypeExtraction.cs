@@ -1284,6 +1284,12 @@ public static partial class LspSyntaxHelper
                     case IParameterSymbol parameter when parameter.Type is not null && parameter.Type.TypeKind != TypeKind.Error:
                         receiverType = parameter.Type;
                         return true;
+                    case IFieldSymbol field when field.Type is not null && field.Type.TypeKind != TypeKind.Error:
+                        receiverType = field.Type;
+                        return true;
+                    case IPropertySymbol property when property.Type is not null && property.Type.TypeKind != TypeKind.Error:
+                        receiverType = property.Type;
+                        return true;
                 }
             }
         }
@@ -1582,6 +1588,9 @@ public static partial class LspSyntaxHelper
         if (context is null)
             return false;
 
+        if (TryCreateEntryFromAccessibleSymbolLookup(name, context.SemanticModel, context.AnchorStatement, context.ScopeId, out entry))
+            return true;
+
         var visited = context.AnchorStatement;
         for (SyntaxNode? scope = context.AnchorStatement.Parent; scope is not null; scope = scope.Parent)
         {
@@ -1786,6 +1795,10 @@ public static partial class LspSyntaxHelper
                 .FirstOrDefault(p => string.Equals(p.Identifier.ValueText, name, StringComparison.Ordinal)),
             ConstructorDeclarationSyntax ctor => ctor.ParameterList.Parameters
                 .FirstOrDefault(p => string.Equals(p.Identifier.ValueText, name, StringComparison.Ordinal)),
+            ClassDeclarationSyntax classDecl => classDecl.ParameterList?.Parameters
+                .FirstOrDefault(p => string.Equals(p.Identifier.ValueText, name, StringComparison.Ordinal)),
+            StructDeclarationSyntax structDecl => structDecl.ParameterList?.Parameters
+                .FirstOrDefault(p => string.Equals(p.Identifier.ValueText, name, StringComparison.Ordinal)),
             LocalFunctionStatementSyntax localFunction => localFunction.ParameterList.Parameters
                 .FirstOrDefault(p => string.Equals(p.Identifier.ValueText, name, StringComparison.Ordinal)),
             ParenthesizedLambdaExpressionSyntax lambda => lambda.ParameterList.Parameters
@@ -1828,6 +1841,55 @@ public static partial class LspSyntaxHelper
             ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
         };
         return true;
+    }
+
+    private static bool TryCreateEntryFromAccessibleSymbolLookup(
+        string name,
+        SemanticModel semanticModel,
+        StatementSyntax anchorStatement,
+        string? scopeId,
+        out LocalSymbolGraphEntry entry)
+    {
+        entry = null!;
+
+        var lookupPositions = new[]
+        {
+            anchorStatement.SpanStart,
+            anchorStatement.Span.End,
+            anchorStatement.FullSpan.Start,
+            anchorStatement.FullSpan.End,
+        };
+
+        foreach (var position in lookupPositions.Distinct())
+        {
+            var symbol = semanticModel.LookupSymbols(position, name: name)
+                .FirstOrDefault(static s => s is IFieldSymbol or IPropertySymbol);
+            if (symbol is null)
+                continue;
+
+            var typeName = symbol switch
+            {
+                IFieldSymbol field => ToDeterministicTypeName(field.Type),
+                IPropertySymbol property => ToDeterministicTypeName(property.Type),
+                _ => null,
+            };
+
+            if (string.IsNullOrWhiteSpace(typeName))
+                continue;
+
+            entry = new LocalSymbolGraphEntry
+            {
+                Name = name,
+                TypeName = typeName!,
+                Kind = symbol is IFieldSymbol ? "field" : "property",
+                DeclarationOrder = symbol.Locations.FirstOrDefault()?.SourceSpan.Start ?? anchorStatement.SpanStart,
+                Scope = scopeId,
+                ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+            };
+            return true;
+        }
+
+        return false;
     }
 
     private static IReadOnlyList<string> ExtractExpressionDependencies(

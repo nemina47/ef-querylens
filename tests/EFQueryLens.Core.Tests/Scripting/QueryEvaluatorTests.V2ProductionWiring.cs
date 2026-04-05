@@ -287,4 +287,177 @@ public partial class QueryEvaluatorTests
             result.ErrorMessage,
             StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task EvaluateAsync_V2ReadOnlyCollectionPlaceholder_ContainsPredicate_TranslatesWithStableSqlShape()
+    {
+        const string expression = "db.Customers.Where(c => termsCollection.Contains(c.Name))";
+
+        var result = await _evaluator.EvaluateAsync(
+            _alcCtx,
+            new TranslationRequest
+            {
+                AssemblyPath = _alcCtx.AssemblyPath,
+                Expression = expression,
+                DbContextTypeName = DefaultMySqlDbContextType,
+                AdditionalImports = [],
+                UsingAliases = new Dictionary<string, string>(StringComparer.Ordinal),
+                UsingStaticTypes = [],
+                LocalSymbolGraph = [],
+                UseAsyncRunner = false,
+                V2ExtractionPlan = new V2QueryExtractionPlanSnapshot
+                {
+                    Expression = expression,
+                    ContextVariableName = "db",
+                    RootContextVariableName = "db",
+                    RootMemberName = "Customers",
+                    BoundaryKind = "Queryable",
+                    NeedsMaterialization = false,
+                },
+                V2CapturePlan = new V2CapturePlanSnapshot
+                {
+                    ExecutableExpression = expression,
+                    IsComplete = true,
+                    Entries =
+                    [
+                        new V2CapturePlanEntry
+                        {
+                            Name = "termsCollection",
+                            TypeName = "IReadOnlyCollection<string>",
+                            Kind = "parameter",
+                            CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+                            DeclarationOrder = 0,
+                        },
+                    ],
+                    Diagnostics = [],
+                },
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.Contains("IN", result.Sql!, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("0 = 1", result.Sql!, StringComparison.Ordinal);
+        Assert.DoesNotContain("WHERE FALSE", result.Sql!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_V2ReadOnlyEnumCollectionPlaceholder_ContainsPredicate_TranslatesWithStableSqlShape()
+    {
+        const string expression = "db.Orders.Where(o => statuses.Contains(o.Status))";
+
+        var result = await _evaluator.EvaluateAsync(
+            _alcCtx,
+            new TranslationRequest
+            {
+                AssemblyPath = _alcCtx.AssemblyPath,
+                Expression = expression,
+                DbContextTypeName = DefaultMySqlDbContextType,
+                AdditionalImports = [],
+                UsingAliases = new Dictionary<string, string>(StringComparer.Ordinal),
+                UsingStaticTypes = [],
+                LocalSymbolGraph = [],
+                UseAsyncRunner = false,
+                V2ExtractionPlan = new V2QueryExtractionPlanSnapshot
+                {
+                    Expression = expression,
+                    ContextVariableName = "db",
+                    RootContextVariableName = "db",
+                    RootMemberName = "Orders",
+                    BoundaryKind = "Queryable",
+                    NeedsMaterialization = false,
+                },
+                V2CapturePlan = new V2CapturePlanSnapshot
+                {
+                    ExecutableExpression = expression,
+                    IsComplete = true,
+                    Entries =
+                    [
+                        new V2CapturePlanEntry
+                        {
+                            Name = "statuses",
+                            TypeName = "IReadOnlyCollection<SampleMySqlApp.Domain.Enums.OrderStatus>",
+                            Kind = "parameter",
+                            CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+                            DeclarationOrder = 0,
+                        },
+                    ],
+                    Diagnostics = [],
+                },
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.Contains("IN", result.Sql!, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("0 = 1", result.Sql!, StringComparison.Ordinal);
+        Assert.DoesNotContain("WHERE FALSE", result.Sql!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_V2WhereAndSelectExpressionPlaceholders_DoNotProduceNullPredicate()
+    {
+        const string expression = "db.ApplicationChecklists.AsNoTracking().Where(filter).Select(select).ToListAsync(ct)";
+
+        var result = await _evaluator.EvaluateAsync(
+            _alcCtx,
+            new TranslationRequest
+            {
+                AssemblyPath = _alcCtx.AssemblyPath,
+                Expression = expression,
+                DbContextTypeName = DefaultMySqlDbContextType,
+                AdditionalImports = [],
+                UsingAliases = new Dictionary<string, string>(StringComparer.Ordinal),
+                UsingStaticTypes = [],
+                LocalSymbolGraph = [],
+                UseAsyncRunner = false,
+                V2ExtractionPlan = new V2QueryExtractionPlanSnapshot
+                {
+                    Expression = expression,
+                    ContextVariableName = "db",
+                    RootContextVariableName = "db",
+                    RootMemberName = "ApplicationChecklists",
+                    BoundaryKind = "Materialized",
+                    NeedsMaterialization = false,
+                },
+                V2CapturePlan = new V2CapturePlanSnapshot
+                {
+                    ExecutableExpression = expression,
+                    IsComplete = true,
+                    Entries =
+                    [
+                        new V2CapturePlanEntry
+                        {
+                            Name = "filter",
+                            TypeName = "global::System.Linq.Expressions.Expression<global::System.Func<global::SampleMySqlApp.Domain.Entities.ApplicationChecklist, bool>>",
+                            Kind = "parameter",
+                            CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+                            DeclarationOrder = 0,
+                        },
+                        new V2CapturePlanEntry
+                        {
+                            Name = "select",
+                            TypeName = "global::System.Linq.Expressions.Expression<global::System.Func<global::SampleMySqlApp.Domain.Entities.ApplicationChecklist, object>>",
+                            Kind = "parameter",
+                            CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+                            DeclarationOrder = 1,
+                        },
+                        new V2CapturePlanEntry
+                        {
+                            Name = "ct",
+                            TypeName = "System.Threading.CancellationToken",
+                            Kind = "parameter",
+                            CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+                            DeclarationOrder = 2,
+                        },
+                    ],
+                    Diagnostics = [],
+                },
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.NotNull(result.Sql);
+        Assert.DoesNotContain("Value cannot be null. (Parameter 'predicate')", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
 }

@@ -147,7 +147,16 @@ function copyDirectory(sourceDir, destinationDir) {
   fs.mkdirSync(path.dirname(destinationDir), { recursive: true });
 
   try {
-    removeDirectoryWithRetry(destinationDir);
+    const removed = removeDirectoryWithRetry(destinationDir);
+    if (!removed) {
+      console.warn(
+        `[EFQueryLens] Using lock-tolerant in-place copy for ${destinationDir}.`
+      );
+      const lockedFiles = copyDirectoryBestEffort(sourceDir, destinationDir);
+      failIfCriticalRuntimeFilesRemainLocked(lockedFiles);
+      return;
+    }
+
     fs.cpSync(sourceDir, destinationDir, { recursive: true, force: true });
     return;
   } catch (error) {
@@ -164,13 +173,13 @@ function copyDirectory(sourceDir, destinationDir) {
 
 function removeDirectoryWithRetry(directoryPath) {
   if (!fs.existsSync(directoryPath)) {
-    return;
+    return true;
   }
 
   // Phase 1: quick attempt before doing anything disruptive.
   try {
-    fs.rmSync(directoryPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-    return;
+    fs.rmSync(directoryPath, { recursive: true, force: true, maxRetries: 1, retryDelay: 50 });
+    return true;
   } catch (error) {
     if (!isFileLockError(error)) throw error;
   }
@@ -179,10 +188,14 @@ function removeDirectoryWithRetry(directoryPath) {
   killQueryLensProcesses(directoryPath);
 
   try {
-    fs.rmSync(directoryPath, { recursive: true, force: true, maxRetries: 30, retryDelay: 200 });
+    // Keep retries intentionally low on Windows — recursive retries on a large tree
+    // can appear hung when many files are locked by a live extension host.
+    fs.rmSync(directoryPath, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
+    return true;
   } catch (error) {
     if (!isFileLockError(error)) throw error;
-    throw error;
+
+    return false;
   }
 }
 
@@ -192,7 +205,7 @@ function copyDirectoryBestEffort(sourceDir, destinationDir) {
   copyDirectoryEntriesBestEffort(sourceDir, destinationDir, lockedFiles);
 
   if (lockedFiles.length === 0) {
-    return;
+    return lockedFiles;
   }
 
   const preview = lockedFiles.slice(0, 5);
@@ -205,6 +218,34 @@ function copyDirectoryBestEffort(sourceDir, destinationDir) {
       `[EFQueryLens] ${lockedFiles.length - preview.length} more locked files were retained in place.`
     );
   }
+
+  return lockedFiles;
+}
+
+function failIfCriticalRuntimeFilesRemainLocked(lockedFiles) {
+  if (!Array.isArray(lockedFiles) || lockedFiles.length === 0) {
+    return;
+  }
+
+  const criticalFileNames = new Set([
+    'EFQueryLens.Core.dll',
+    'EFQueryLens.Lsp.dll',
+    'EFQueryLens.Daemon.dll',
+  ]);
+
+  const blockedCritical = lockedFiles.filter(filePath =>
+    criticalFileNames.has(path.basename(filePath))
+  );
+
+  if (blockedCritical.length === 0) {
+    return;
+  }
+
+  const details = blockedCritical.map(p => `- ${p}`).join('\n');
+  throw new Error(
+    `[EFQueryLens] Critical runtime files are still locked after recovery. ` +
+    `Restart VS Code / EF QueryLens language server and rerun prepare-runtime.\n${details}`
+  );
 }
 
 function copyDirectoryEntriesBestEffort(sourceDir, destinationDir, lockedFiles) {
@@ -240,14 +281,26 @@ function killQueryLensProcesses(directoryPath) {
     // Kill any dotnet process whose command line contains EFQueryLens (covers LSP + daemon
     // running as framework-dependent: "dotnet EFQueryLens.Lsp.dll" / "dotnet EFQueryLens.Daemon.dll").
     // Also kills self-contained exe variants if present.
-    spawnSync(
+    const killResult = spawnSync(
       'powershell',
       [
-        '-NonInteractive', '-NoProfile', '-Command',
+        '-NonInteractive',
+        '-NoProfile',
+        '-Command',
         `Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like '*EFQueryLens*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
       ],
-      { stdio: 'ignore' }
+      {
+        stdio: 'ignore',
+        timeout: 15000,
+      }
     );
+
+    if (killResult.error) {
+      console.warn(
+        `[EFQueryLens] Process-kill probe timed out or failed (${killResult.error.code ?? 'unknown'}). Continuing with lock-tolerant copy.`
+      );
+    }
+
     return;
   }
 

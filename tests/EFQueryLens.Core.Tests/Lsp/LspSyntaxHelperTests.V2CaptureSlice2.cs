@@ -407,6 +407,31 @@ public partial class LspSyntaxHelperTests
         Assert.Empty(capturePlan.Diagnostics);
     }
 
+    [Fact]
+    public void BuildV2CapturePlanFromGraph_ValueMemberAccess_PromotesGuidPlaceholderToNullable()
+    {
+        var graph = new LocalSymbolGraphEntry[]
+        {
+            new()
+            {
+                Name = "applicationInputReplyDraftId",
+                TypeName = "Guid",
+                Kind = "parameter",
+                DeclarationOrder = 0,
+                ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+            },
+        };
+
+        var capturePlan = LspSyntaxHelper.BuildV2CapturePlanFromGraph(
+            "dbContext.ApplicationInputReplyDrafts.Where(w => w.ApplicationInputReplyDraftId == applicationInputReplyDraftId.Value)",
+            graph);
+
+        var id = Assert.Single(capturePlan.Entries, e => string.Equals(e.Name, "applicationInputReplyDraftId", StringComparison.Ordinal));
+        Assert.Equal(LocalSymbolReplayPolicies.UsePlaceholder, id.CapturePolicy);
+        Assert.Equal("Guid?", id.TypeName);
+        Assert.Empty(capturePlan.Diagnostics);
+    }
+
     private static V2CapturePlanSnapshot BuildCapturePlanAtMarker(string source, string marker)
     {
         var (line, character) = FindPosition(source, marker);

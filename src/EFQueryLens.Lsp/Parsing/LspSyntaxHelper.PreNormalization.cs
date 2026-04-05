@@ -407,18 +407,28 @@ public static partial class LspSyntaxHelper
             if (visited.Expression is not CollectionExpressionSyntax collection)
                 return visited;
 
-            if (!TryConvertCollectionExpressionToImplicitArray(collection, out var implicitArray))
+            if (!TryRewriteCollectionExpressionReceiver(collection, out var rewrittenReceiver))
                 return visited;
 
             Changed = true;
-            return visited.WithExpression(implicitArray.WithTriviaFrom(collection));
+            return visited.WithExpression(rewrittenReceiver.WithTriviaFrom(collection));
         }
 
-        private static bool TryConvertCollectionExpressionToImplicitArray(
+        private static bool TryRewriteCollectionExpressionReceiver(
             CollectionExpressionSyntax collection,
-            out ImplicitArrayCreationExpressionSyntax implicitArray)
+            out ExpressionSyntax rewrittenReceiver)
         {
-            implicitArray = null!;
+            rewrittenReceiver = null!;
+
+            // C# collection expressions with spread can fail in eval compilation when used as
+            // method receivers (CS9176: no target type). For the common receiver shape
+            // `[.. source].Contains(x)`, rewrite to `source.Contains(x)`.
+            if (collection.Elements.Count == 1
+                && collection.Elements[0] is SpreadElementSyntax spread)
+            {
+                rewrittenReceiver = ParenthesizeIfNeeded(spread.Expression.WithoutTrivia());
+                return true;
+            }
 
             var elements = new List<ExpressionSyntax>();
             foreach (var element in collection.Elements)
@@ -433,8 +443,16 @@ public static partial class LspSyntaxHelper
                 SyntaxKind.ArrayInitializerExpression,
                 SeparatedList(elements));
 
-            implicitArray = ImplicitArrayCreationExpression(initializer);
+            rewrittenReceiver = ImplicitArrayCreationExpression(initializer);
             return true;
         }
+
+        private static ExpressionSyntax ParenthesizeIfNeeded(ExpressionSyntax expression) =>
+            expression is IdentifierNameSyntax
+                or MemberAccessExpressionSyntax
+                or InvocationExpressionSyntax
+                or ParenthesizedExpressionSyntax
+                ? expression
+                : ParenthesizedExpression(expression);
     }
 }

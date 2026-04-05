@@ -10,6 +10,15 @@ namespace EFQueryLens.Core.Tests.Scripting;
 /// </summary>
 public class EvalSourceBuilderV2Tests
 {
+    private sealed class NestedTypeContainer
+    {
+        public enum NestedEnum
+        {
+            First,
+            Second,
+        }
+    }
+
     [Fact]
     public void BuildV2CaptureInitializationCode_ReplayInitializer_EmitsReplayCode()
     {
@@ -181,6 +190,31 @@ public class EvalSourceBuilderV2Tests
     }
 
     [Fact]
+    public void BuildV2CaptureInitializationCode_UsePlaceholder_ListOfNestedEnum_UsesCompilableTypeName()
+    {
+        var entry = new V2CapturePlanEntry
+        {
+            Name = "clearSections",
+            TypeName = $"global::System.Collections.Generic.List<{typeof(NestedTypeContainer.NestedEnum).FullName}>",
+            CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+        };
+
+        var code = EvalSourceBuilder.BuildV2CaptureInitializationCode(entry);
+
+        Assert.NotNull(code);
+        Assert.Contains(
+            "new global::System.Collections.Generic.List<EFQueryLens.Core.Tests.Scripting.EvalSourceBuilderV2Tests.NestedTypeContainer.NestedEnum>",
+            code);
+        Assert.DoesNotContain("+", code);
+        Assert.Contains(
+            "typeof(EFQueryLens.Core.Tests.Scripting.EvalSourceBuilderV2Tests.NestedTypeContainer.NestedEnum).IsEnum",
+            code);
+        Assert.Contains(
+            "Enum.GetValues(typeof(EFQueryLens.Core.Tests.Scripting.EvalSourceBuilderV2Tests.NestedTypeContainer.NestedEnum))",
+            code);
+    }
+
+    [Fact]
     public void BuildV2CaptureInitializationCode_UsePlaceholder_IEnumerable_SeedsTwoDeterministicItems()
     {
         var entry = new V2CapturePlanEntry
@@ -195,6 +229,43 @@ public class EvalSourceBuilderV2Tests
         Assert.NotNull(code);
         Assert.Contains("new int[]", code);
         Assert.Contains("{ 1, 2 }", code);
+    }
+
+    [Fact]
+    public void BuildV2CaptureInitializationCode_UsePlaceholder_IReadOnlyCollection_SeedsTwoDeterministicItems()
+    {
+        var entry = new V2CapturePlanEntry
+        {
+            Name = "ids",
+            TypeName = "IReadOnlyCollection<System.Guid>",
+            CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+        };
+
+        var code = EvalSourceBuilder.BuildV2CaptureInitializationCode(entry);
+
+        Assert.NotNull(code);
+        Assert.Contains("new global::System.Collections.Generic.List<System.Guid>", code);
+        Assert.Contains("11111111-1111-1111-1111-111111111111", code);
+        Assert.Contains("22222222-2222-2222-2222-222222222222", code);
+    }
+
+    [Fact]
+    public void BuildV2CaptureInitializationCode_UsePlaceholder_IReadOnlyListNestedEnum_UsesCompilableTypeName()
+    {
+        var entry = new V2CapturePlanEntry
+        {
+            Name = "riskClasses",
+            TypeName = $"global::System.Collections.Generic.IReadOnlyList<{typeof(NestedTypeContainer.NestedEnum).FullName}>",
+            CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+        };
+
+        var code = EvalSourceBuilder.BuildV2CaptureInitializationCode(entry);
+
+        Assert.NotNull(code);
+        Assert.Contains(
+            "new global::System.Collections.Generic.List<EFQueryLens.Core.Tests.Scripting.EvalSourceBuilderV2Tests.NestedTypeContainer.NestedEnum>",
+            code);
+        Assert.DoesNotContain("+", code);
     }
 
     [Fact]
@@ -304,6 +375,25 @@ public class EvalSourceBuilderV2Tests
         Assert.NotNull(code);
         Assert.Contains("var expression =", code);
         Assert.Contains("(object)e", code);
+    }
+
+    [Fact]
+    public void BuildV2CaptureInitializationCode_UsePlaceholder_ExpressionPredicateWithoutHint_EmitsNonNullLambda()
+    {
+        var typeName = "global::System.Linq.Expressions.Expression<global::System.Func<global::MyApp.Order, bool>>";
+        var entry = new V2CapturePlanEntry
+        {
+            Name = "filter",
+            TypeName = typeName,
+            CapturePolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+        };
+
+        var code = EvalSourceBuilder.BuildV2CaptureInitializationCode(entry);
+
+        Assert.NotNull(code);
+        Assert.Contains("var filter =", code);
+        Assert.Contains("(e => true)", code);
+        Assert.DoesNotContain("default(global::System.Linq.Expressions.Expression", code);
     }
 
     [Fact]
