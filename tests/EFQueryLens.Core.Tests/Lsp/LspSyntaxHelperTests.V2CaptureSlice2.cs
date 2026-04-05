@@ -355,6 +355,58 @@ public partial class LspSyntaxHelperTests
         Assert.Empty(capturePlan.Diagnostics);
     }
 
+    [Fact]
+    public void BuildV2CapturePlanFromGraph_UnknownCollectionReceiverContainsMember_InferredAsTypedListPlaceholder()
+    {
+        var graph = new LocalSymbolGraphEntry[]
+        {
+            new()
+            {
+                Name = "applicationId",
+                TypeName = "global::System.Guid",
+                Kind = "parameter",
+                DeclarationOrder = 0,
+                ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+            },
+            new()
+            {
+                Name = "clearSections",
+                TypeName = "?",
+                Kind = "local",
+                InitializerExpression = "GetClearSections()",
+                DeclarationOrder = 1,
+                Dependencies = [],
+                ReplayPolicy = LocalSymbolReplayPolicies.ReplayInitializer,
+            },
+            new()
+            {
+                Name = "ct",
+                TypeName = "global::System.Threading.CancellationToken",
+                Kind = "parameter",
+                DeclarationOrder = 2,
+                ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+            },
+        };
+
+        var lambdaMemberTypes = new Dictionary<(string Receiver, string Member), string>
+        {
+            [("d", "Page")] = "global::MyApp.ApplicationPage",
+            [("d", "ApplicationDetailsId")] = "global::System.Guid",
+        };
+
+        var capturePlan = LspSyntaxHelper.BuildV2CapturePlanFromGraph(
+            "dbContext.ApplicationDrafts.Where(d => d.ApplicationDetailsId == applicationId && clearSections.Contains(d.Page)).ToListAsync(ct)",
+            graph,
+            lambdaMemberTypes);
+
+        var clearSections = Assert.Single(capturePlan.Entries, e => string.Equals(e.Name, "clearSections", StringComparison.Ordinal));
+        Assert.Equal(LocalSymbolReplayPolicies.UsePlaceholder, clearSections.CapturePolicy);
+        Assert.Equal("global::System.Collections.Generic.List<global::MyApp.ApplicationPage>", clearSections.TypeName);
+        Assert.Null(clearSections.InitializerExpression);
+        Assert.Empty(clearSections.Dependencies);
+        Assert.Empty(capturePlan.Diagnostics);
+    }
+
     private static V2CapturePlanSnapshot BuildCapturePlanAtMarker(string source, string marker)
     {
         var (line, character) = FindPosition(source, marker);

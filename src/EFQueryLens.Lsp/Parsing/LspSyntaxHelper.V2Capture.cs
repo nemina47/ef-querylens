@@ -38,13 +38,28 @@ public static partial class LspSyntaxHelper
             dbContextTypeName,
             debugLog);
 
-        capturePlan = BuildV2CapturePlanFromGraph(rewrittenExpression, graph);
+        var inferredLambdaMemberTypes = BuildLambdaParameterMemberTypeMap(
+            SyntaxFactory.ParseExpression(rewrittenExpression),
+            contextVariableName,
+            targetAssemblyPath,
+            dbContextTypeName,
+            debugLog);
+
+        capturePlan = BuildV2CapturePlanFromGraph(rewrittenExpression, graph, inferredLambdaMemberTypes);
         return capturePlan.IsComplete;
     }
 
     internal static V2CapturePlanSnapshot BuildV2CapturePlanFromGraph(
         string executableExpression,
         IReadOnlyList<LocalSymbolGraphEntry> graph)
+    {
+        return BuildV2CapturePlanFromGraph(executableExpression, graph, null);
+    }
+
+    internal static V2CapturePlanSnapshot BuildV2CapturePlanFromGraph(
+        string executableExpression,
+        IReadOnlyList<LocalSymbolGraphEntry> graph,
+        IReadOnlyDictionary<(string Receiver, string Member), string>? inferredLambdaMemberTypes)
     {
         var ordered = graph
             .OrderBy(x => x.DeclarationOrder)
@@ -57,7 +72,12 @@ public static partial class LspSyntaxHelper
 
         foreach (var entry in ordered)
         {
-            var planEntry = ClassifyCaptureEntry(entry, byName, diagnostics);
+            var planEntry = ClassifyCaptureEntry(
+                entry,
+                byName,
+                executableExpression,
+                inferredLambdaMemberTypes,
+                diagnostics);
             entries.Add(planEntry);
         }
 
@@ -127,6 +147,8 @@ public static partial class LspSyntaxHelper
     private static V2CapturePlanEntry ClassifyCaptureEntry(
         LocalSymbolGraphEntry entry,
         IReadOnlyDictionary<string, LocalSymbolGraphEntry> byName,
+        string executableExpression,
+        IReadOnlyDictionary<(string Receiver, string Member), string>? inferredLambdaMemberTypes,
         ICollection<V2CaptureDiagnostic> diagnostics)
     {
         if (string.Equals(entry.ReplayPolicy, LocalSymbolReplayPolicies.ReplayInitializer, StringComparison.Ordinal))
@@ -169,7 +191,7 @@ public static partial class LspSyntaxHelper
                 //   var pageSize = Math.Clamp(request.PageSize, 1, 200); → int → synthesize 1
                 // The initializer is unsafe to replay, but a known or dependency-inferred type
                 // can still be synthesized deterministically.
-                if (TryGetPlaceholderTypeForEntry(entry, byName, out var placeholderType))
+                if (TryGetPlaceholderTypeForEntry(entry, byName, executableExpression, inferredLambdaMemberTypes, out var placeholderType))
                 {
                     return new V2CapturePlanEntry
                     {
@@ -206,7 +228,7 @@ public static partial class LspSyntaxHelper
             {
                 // Same downgrade: if the type is catalog-known, synthesize a placeholder rather
                 // than propagating the unsafe-dependency rejection.
-                if (TryGetPlaceholderTypeForEntry(entry, byName, out var placeholderType))
+                if (TryGetPlaceholderTypeForEntry(entry, byName, executableExpression, inferredLambdaMemberTypes, out var placeholderType))
                 {
                     return new V2CapturePlanEntry
                     {
@@ -255,7 +277,8 @@ public static partial class LspSyntaxHelper
             // common inferred locals like:
             //   var safeLookbackDays = Math.Clamp(lookbackDays, 1, 365); // lookbackDays:int
             //   var fromUtc = utcNow.Date.AddDays(-safeLookbackDays);    // utcNow:DateTime
-            if (TryInferPlaceholderTypeFromDependencies(entry, byName, out var inferredType))
+            if (TryInferPlaceholderTypeFromDependencies(entry, byName, out var inferredType)
+                || TryInferPlaceholderTypeFromQueryUsage(entry.Name, executableExpression, inferredLambdaMemberTypes, out inferredType))
             {
                 return new V2CapturePlanEntry
                 {
@@ -383,14 +406,25 @@ public static partial class LspSyntaxHelper
     private static bool TryGetPlaceholderTypeForEntry(
         LocalSymbolGraphEntry entry,
         IReadOnlyDictionary<string, LocalSymbolGraphEntry> byName,
+        string executableExpression,
+        IReadOnlyDictionary<(string Receiver, string Member), string>? inferredLambdaMemberTypes,
         out string typeName)
     {
         typeName = entry.TypeName;
         if (IsKnownPlaceholderType(typeName))
             return true;
 
-        if (TryInferPlaceholderTypeFromDependencies(entry, byName, out var inferredType)
+        if ((TryInferPlaceholderTypeFromDependencies(entry, byName, out var inferredType)
+             || TryInferPlaceholderTypeFromQueryUsage(entry.Name, executableExpression, inferredLambdaMemberTypes, out inferredType))
             && IsKnownPlaceholderType(inferredType))
+        {
+            typeName = inferredType;
+            return true;
+        }
+
+        // Query usage may infer collection placeholder types like List<Enum> for
+        // receiver patterns such as clearSections.Contains(d.Page).
+        if (TryInferPlaceholderTypeFromQueryUsage(entry.Name, executableExpression, inferredLambdaMemberTypes, out inferredType))
         {
             typeName = inferredType;
             return true;
@@ -465,6 +499,67 @@ public static partial class LspSyntaxHelper
         {
             inferredType = depTypes[0];
             return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryInferPlaceholderTypeFromQueryUsage(
+        string symbolName,
+        string executableExpression,
+        IReadOnlyDictionary<(string Receiver, string Member), string>? inferredLambdaMemberTypes,
+        out string inferredType)
+    {
+        inferredType = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(symbolName)
+            || string.IsNullOrWhiteSpace(executableExpression)
+            || inferredLambdaMemberTypes is null
+            || inferredLambdaMemberTypes.Count == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            var root = SyntaxFactory.ParseExpression(executableExpression);
+            foreach (var invocation in root.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
+            {
+                if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
+                    continue;
+
+                if (!string.Equals(memberAccess.Name.Identifier.ValueText, "Contains", StringComparison.Ordinal))
+                    continue;
+
+                if (memberAccess.Expression is not IdentifierNameSyntax receiverIdentifier
+                    || !string.Equals(receiverIdentifier.Identifier.ValueText, symbolName, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (invocation.ArgumentList.Arguments.Count != 1)
+                    continue;
+
+                var argExpression = invocation.ArgumentList.Arguments[0].Expression;
+                if (argExpression is ParenthesizedExpressionSyntax parenthesized)
+                    argExpression = parenthesized.Expression;
+
+                if (argExpression is MemberAccessExpressionSyntax argMemberAccess
+                    && argMemberAccess.Expression is IdentifierNameSyntax argReceiverIdentifier)
+                {
+                    var key = (argReceiverIdentifier.Identifier.ValueText, argMemberAccess.Name.Identifier.ValueText);
+                    if (inferredLambdaMemberTypes.TryGetValue(key, out var elementType)
+                        && !string.IsNullOrWhiteSpace(elementType))
+                    {
+                        inferredType = $"global::System.Collections.Generic.List<{elementType}>";
+                        return true;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Best effort only.
         }
 
         return false;
