@@ -471,6 +471,36 @@ public class HoverPreviewServiceFormattingTests : IDisposable
         Assert.DoesNotContain("fromUtc", unresolved, StringComparer.Ordinal);
     }
 
+    [Fact]
+    public void FindUnresolvedSymbols_IgnoresSyntheticFactoryReceiver()
+    {
+        var method = GetStaticMethod(
+            "FindUnresolvedSymbols",
+            typeof(string),
+            typeof(string),
+            typeof(IReadOnlyList<LocalSymbolGraphEntry>));
+
+        IReadOnlyList<LocalSymbolGraphEntry> graph =
+        [
+            new()
+            {
+                Name = "ct",
+                TypeName = "global::System.Threading.CancellationToken",
+                Kind = "parameter",
+                DeclarationOrder = 1,
+                ReplayPolicy = LocalSymbolReplayPolicies.UsePlaceholder,
+            },
+        ];
+
+        var unresolved = (IReadOnlyList<string>)method.Invoke(null, [
+            "__qlFactoryContext.Rationales.AsNoTracking().OrderBy(x => x.Title).ToListAsync(ct)",
+            "Rationales",
+            graph,
+        ])!;
+
+        Assert.DoesNotContain("__qlFactoryContext", unresolved, StringComparer.Ordinal);
+    }
+
     private static MethodInfo GetStaticMethod(string name, params Type[] parameterTypes) =>
         typeof(HoverPreviewService).GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic, null, parameterTypes, null)
         ?? throw new InvalidOperationException($"Method {name} not found.");

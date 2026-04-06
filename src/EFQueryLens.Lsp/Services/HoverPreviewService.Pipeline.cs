@@ -467,6 +467,7 @@ internal sealed partial class HoverPreviewService
         var declared = new HashSet<string>(StringComparer.Ordinal)
         {
             contextVariableName,
+            "__qlFactoryContext",
         };
 
         foreach (var symbol in graph)
