@@ -707,7 +707,8 @@ public static partial class LspSyntaxHelper
                 debugLog?.Invoke($"capture-skip reason=receiver-is-type-or-namespace receiver={receiverName} access={node}");
                 return null;
             }
-            if (receiverName.StartsWith("__qlm_", StringComparison.Ordinal))
+            if (receiverName.StartsWith("__qlm_", StringComparison.Ordinal)
+                || string.Equals(receiverName, "__qlFactoryContext", StringComparison.Ordinal))
             {
                 debugLog?.Invoke($"capture-skip reason=synthetic-receiver receiver={receiverName} access={node}");
                 return null;

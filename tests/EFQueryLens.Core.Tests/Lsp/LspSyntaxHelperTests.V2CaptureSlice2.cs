@@ -106,6 +106,83 @@ public partial class LspSyntaxHelperTests
     }
 
     [Fact]
+    public void TryBuildV2CapturePlan_FactoryRootSubstitution_DoesNotRequireSyntheticReceiverCapture()
+    {
+        var source = """
+            using Microsoft.EntityFrameworkCore;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            class Rationale
+            {
+                public string Title { get; set; } = string.Empty;
+            }
+
+            class ApplicationDbContext : DbContext
+            {
+                public DbSet<Rationale> Rationales => Set<Rationale>();
+            }
+
+            class Demo
+            {
+                private readonly IDbContextFactory<ApplicationDbContext> _contextFactory;
+
+                Demo(IDbContextFactory<ApplicationDbContext> contextFactory)
+                {
+                    _contextFactory = contextFactory;
+                }
+
+                async Task Run(CancellationToken ct)
+                {
+                    _ = (await _contextFactory.CreateDbContextAsync(ct)).Rationales
+                        .AsNoTracking()
+                        .OrderBy(x => x.Title)
+                        .ToListAsync(ct);
+                }
+            }
+            """;
+
+        var (line, character) = FindPosition(source, "ToListAsync");
+        var extractionSuccess = LspSyntaxHelper.TryBuildV2ExtractionPlan(
+            source,
+            @"c:\repo\Demo.cs",
+            line,
+            character,
+            out var extractionPlan,
+            out var extractionDiagnostics);
+
+        Assert.True(extractionSuccess);
+        Assert.NotNull(extractionPlan);
+        Assert.Empty(extractionDiagnostics);
+
+        var captureSuccess = LspSyntaxHelper.TryBuildV2CapturePlan(
+            extractionPlan!.Expression,
+            extractionPlan.ContextVariableName,
+            source,
+            extractionPlan.Origin.Line,
+            extractionPlan.Origin.Character,
+            targetAssemblyPath: null,
+            out var capturePlan,
+            dbContextTypeName: "ApplicationDbContext",
+            factoryCandidateTypeNames: ["ApplicationDbContext"]);
+
+        Assert.True(captureSuccess);
+        Assert.NotNull(capturePlan);
+        Assert.True(capturePlan!.IsComplete);
+        Assert.Empty(capturePlan.Diagnostics);
+
+        // Synthetic receiver must not appear as an unresolved or captured symbol.
+        Assert.DoesNotContain(
+            capturePlan.Entries,
+            e => string.Equals(e.Name, "__qlFactoryContext", StringComparison.Ordinal));
+
+        // Ensure factory variable is not emitted as placeholder anymore after substitution.
+        Assert.DoesNotContain(
+            capturePlan.Entries,
+            e => string.Equals(e.Name, "_contextFactory", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void BuildV2CapturePlanFromGraph_MissingDependency_RejectedWithDiagnostic()
     {
         var graph = new[]
