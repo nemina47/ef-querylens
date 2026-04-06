@@ -1359,6 +1359,7 @@ public static partial class LspSyntaxHelper
         var declared = new HashSet<string>(StringComparer.Ordinal)
         {
             contextVariableName,
+            "__qlFactoryContext",  // Skip synthetic factory receiver; handled separately in capture plan
         };
 
         foreach (var parameter in expression.DescendantNodesAndSelf().OfType<ParameterSyntax>())
