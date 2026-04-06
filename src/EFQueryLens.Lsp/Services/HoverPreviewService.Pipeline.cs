@@ -250,7 +250,8 @@ internal sealed partial class HoverPreviewService
             secondaryLine: helperSubstitutionApplied ? line : null,
             secondaryCharacter: helperSubstitutionApplied ? character : null,
             dbContextTypeName: dbContextTypeName,
-            debugLog: detail => log($"capture-plan {detail}"));
+            debugLog: detail => log($"capture-plan {detail}"),
+            factoryCandidateTypeNames: factoryDbContextCandidates);
 
         if (!capturePlanSuccess || capturePlan is null)
         {

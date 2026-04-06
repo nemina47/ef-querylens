@@ -20,12 +20,25 @@ public static partial class LspSyntaxHelper
         int? secondaryLine = null,
         int? secondaryCharacter = null,
         string? dbContextTypeName = null,
-        Action<string>? debugLog = null)
+        Action<string>? debugLog = null,
+        IReadOnlyList<string>? factoryCandidateTypeNames = null)
     {
         capturePlan = null;
 
-        var graph = ExtractFreeVariableSymbolGraph(
+        // Step 1: Attempt factory-root substitution before normal free-variable extraction.
+        // This normalizes expressions like: await _contextFactory.CreateDbContextAsync(ct).DbSet<User>()
+        // into: __qlFactoryContext.DbSet<User>() so that the synthetic receiver can be properly captured.
+        var (normalizedExpression, factoryRootApplied, inferredFactoryContextType) = TrySubstituteFactoryRoot(
             expression,
+            contextVariableName,
+            factoryCandidateTypeNames,
+            debugLog);
+
+        // Use the normalized expression for the rest of the pipeline.
+        var expressionToAnalyze = normalizedExpression;
+
+        var graph = ExtractFreeVariableSymbolGraph(
+            expressionToAnalyze,
             contextVariableName,
             primarySourceText,
             primaryLine,
@@ -45,7 +58,15 @@ public static partial class LspSyntaxHelper
             dbContextTypeName,
             debugLog);
 
-        capturePlan = BuildV2CapturePlanFromGraph(rewrittenExpression, graph, inferredLambdaMemberTypes);
+        // If factory root substitution was applied, inject the synthetic receiver variable into the capture plan.
+        // The synthetic receiver must be replayed (not captured as a free variable) so EF Core execution
+        // uses the QueryLens-owned DbContext instance rather than attempting to create a new one.
+        capturePlan = BuildV2CapturePlanFromGraph(
+            rewrittenExpression, 
+            graph, 
+            inferredLambdaMemberTypes,
+            factoryRootApplied ? "__qlFactoryContext" : null,
+            inferredFactoryContextType);
         return capturePlan.IsComplete;
     }
 
@@ -53,13 +74,23 @@ public static partial class LspSyntaxHelper
         string executableExpression,
         IReadOnlyList<LocalSymbolGraphEntry> graph)
     {
-        return BuildV2CapturePlanFromGraph(executableExpression, graph, null);
+        return BuildV2CapturePlanFromGraph(executableExpression, graph, null, null, null);
     }
 
     internal static V2CapturePlanSnapshot BuildV2CapturePlanFromGraph(
         string executableExpression,
         IReadOnlyList<LocalSymbolGraphEntry> graph,
         IReadOnlyDictionary<(string Receiver, string Member), string>? inferredLambdaMemberTypes)
+    {
+        return BuildV2CapturePlanFromGraph(executableExpression, graph, inferredLambdaMemberTypes, null, null);
+    }
+
+    internal static V2CapturePlanSnapshot BuildV2CapturePlanFromGraph(
+        string executableExpression,
+        IReadOnlyList<LocalSymbolGraphEntry> graph,
+        IReadOnlyDictionary<(string Receiver, string Member), string>? inferredLambdaMemberTypes,
+        string? factoryReceiverVariableName,
+        string? factoryReceiverContextType)
     {
         var ordered = graph
             .OrderBy(x => x.DeclarationOrder)
@@ -79,6 +110,28 @@ public static partial class LspSyntaxHelper
                 inferredLambdaMemberTypes,
                 diagnostics);
             entries.Add(planEntry);
+        }
+
+        // Inject factory receiver if factory substitution was applied.
+        // The synthetic receiver variable must be added as a ReplayInitializer entry
+        // so it gets proper initialization in the evaluation context.
+        if (!string.IsNullOrWhiteSpace(factoryReceiverVariableName)
+            && !string.IsNullOrWhiteSpace(factoryReceiverContextType))
+        {
+            // Check if already in entries (shouldn't be, but defensive).
+            if (!entries.Any(e => e.Name.Equals(factoryReceiverVariableName, StringComparison.Ordinal)))
+            {
+                entries.Add(new V2CapturePlanEntry
+                {
+                    Name = factoryReceiverVariableName,
+                    TypeName = factoryReceiverContextType,
+                    CapturePolicy = LocalSymbolReplayPolicies.ReplayInitializer,
+                    DeclarationOrder = int.MaxValue,  // Injected entry, low priority
+                    InitializerExpression = null,     // Will be set by the caller (HoverPreviewService provides context)
+                    QueryUsageHint = null,
+                    Dependencies = [],
+                });
+            }
         }
 
         // If executable expression accesses '<symbol>.Value', the symbol should be synthesized as
