@@ -36,4 +36,13 @@
           Command="dotnet publish &quot;$(FormatterProjectPath)&quot; -c $(Configuration) -f $(TargetFramework) --self-contained false /p:UseAppHost=false -o &quot;$(_FormatterPublishDir)&quot;" />
   </Target>
 
+  <!-- Keep formatter available for non-publish runs (e.g., QUERYLENS_LSP_DLL overrides to bin output). -->
+  <Target Name="PublishBundledFormatterForLspBuildOutput" AfterTargets="Build">
+    <PropertyGroup>
+      <_FormatterBuildDir>$(TargetDir)formatter\</_FormatterBuildDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(_FormatterBuildDir)" />
+    <Exec Command="dotnet publish &quot;$(FormatterProjectPath)&quot; -c $(Configuration) -f $(TargetFramework) --self-contained false /p:UseAppHost=false -o &quot;$(_FormatterBuildDir)&quot;" />
+  </Target>
+
 </Project>

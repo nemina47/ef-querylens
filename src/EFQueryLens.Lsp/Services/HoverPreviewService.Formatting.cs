@@ -435,19 +435,27 @@ internal sealed partial class HoverPreviewService
 
     private static IEnumerable<ProcessStartInfo> ResolveFormatterProcessStartInfos()
     {
-        var formatterDir = Path.Combine(AppContext.BaseDirectory, "formatter");
         var isWindows = OperatingSystem.IsWindows();
         var exeName = isWindows ? "EFQueryLens.Formatter.exe" : "EFQueryLens.Formatter";
-        var exePath = Path.Combine(formatterDir, exeName);
-        if (File.Exists(exePath))
+        var candidateDirectories = new[]
         {
-            yield return CreateFormatterProcessStartInfo(exePath, string.Empty);
-        }
+            Path.Combine(AppContext.BaseDirectory, "formatter"),
+            AppContext.BaseDirectory,
+        };
 
-        var dllPath = Path.Combine(formatterDir, "EFQueryLens.Formatter.dll");
-        if (File.Exists(dllPath))
+        foreach (var candidateDirectory in candidateDirectories.Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            yield return CreateFormatterProcessStartInfo("dotnet", $"\"{dllPath}\"");
+            var exePath = Path.Combine(candidateDirectory, exeName);
+            if (File.Exists(exePath))
+            {
+                yield return CreateFormatterProcessStartInfo(exePath, string.Empty);
+            }
+
+            var dllPath = Path.Combine(candidateDirectory, "EFQueryLens.Formatter.dll");
+            if (File.Exists(dllPath))
+            {
+                yield return CreateFormatterProcessStartInfo("dotnet", $"\"{dllPath}\"");
+            }
         }
     }
 
