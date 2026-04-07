@@ -131,20 +131,13 @@ internal static partial class LinqHoverMarkdownRenderer
             string displayLine = line.Replace("\\`", "`");
             TextBlock tb = new()
             {
+                Text = displayLine,
                 FontFamily = new FontFamily("Consolas"),
                 FontSize = 12,
                 Margin = new Thickness(0, 0, 0, 0),
                 TextWrapping = TextWrapping.NoWrap,
+                Foreground = new SolidColorBrush(Color.FromRgb(0xd4, 0xd4, 0xd4)),
             };
-
-            if (string.Equals(language, "sql", StringComparison.OrdinalIgnoreCase))
-            {
-                ApplySqlSyntaxHighlight(tb, displayLine);
-                codeStack.Children.Add(tb);
-                continue;
-            }
-
-            tb.Text = displayLine;
 
             if (string.Equals(language, "diff", StringComparison.OrdinalIgnoreCase))
             {
@@ -158,14 +151,6 @@ internal static partial class LinqHoverMarkdownRenderer
                     tb.Foreground = new SolidColorBrush(Color.FromRgb(0xff, 0xa1, 0x98));
                     tb.Background = new SolidColorBrush(Color.FromRgb(0x4a, 0x20, 0x23));
                 }
-                else
-                {
-                    tb.Foreground = new SolidColorBrush(Color.FromRgb(0xd4, 0xd4, 0xd4));
-                }
-            }
-            else
-            {
-                tb.Foreground = new SolidColorBrush(Color.FromRgb(0xd4, 0xd4, 0xd4));
             }
 
             codeStack.Children.Add(tb);

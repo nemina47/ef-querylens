@@ -214,6 +214,13 @@ internal sealed class QueryLensSqlStatementDto
     public string? SplitLabel { get; set; }
 }
 
+internal sealed class QueryLensParameterDto
+{
+    public string? Name { get; set; }
+    public string? ClrType { get; set; }
+    public string? InferredValue { get; set; }
+}
+
 internal sealed class QueryLensStructuredHoverResponse
 {
     public bool Success { get; set; }
@@ -221,6 +228,8 @@ internal sealed class QueryLensStructuredHoverResponse
     public List<QueryLensSqlStatementDto>? Statements { get; set; }
     public int CommandCount { get; set; }
     public string? SourceExpression { get; set; }
+    public string? ExecutedExpression { get; set; }
+    public List<QueryLensParameterDto>? Parameters { get; set; }
     public string? DbContextType { get; set; }
     public string? ProviderName { get; set; }
     public string? SourceFile { get; set; }
