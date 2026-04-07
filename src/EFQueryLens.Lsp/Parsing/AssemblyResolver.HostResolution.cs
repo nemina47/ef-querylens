@@ -258,8 +258,9 @@ public static partial class AssemblyResolver
 
         var slnContent = File.ReadAllText(solutionPath);
         return SlnProjectRegex().Matches(slnContent)
-            .Select(m => Path.GetFullPath(
-                Path.Combine(Path.GetDirectoryName(solutionPath)!, m.Groups[1].Value)))
+            .Select(m => m.Groups[1].Value.Replace('\\', Path.DirectorySeparatorChar))
+            .Select(relativePath => Path.GetFullPath(
+                Path.Combine(Path.GetDirectoryName(solutionPath)!, relativePath)))
             .Where(p => File.Exists(p) && !string.Equals(p,
                 Path.GetFullPath(libraryCsprojPath), StringComparison.OrdinalIgnoreCase))
             .ToList();

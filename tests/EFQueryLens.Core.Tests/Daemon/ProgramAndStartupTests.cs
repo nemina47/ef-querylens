@@ -111,7 +111,12 @@ public class ProgramAndStartupTests
         using var timer = (System.Timers.Timer)IdleShutdownTimer.Start(app, runtime, idleMinutes: 1);
         timer.Interval = 10;
 
-        await Task.Delay(120);
+        var deadline = DateTime.UtcNow.AddSeconds(3);
+        while (!app.Lifetime.ApplicationStopping.IsCancellationRequested && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(25);
+        }
+
         Assert.True(app.Lifetime.ApplicationStopping.IsCancellationRequested);
 
         await app.StopAsync();

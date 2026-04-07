@@ -178,15 +178,28 @@ public sealed class EngineDiscoveryAndHttpClientTests : IAsyncDisposable
     public async Task PumpStderrAsync_ForProcess_WritesLinesToLogger()
     {
         var logs = new List<string>();
-        using var process = Process.Start(new ProcessStartInfo
-        {
-            FileName = "cmd.exe",
-            Arguments = "/c echo stderr-line 1>&2",
-            UseShellExecute = false,
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-            CreateNoWindow = true,
-        }) ?? throw new InvalidOperationException("Could not start test process.");
+        var startInfo = OperatingSystem.IsWindows()
+            ? new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = "/c echo stderr-line 1>&2",
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                CreateNoWindow = true,
+            }
+            : new ProcessStartInfo
+            {
+                FileName = "/bin/sh",
+                Arguments = "-c \"echo stderr-line 1>&2\"",
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                CreateNoWindow = true,
+            };
+
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Could not start test process.");
 
         await InvokePumpStderrAsync(process, message => logs.Add(message));
         await process.WaitForExitAsync();
