@@ -24,10 +24,8 @@ internal static partial class StubSynthesizer
     {
         var stubs = new List<string>();
 
-        if (capturePlan?.Entries == null || capturePlan.Entries.Count == 0)
-            return stubs;
-
-        foreach (var entry in capturePlan.Entries)
+        var entries = capturePlan?.Entries ?? [];
+        foreach (var entry in entries)
         {
             var stub = global::EFQueryLens.Core.Scripting.Compilation.EvalSourceBuilder.BuildV2CaptureInitializationCode(entry);
             if (stub is not null)

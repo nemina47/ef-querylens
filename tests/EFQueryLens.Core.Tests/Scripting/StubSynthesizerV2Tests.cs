@@ -167,4 +167,19 @@ public class StubSynthesizerV2Tests
 
         Assert.Contains(stubs, s => s.Contains("var __qlFactoryContext = Rationales;", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void BuildV2Stubs_FactoryRootExpression_WithEmptyEntries_AddsSyntheticContextAliasStub()
+    {
+        var plan = new V2CapturePlanSnapshot
+        {
+            ExecutableExpression = "__qlFactoryContext.Rationales.AsNoTracking().OrderBy(x => x.Title).ToListAsync(ct)",
+            IsComplete = true,
+            Entries = [],
+        };
+
+        var stubs = StubSynthesizer.BuildV2Stubs(plan, plan.ExecutableExpression, "Rationales");
+
+        Assert.Contains(stubs, s => s.Contains("var __qlFactoryContext = Rationales;", StringComparison.Ordinal));
+    }
 }
