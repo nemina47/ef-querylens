@@ -109,42 +109,8 @@ internal static partial class LinqHoverMarkdownRenderer
             }
         }
 
-        // Render LINQ source expression
-        if (!string.IsNullOrWhiteSpace(response.SourceExpression))
-        {
-            string sourceExpr = response.SourceExpression!;
-            List<string> linqLines = sourceExpr.Replace("\r\n", "\n").Split('\n').ToList();
-            stack.Children.Add(RenderHeading("LINQ (csharp)", 13, copySql));
-            stack.Children.Add(RenderCodeBlock("csharp", linqLines));
-        }
 
-        // Render executed LINQ if different from source
-        if (!string.IsNullOrWhiteSpace(response.ExecutedExpression)
-            && !string.Equals(response.ExecutedExpression, response.SourceExpression, StringComparison.Ordinal))
-        {
-            string executedExpr = response.ExecutedExpression!;
-            List<string> executedLinqLines = executedExpr.Replace("\r\n", "\n").Split('\n').ToList();
-            stack.Children.Add(RenderHeading("Executed LINQ (csharp)", 13, copySql));
-            stack.Children.Add(RenderCodeBlock("csharp", executedLinqLines));
-        }
 
-        // Render parameters
-        List<QueryLensParameterDto> parameters = response.Parameters ?? [];
-        if (parameters.Count > 0)
-        {
-            stack.Children.Add(RenderHeading("Parameters", 13, copySql));
-            int maxNameLength = parameters.Max(p => (p.Name ?? string.Empty).Length);
-            foreach (var param in parameters)
-            {
-                string name = param.Name ?? string.Empty;
-                string clrType = param.ClrType ?? "unknown";
-                string valueSuffix = string.IsNullOrWhiteSpace(param.InferredValue)
-                    ? string.Empty
-                    : $" = {param.InferredValue}";
-                string paramLine = $"- `{name.PadRight(maxNameLength)}` `{clrType}`{valueSuffix}";
-                stack.Children.Add(RenderBullet(paramLine, copySql));
-            }
-        }
 
         foreach (QueryLensSqlStatementDto stmt in statements)
         {

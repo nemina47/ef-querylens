@@ -69,7 +69,15 @@ internal sealed partial class HoverPreviewService
         var fullSql = statements.Count == 0
             ? null
             : BuildStatementsSqlBlock(statements);
-        var enrichedSql = BuildStructuredEnrichedSql(
+            // Format expressions for consistent display
+                var formattedSourceExpression = !string.IsNullOrWhiteSpace(canonical.SourceExpression)
+                    ? NormalizeCodeForComment(canonical.SourceExpression)
+                    : canonical.SourceExpression;
+                var formattedExecutedExpression = !string.IsNullOrWhiteSpace(canonical.ExecutedExpression)
+                    ? NormalizeCodeForComment(canonical.ExecutedExpression)
+                    : canonical.ExecutedExpression;
+        
+            var enrichedSql = BuildStructuredEnrichedSql(
             fullSql,
             sourceFile: filePath,
             sourceLine: canonical.SourceLine,
@@ -92,8 +100,8 @@ internal sealed partial class HoverPreviewService
             ErrorMessage: null,
             Statements: statements,
             CommandCount: canonical.Commands.Count,
-            SourceExpression: canonical.SourceExpression,
-            ExecutedExpression: canonical.ExecutedExpression,
+                SourceExpression: formattedSourceExpression,
+                ExecutedExpression: formattedExecutedExpression,
             DbContextType: canonical.Metadata?.DbContextType,
             ProviderName: canonical.Metadata?.ProviderName,
             SourceFile: filePath,
