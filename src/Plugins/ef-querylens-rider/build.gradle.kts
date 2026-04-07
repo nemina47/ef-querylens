@@ -32,7 +32,7 @@ dependencies {
         }
     }
     // CommonMark spec-compliant Markdown to HTML (replaces custom regex conversion)
-    implementation("org.commonmark:commonmark:0.27.1")
+    implementation("org.commonmark:commonmark:0.28.0")
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.13.4")
 }
