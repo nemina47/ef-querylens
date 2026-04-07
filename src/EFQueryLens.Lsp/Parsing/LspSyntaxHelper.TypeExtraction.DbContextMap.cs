@@ -1,5 +1,8 @@
-using Microsoft.CodeAnalysis.CSharp.Syntax;
+// Metadata-only DbContext/DbSet member-type extraction for LSP hover rewriting.
+// Uses MetadataLoadContext so QueryLens can inspect project outputs without
+// pinning user bin-folder assemblies in the default load context.
 using System.Reflection;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace EFQueryLens.Lsp.Parsing;
 
@@ -85,8 +88,21 @@ public static partial class LspSyntaxHelper
 
         try
         {
-            var assembly = Assembly.LoadFrom(targetAssemblyPath);
-            var dbContextType = ResolveDbContextType(assembly, targetAssemblyPath, dbContextTypeName);
+            var assemblyDir = Path.GetDirectoryName(targetAssemblyPath) ?? string.Empty;
+            var userDlls = Directory.Exists(assemblyDir)
+                ? Directory.GetFiles(assemblyDir, "*.dll", SearchOption.TopDirectoryOnly)
+                : (string[])[targetAssemblyPath];
+            var runtimeDlls = Directory.GetFiles(
+                Path.GetDirectoryName(typeof(object).Assembly.Location)!, "*.dll", SearchOption.TopDirectoryOnly);
+
+            var resolver = new PathAssemblyResolver(userDlls.Concat(runtimeDlls).Distinct().ToArray());
+            using var mlc = new MetadataLoadContext(resolver);
+
+            Assembly assembly;
+            try { assembly = mlc.LoadFromAssemblyPath(targetAssemblyPath); }
+            catch { return false; }
+
+            var dbContextType = ResolveDbContextType(mlc, assembly, assemblyDir, dbContextTypeName);
             if (dbContextType is null)
                 return false;
 
@@ -128,7 +144,7 @@ public static partial class LspSyntaxHelper
         }
     }
 
-    private static Type? ResolveDbContextType(Assembly assembly, string? targetAssemblyPath, string? dbContextTypeName)
+    private static Type? ResolveDbContextType(MetadataLoadContext mlc, Assembly assembly, string assemblyDir, string? dbContextTypeName)
     {
         static string NormalizeTypeLookupName(string value)
             => value.Trim()
@@ -138,13 +154,16 @@ public static partial class LspSyntaxHelper
 
         static bool IsDbContextType(Type t)
         {
-            for (var current = t; current is not null; current = current.BaseType)
+            for (var current = t; current is not null;)
             {
                 if (string.Equals(current.FullName, "Microsoft.EntityFrameworkCore.DbContext", StringComparison.Ordinal)
                     || string.Equals(current.Name, "DbContext", StringComparison.Ordinal))
                 {
                     return true;
                 }
+
+                try { current = current.BaseType; }
+                catch { break; }
             }
 
             return false;
@@ -153,16 +172,13 @@ public static partial class LspSyntaxHelper
         var allTypes = new List<Type>();
         allTypes.AddRange(GetLoadableTypes(assembly));
 
-        var assemblyDir = string.IsNullOrWhiteSpace(targetAssemblyPath)
-            ? null
-            : Path.GetDirectoryName(targetAssemblyPath);
-        if (!string.IsNullOrWhiteSpace(assemblyDir) && Directory.Exists(assemblyDir))
+        if (Directory.Exists(assemblyDir))
         {
             foreach (var dll in Directory.EnumerateFiles(assemblyDir, "*.dll", SearchOption.TopDirectoryOnly))
             {
                 try
                 {
-                    var loaded = Assembly.LoadFrom(dll);
+                    var loaded = mlc.LoadFromAssemblyPath(dll);
                     allTypes.AddRange(GetLoadableTypes(loaded));
                 }
                 catch

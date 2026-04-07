@@ -2,6 +2,8 @@
 
 ## Known Issues
 
+- [ ] Evaluate a daemon-published shadow-bundle manifest/path contract for future LSP artifact coordination after the MetadataLoadContext slice stabilizes (discovered in lsp-metadata-loadcontext-r8)
+
 ### Flaky Test: TranslationPrewarmServiceTests.DebounceWarmDocument_SupersedesPendingWarm_ForSameFile
 
 **Status**: Not blocking (fails intermittently, passes in isolation)

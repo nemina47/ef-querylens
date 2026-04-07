@@ -1,5 +1,6 @@
 using EFQueryLens.Core;
 using EFQueryLens.Core.Contracts;
+using EFQueryLens.Lsp.Handlers;
 
 namespace EFQueryLens.Lsp.Services;
 
@@ -40,11 +41,13 @@ internal sealed partial class HoverPreviewService
     private const string HoverBuildMarker = "2026-03-28-vscode-linkfix";
 
     private readonly IQueryLensEngine _engine;
+    private readonly WarmupHandler? _warmupHandler;
     private bool _debugEnabled;
 
-    public HoverPreviewService(IQueryLensEngine engine, bool debugEnabled = false)
+    public HoverPreviewService(IQueryLensEngine engine, WarmupHandler? warmupHandler = null, bool debugEnabled = false)
     {
         _engine = engine;
+        _warmupHandler = warmupHandler;
         _debugEnabled = debugEnabled;
 
         Console.Error.WriteLine(

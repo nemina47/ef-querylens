@@ -16,5 +16,5 @@ public sealed class LspTestFixture
     internal FakeEngineControl CreateControllableEngine() => new();
 
     internal HoverPreviewService CreateHoverService(bool debugEnabled = false) =>
-        new(CreatePlainEngine(), debugEnabled);
+        new(CreatePlainEngine(), debugEnabled: debugEnabled);
 }

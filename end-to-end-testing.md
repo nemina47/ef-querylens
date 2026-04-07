@@ -65,6 +65,23 @@
    - Expected: Legacy extraction and codegen path still works, SQL is returned, no change to existing behavior
    - Verify: Solution builds with no new errors or warnings in LSP/daemon components
 
+## LSP Metadata LoadContext
+
+1. **First hover during cold start shows explicit status**
+   - Open a sample project and trigger a query preview before warmup completes
+   - Expected: Preview shows an immediate startup/warmup status message (e.g., "QueryLens starting" or "warming up")
+   - Verify: No silent waiting period for user
+
+2. **Preview succeeds after warmup without restart**
+   - Wait for warmup and trigger the same preview again
+   - Expected: SQL preview succeeds without requiring IDE restart
+   - Verify: Transition from startup status to working preview is seamless
+
+3. **No bin-folder DLL locks after metadata inspection**
+   - Rebuild the sample project after previewing
+   - Expected: Build outputs are not blocked by the LSP process
+   - Verify: No "file in use" errors during build
+
 ## V2 Production Wiring (Pipeline + VS Code)
 
 1. **Legacy payload path remains transparent**

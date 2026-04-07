@@ -9,6 +9,7 @@ using Microsoft.VisualStudio.LanguageServer.Protocol;
 namespace EFQueryLens.Lsp.Handlers;
 
 internal sealed record WarmupResponse(bool Success, bool Cached, string? AssemblyPath, string? Message);
+internal sealed record WarmupPreviewState(bool ShouldDeferPreview, string Reason, string Message, string? AssemblyPath);
 
 internal sealed partial class WarmupHandler
 {
@@ -94,26 +95,47 @@ internal sealed partial class WarmupHandler
             request.Position.Line,
             request.Position.Character);
 
-        var created = new Lazy<Task<WarmupResponse>>(
-            () => ExecuteWarmupAsync(targetAssembly, dbContextTypeName),
-            LazyThreadSafetyMode.ExecutionAndPublication);
-        var inflight = _inflightWarmups.GetOrAdd(targetAssembly, created);
-        var isOwner = ReferenceEquals(inflight, created);
+        var (task, _) = GetOrStartWarmupTask(targetAssembly, dbContextTypeName);
+        return await task.WaitAsync(cancellationToken);
+    }
 
-        if (isOwner)
+    internal WarmupPreviewState EnsureWarmupStartedForPreview(
+        string filePath,
+        string sourceText,
+        int line,
+        int character)
+    {
+        if (string.IsNullOrWhiteSpace(sourceText))
         {
-            _ = inflight.Value.ContinueWith(
-                completedTask => _inflightWarmups.TryRemove(targetAssembly, out _),
-                CancellationToken.None,
-                TaskContinuationOptions.ExecuteSynchronously,
-                TaskScheduler.Default);
-        }
-        else
-        {
-            LogDebug($"warmup-inflight-join assembly={targetAssembly} context={dbContextTypeName ?? "<auto>"}");
+            return new WarmupPreviewState(false, "empty-source", string.Empty, null);
         }
 
-        return await inflight.Value.WaitAsync(cancellationToken);
+        if (LspSyntaxHelper.FindAllLinqChains(sourceText).Count == 0)
+        {
+            return new WarmupPreviewState(false, "no-linq-chain", string.Empty, null);
+        }
+
+        var targetAssembly = AssemblyResolver.TryGetTargetAssembly(filePath);
+        if (string.IsNullOrWhiteSpace(targetAssembly)
+            || targetAssembly.StartsWith("DEBUG_FAIL", StringComparison.Ordinal)
+            || !File.Exists(targetAssembly))
+        {
+            return new WarmupPreviewState(false, "assembly-not-found", string.Empty, targetAssembly);
+        }
+
+        if (TryGetCachedWarmup(targetAssembly, out var cached))
+        {
+            LogDebug($"warmup-preview-cache assembly={targetAssembly} success={cached.Success} message={cached.Message}");
+            return new WarmupPreviewState(false, cached.Message, string.Empty, targetAssembly);
+        }
+
+        var dbContextTypeName = TryResolveDbContextTypeName(sourceText, line, character);
+        var (task, isOwner) = GetOrStartWarmupTask(targetAssembly, dbContextTypeName);
+        _ = task;
+
+        return isOwner
+            ? new WarmupPreviewState(true, "warmup-started", "EF QueryLens - starting and warming up", targetAssembly)
+            : new WarmupPreviewState(true, "warmup-inflight", "EF QueryLens - warming up", targetAssembly);
     }
 
     private async Task<WarmupResponse> ExecuteWarmupAsync(string targetAssembly, string? dbContextTypeName)
@@ -150,6 +172,30 @@ internal sealed partial class WarmupHandler
             LogDebug($"warmup-failed assembly={targetAssembly} elapsedMs={sw.ElapsedMilliseconds} type={ex.GetType().Name} message={ex.Message} context={dbContextTypeName ?? "<auto>"}");
             return new WarmupResponse(false, false, targetAssembly, ex.GetType().Name);
         }
+    }
+
+    private (Task<WarmupResponse> Task, bool IsOwner) GetOrStartWarmupTask(string targetAssembly, string? dbContextTypeName)
+    {
+        var created = new Lazy<Task<WarmupResponse>>(
+            () => ExecuteWarmupAsync(targetAssembly, dbContextTypeName),
+            LazyThreadSafetyMode.ExecutionAndPublication);
+        var inflight = _inflightWarmups.GetOrAdd(targetAssembly, created);
+        var isOwner = ReferenceEquals(inflight, created);
+
+        if (isOwner)
+        {
+            _ = inflight.Value.ContinueWith(
+                completedTask => _inflightWarmups.TryRemove(targetAssembly, out _),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+        else
+        {
+            LogDebug($"warmup-inflight-join assembly={targetAssembly} context={dbContextTypeName ?? "<auto>"}");
+        }
+
+        return (inflight.Value, isOwner);
     }
 
 }

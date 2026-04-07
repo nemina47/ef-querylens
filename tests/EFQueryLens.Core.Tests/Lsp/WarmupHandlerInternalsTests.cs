@@ -4,6 +4,7 @@ using EFQueryLens.Core.Tests.Lsp.Fakes;
 using EFQueryLens.Lsp;
 using EFQueryLens.Lsp.Handlers;
 using Microsoft.VisualStudio.LanguageServer.Protocol;
+using Xunit;
 
 namespace EFQueryLens.Core.Tests.Lsp;
 
@@ -20,7 +21,7 @@ public class WarmupHandlerInternalsTests
                 TextDocument = new TextDocumentIdentifier { Uri = new Uri("file:///c:/does-not-exist/sample.cs") },
                 Position = new Position(0, 0),
             },
-            CancellationToken.None);
+            TestContext.Current.CancellationToken);
 
         Assert.False(response.Success);
         Assert.Equal("empty-source", response.Message);
@@ -40,7 +41,7 @@ public class WarmupHandlerInternalsTests
                 TextDocument = new TextDocumentIdentifier { Uri = uri },
                 Position = new Position(0, 0),
             },
-            CancellationToken.None);
+            TestContext.Current.CancellationToken);
 
         Assert.False(response.Success);
         Assert.Equal("no-linq-chain", response.Message);
@@ -63,7 +64,7 @@ public class WarmupHandlerInternalsTests
                 TextDocument = new TextDocumentIdentifier { Uri = uri },
                 Position = new Position(0, 15),
             },
-            CancellationToken.None);
+            TestContext.Current.CancellationToken);
 
         Assert.False(response.Success);
         Assert.Equal("assembly-not-found", response.Message);
@@ -165,10 +166,10 @@ public class C
         var handler = new WarmupHandler(docs, new TestControllableEngine());
         var tempDir = Directory.CreateTempSubdirectory();
         var sourcePath = Path.Combine(tempDir.FullName, "source.cs");
-        await File.WriteAllTextAsync(sourcePath, "var q = db.Orders.Where(o => o.Id > 0);");
+        await File.WriteAllTextAsync(sourcePath, "var q = db.Orders.Where(o => o.Id > 0);", TestContext.Current.CancellationToken);
         var uri = new Uri(sourcePath).ToString();
 
-        var task = (Task<string?>)InvokePrivate(handler, "GetSourceTextAsync", [uri, sourcePath, CancellationToken.None])!;
+        var task = (Task<string?>)InvokePrivate(handler, "GetSourceTextAsync", [uri, sourcePath, TestContext.Current.CancellationToken])!;
         var text = await task;
 
         Assert.Contains("Orders", text);
@@ -182,10 +183,74 @@ public class C
         var task = (Task<string?>)InvokePrivate(
             handler,
             "GetSourceTextAsync",
-            ["file:///missing.cs", "c:/definitely-missing/file.cs", CancellationToken.None])!;
+            ["file:///missing.cs", "c:/definitely-missing/file.cs", TestContext.Current.CancellationToken])!;
         var text = await task;
 
         Assert.Null(text);
+    }
+
+    [Fact]
+    public void EnsureWarmupStartedForPreview_FirstCall_StartsWarmupAndDefersPreview()
+    {
+        var tempDir = Directory.CreateTempSubdirectory();
+        var sourcePath = CreateTempProjectWithOutput(tempDir.FullName, "App");
+        var engine = new TestControllableEngine { InspectModelDelay = TimeSpan.FromMilliseconds(200) };
+        var handler = new WarmupHandler(new DocumentManager(), engine);
+
+        var state = handler.EnsureWarmupStartedForPreview(
+            sourcePath,
+            "var q = db.Orders.Where(o => o.Id > 0);",
+            0,
+            15);
+
+        Assert.True(state.ShouldDeferPreview);
+        Assert.Equal("warmup-started", state.Reason);
+        Assert.Contains("warming up", state.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task EnsureWarmupStartedForPreview_AfterSuccessfulWarmup_DoesNotDeferPreview()
+    {
+        var tempDir = Directory.CreateTempSubdirectory();
+        var sourcePath = CreateTempProjectWithOutput(tempDir.FullName, "App");
+        var engine = new TestControllableEngine();
+        var handler = new WarmupHandler(new DocumentManager(), engine);
+
+        var initial = handler.EnsureWarmupStartedForPreview(
+            sourcePath,
+            "var q = db.Orders.Where(o => o.Id > 0);",
+            0,
+            15);
+
+        Assert.True(initial.ShouldDeferPreview);
+
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        var after = handler.EnsureWarmupStartedForPreview(
+            sourcePath,
+            "var q = db.Orders.Where(o => o.Id > 0);",
+            0,
+            15);
+
+        Assert.False(after.ShouldDeferPreview);
+    }
+
+    private static string CreateTempProjectWithOutput(string rootDir, string projectName)
+    {
+        var projectDir = Path.Combine(rootDir, projectName);
+        Directory.CreateDirectory(projectDir);
+        File.WriteAllText(
+            Path.Combine(projectDir, $"{projectName}.csproj"),
+            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup></Project>");
+
+        var sourcePath = Path.Combine(projectDir, "Query.cs");
+        File.WriteAllText(sourcePath, "var q = db.Orders.Where(o => o.Id > 0);");
+
+        var outputDir = Path.Combine(projectDir, "bin", "Debug", "net10.0");
+        Directory.CreateDirectory(outputDir);
+        File.WriteAllBytes(Path.Combine(outputDir, $"{projectName}.dll"), [0]);
+
+        return sourcePath;
     }
 
     private static object? InvokePrivate(object target, string methodName, object?[] args)

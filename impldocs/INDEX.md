@@ -24,3 +24,4 @@
 | query-extraction-v2-cutover-r4 | superseded → v2-cutover-inventory-k8 | Original broad Slice 4 cutover plan was split into smaller cleanup slices starting with inventory and guardrails. |
 | v2-cutover-inventory-k8 | completed | Inventories remaining v1/legacy extraction and runtime paths, adds explicit unsupported-shape guardrails, and defines deletion slices for v2 cutover cleanup. |
 | v2-cutover-core-runtime-s5 | in-progress | Removes legacy BuildInitialStubs dual-path dispatch from QueryEvaluator; migrates all QueryEvaluatorTests to v2 payloads; deletes StubSynthesizer.cs legacy file; removes LocalSymbolGraph from TranslationRequest. Blocking dependency for LSP cutover Slice 2. |
+| lsp-metadata-loadcontext-r8 | completed | Replaces LSP bin-folder reflection loads with MetadataLoadContext and adds explicit cold-start preview status messaging without introducing daemon shadow-path coordination. |

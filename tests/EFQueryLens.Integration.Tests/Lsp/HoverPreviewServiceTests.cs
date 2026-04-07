@@ -1,5 +1,8 @@
+using EFQueryLens.Core.Contracts;
 using EFQueryLens.Integration.Tests.Lsp.Fakes;
 using EFQueryLens.Integration.Tests.Lsp.Fixtures;
+using EFQueryLens.Lsp;
+using EFQueryLens.Lsp.Handlers;
 using EFQueryLens.Lsp.Services;
 
 namespace EFQueryLens.Integration.Tests.Lsp;
@@ -216,5 +219,82 @@ public class HoverPreviewServiceTests : IClassFixture<LspTestFixture>
             cancellationToken: cts.Token);
 
         Assert.False(result.Success);
+    }
+
+    [Fact]
+    public async Task BuildStructuredAsync_FirstHoverDuringWarmup_ReturnsStartingStatus()
+    {
+        var tempDir = Directory.CreateTempSubdirectory();
+        var sourcePath = CreateTempProjectWithOutput(tempDir.FullName, "HoverWarmupApp");
+        var engine = _fixture.CreatePlainEngine();
+        engine.InspectModelAsyncHandler = async (_, ct) =>
+        {
+            await Task.Delay(200, ct);
+            return new ModelSnapshot { DbContextType = "FakeContext" };
+        };
+
+        var service = new HoverPreviewService(
+            engine,
+            new WarmupHandler(new DocumentManager(), engine));
+
+        var result = await service.BuildStructuredAsync(
+            filePath: sourcePath,
+            sourceText: "var q = db.Orders.Where(o => o.Id > 0);",
+            line: 0,
+            character: 15,
+            cancellationToken: CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(QueryTranslationStatus.Starting, result.Status);
+        Assert.Contains("warming up", result.StatusMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task BuildStructuredAsync_AfterWarmupCompletes_DoesNotReturnStartingStatus()
+    {
+        var tempDir = Directory.CreateTempSubdirectory();
+        var sourcePath = CreateTempProjectWithOutput(tempDir.FullName, "HoverWarmupApp");
+        var engine = _fixture.CreatePlainEngine();
+        var service = new HoverPreviewService(
+            engine,
+            new WarmupHandler(new DocumentManager(), engine));
+
+        var first = await service.BuildStructuredAsync(
+            filePath: sourcePath,
+            sourceText: "var q = db.Orders.Where(o => o.Id > 0);",
+            line: 0,
+            character: 15,
+            cancellationToken: CancellationToken.None);
+
+        Assert.Equal(QueryTranslationStatus.Starting, first.Status);
+
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        var second = await service.BuildStructuredAsync(
+            filePath: sourcePath,
+            sourceText: "var q = db.Orders.Where(o => o.Id > 0);",
+            line: 0,
+            character: 15,
+            cancellationToken: CancellationToken.None);
+
+        Assert.NotEqual(QueryTranslationStatus.Starting, second.Status);
+    }
+
+    private static string CreateTempProjectWithOutput(string rootDir, string projectName)
+    {
+        var projectDir = Path.Combine(rootDir, projectName);
+        Directory.CreateDirectory(projectDir);
+        File.WriteAllText(
+            Path.Combine(projectDir, $"{projectName}.csproj"),
+            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup></Project>");
+
+        var sourcePath = Path.Combine(projectDir, "Query.cs");
+        File.WriteAllText(sourcePath, "var q = db.Orders.Where(o => o.Id > 0);");
+
+        var outputDir = Path.Combine(projectDir, "bin", "Debug", "net10.0");
+        Directory.CreateDirectory(outputDir);
+        File.WriteAllBytes(Path.Combine(outputDir, $"{projectName}.dll"), [0]);
+
+        return sourcePath;
     }
 }

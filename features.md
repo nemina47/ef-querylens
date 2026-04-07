@@ -45,3 +45,10 @@
 - Deterministic substitution/skip diagnostics for factory pattern matching in capture planning (factory-root-substitution-j4)
 - Free variable collection filtering to exclude synthetic factory context receiver from capture graph (factory-root-substitution-j4)
 - Unit test coverage for async/sync factory patterns, ambiguity conflicts, and regression cases (factory-root-substitution-j4)
+
+## LSP Metadata
+
+- MetadataLoadContext-based DbContext and entity metadata inspection without locking bin-folder DLLs (lsp-metadata-loadcontext-r8)
+- Explicit first-hover startup and warmup status messaging during daemon cold start (lsp-metadata-loadcontext-r8)
+- Shared WarmupHandler instance across LSP hover and warmup commands (lsp-metadata-loadcontext-r8)
+- Deterministic fully qualified type-name expectations in metadata inspection tests (lsp-metadata-loadcontext-r8)

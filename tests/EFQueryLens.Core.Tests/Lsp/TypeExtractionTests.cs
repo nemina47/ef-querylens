@@ -1,5 +1,5 @@
-using EFQueryLens.Lsp.Parsing;
 using EFQueryLens.Core.Contracts;
+using EFQueryLens.Lsp.Parsing;
 
 namespace EFQueryLens.Core.Tests.Lsp;
 
@@ -190,7 +190,7 @@ public class TypeExtractionTests
         var types = Extract(source, "_ = list;");
 
         Assert.True(types.TryGetValue("list", out var typeName));
-        Assert.Equal("List<string>", typeName);
+        Assert.Equal("global::System.Collections.Generic.List<string>", typeName);
     }
 
     [Fact]
@@ -204,7 +204,7 @@ public class TypeExtractionTests
         var types = Extract(source, "_ = id;");
 
         Assert.True(types.TryGetValue("id", out var typeName));
-        Assert.Equal("Guid", typeName);
+        Assert.Equal("global::System.Guid", typeName);
     }
 
     [Fact]
@@ -218,7 +218,7 @@ public class TypeExtractionTests
         var types = Extract(source, "_ = id;");
 
         Assert.True(types.TryGetValue("id", out var typeName));
-        Assert.Equal("Guid", typeName);
+        Assert.Equal("global::System.Guid", typeName);
     }
 
     // ─── Scope boundaries ─────────────────────────────────────────────────────
@@ -550,9 +550,9 @@ public class TypeExtractionTests
         var (line, character) = FindPosition(source, ".Skip((page - 1) * pageSize)");
         var graph = LspSyntaxHelper.ExtractLocalSymbolGraphAtPosition(source, line, character, targetAssemblyPath: null);
 
-        var request = Assert.Single(graph.Where(g => g.Name == "request"));
-        var page = Assert.Single(graph.Where(g => g.Name == "page"));
-        var pageSize = Assert.Single(graph.Where(g => g.Name == "pageSize"));
+        var request = Assert.Single(graph, g => g.Name == "request");
+        var page = Assert.Single(graph, g => g.Name == "page");
+        var pageSize = Assert.Single(graph, g => g.Name == "pageSize");
 
         Assert.True(request.DeclarationOrder < page.DeclarationOrder);
         Assert.True(request.DeclarationOrder < pageSize.DeclarationOrder);
@@ -1104,7 +1104,7 @@ public class TypeExtractionTests
         Assert.DoesNotContain(graph, g => g.Name == "query");
         Assert.DoesNotContain(graph, g => g.Name == "filteredQuery");
 
-        var groupIds = Assert.Single(graph.Where(g => g.Name == "groupIds"));
+        var groupIds = Assert.Single(graph, g => g.Name == "groupIds");
         Assert.Equal(LocalSymbolReplayPolicies.UsePlaceholder, groupIds.ReplayPolicy);
         Assert.Empty(groupIds.Dependencies);
         Assert.Null(groupIds.InitializerExpression);

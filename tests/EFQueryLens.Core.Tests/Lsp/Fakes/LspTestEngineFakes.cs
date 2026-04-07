@@ -45,6 +45,7 @@ internal sealed class TestControllableEngine : IQueryLensEngine, IEngineControl
 {
     public bool ThrowOnRestart { get; set; }
     public bool ThrowOnInvalidate { get; set; }
+    public TimeSpan InspectModelDelay { get; set; }
     public int RestartCalls { get; private set; }
     public int InvalidateCalls { get; private set; }
 
@@ -62,8 +63,13 @@ internal sealed class TestControllableEngine : IQueryLensEngine, IEngineControl
             },
         });
 
-    public Task<ModelSnapshot> InspectModelAsync(ModelInspectionRequest request, CancellationToken ct = default)
-        => Task.FromResult(new ModelSnapshot { DbContextType = "MyDb" });
+    public async Task<ModelSnapshot> InspectModelAsync(ModelInspectionRequest request, CancellationToken ct = default)
+    {
+        if (InspectModelDelay > TimeSpan.Zero)
+            await Task.Delay(InspectModelDelay, ct);
+
+        return new ModelSnapshot { DbContextType = "MyDb" };
+    }
 
     public Task<FactoryGenerationResult> GenerateFactoryAsync(FactoryGenerationRequest request, CancellationToken ct = default)
         => Task.FromResult(new FactoryGenerationResult

@@ -60,7 +60,7 @@ internal sealed partial class HoverPreviewService
 
     private static string BuildStatusText(QueryTranslationStatus status) => status switch
     {
-        QueryTranslationStatus.Starting => "EF QueryLens - starting up",
+        QueryTranslationStatus.Starting => "EF QueryLens - warming up",
         QueryTranslationStatus.InQueue => "EF QueryLens - in queue",
         QueryTranslationStatus.DaemonUnavailable => "EF QueryLens - error",
         _ => "EF QueryLens - in queue",
@@ -164,6 +164,28 @@ internal sealed partial class HoverPreviewService
             return Fail("Could not locate compiled target assembly for this file. Build the project and try again.", sourceLine);
         }
 
+        var warmupState = _warmupHandler?.EnsureWarmupStartedForPreview(
+            filePath,
+            sourceText,
+            line,
+            character);
+        if (warmupState is { ShouldDeferPreview: true })
+        {
+            log($"preview-starting line={line} char={character} reason={warmupState.Reason} assembly={warmupState.AssemblyPath}");
+            return new HoverCanonicalComputationResult(
+                Success: true,
+                Message: warmupState.Message,
+                Status: QueryTranslationStatus.Starting,
+                AvgTranslationMs: 0,
+                LastTranslationMs: 0,
+                SourceExpression: callSiteExpression ?? expression,
+                ExecutedExpression: null,
+                SourceLine: sourceLine,
+                Metadata: null,
+                Commands: [],
+                Warnings: []);
+        }
+
         var isHelperExtraction = string.Equals(origin?.Scope, "helper-method", StringComparison.Ordinal);
         if (isHelperExtraction)
         {
@@ -219,7 +241,7 @@ internal sealed partial class HoverPreviewService
         }
 
         var helperSubstitutionApplied = string.Equals(origin.Scope, "helper-method", StringComparison.Ordinal);
-        
+
         // Build v2 extraction plan (slice 1: extraction IR)
         var extractionPlanSuccess = LspSyntaxHelper.TryBuildV2ExtractionPlan(
             extractionSourceText,
@@ -237,7 +259,7 @@ internal sealed partial class HoverPreviewService
             var reason = firstDiagnostic?.Code ?? "extraction-plan-failed";
             log($"preview-info line={line} char={character} reason={reason} (falling back to capture-plan-only)");
         }
-        
+
         var capturePlanSuccess = LspSyntaxHelper.TryBuildV2CapturePlan(
             expression,
             contextVariableName!,

@@ -15,13 +15,14 @@ internal static class MicrosoftLspHost
             Console.Error.WriteLine("[QL-LSP] host-run debug=true");
 
         var documentManager = new DocumentManager();
-        var hoverPreviewService = new HoverPreviewService(engine, debugEnabled);
+        var warmupHandler = new WarmupHandler(documentManager, engine);
+        var hoverPreviewService = new HoverPreviewService(engine, warmupHandler, debugEnabled);
         var hoverHandler = new HoverHandler(documentManager, hoverPreviewService);
         var prewarm = new TranslationPrewarmService(hoverPreviewService, hoverHandler.StorePrewarmedEntry);
 
         var lspHandler = new LanguageServerHandler(
             hover: hoverHandler,
-            warmup: new WarmupHandler(documentManager, engine),
+            warmup: warmupHandler,
             daemonControl: new DaemonControlHandler(engine),
             textSync: new TextDocumentSyncHandler(documentManager, prewarm),
             generateFactory: new GenerateFactoryHandler(engine),
